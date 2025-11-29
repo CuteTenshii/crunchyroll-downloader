@@ -9,6 +9,10 @@ Downloads anime from Crunchyroll and outputs them in a MKV file.
 - Decrypts Widevine DRM (requires a .wvd file, which can't be provided here for legal reasons. Search on Google to create/get one)
 - Adds metadata (like episode name) to the MKV container
 
+## Download
+
+Check the [latest release](https://github.com/CuteTenshii/crunchyroll-downloader/releases/latest) and download the file associated that corresponds to your OS.
+
 ## Requirements
 
 - [Go](https://go.dev/dl/)
