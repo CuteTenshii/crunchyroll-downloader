@@ -11,7 +11,6 @@ import (
 	"github.com/google/uuid"
 )
 
-var client = &http.Client{}
 var deviceId = uuid.NewString()
 
 type CrunchyrollTokenResponse struct {
@@ -35,7 +34,7 @@ func getAccessToken(etpRt string) string {
 	req.AddCookie(&http.Cookie{Name: "device_id", Value: deviceId})
 	req.AddCookie(&http.Cookie{Name: "etp_rt", Value: etpRt})
 
-	resp, err := client.Do(req)
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		panic(err)
 	}

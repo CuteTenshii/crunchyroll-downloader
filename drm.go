@@ -27,18 +27,17 @@ func findSet(sets []*mpd.AdaptationSet, mimeType string) *mpd.AdaptationSet {
 
 // getPssh finds the PSSH in the MPD manifest
 func getPssh(mpd *mpd.MPD) *string {
-	period := mpd.Period[0]
-	videoSet := findSet(period.AdaptationSets, "video/mp4")
-	audioSet := findSet(period.AdaptationSets, "audio/mp4")
-	if videoSet == nil || audioSet == nil {
+	set := findSet(mpd.Period[0].AdaptationSets, "video/mp4")
+	if set == nil {
 		return nil
 	}
-	contentProtections := videoSet.ContentProtections
-	for _, contentProtection := range contentProtections {
+
+	for _, contentProtection := range set.ContentProtections {
 		if contentProtection.CencPSSH != nil {
 			return contentProtection.CencPSSH
 		}
 	}
+
 	return nil
 }
 
@@ -52,8 +51,8 @@ func sendChallenge(contentId, videoToken string, challenge []byte) []byte {
 		panic(err)
 	}
 	req.Header.Set("Content-Type", "application/octet-stream")
-	req.Header.Set("x-cr-content-id", contentId)
-	req.Header.Set("x-cr-video-token", videoToken)
+	req.Header.Set("X-Cr-Content-Id", contentId)
+	req.Header.Set("X-Cr-Video-Token", videoToken)
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Origin", "https://static.crunchyroll.com")
 	req.Header.Set("Referer", "https://static.crunchyroll.com/")
@@ -63,24 +62,28 @@ func sendChallenge(contentId, videoToken string, challenge []byte) []byte {
 		panic(err)
 	}
 	defer resp.Body.Close()
+
 	// Parse JSON response
 	res, err := io.ReadAll(resp.Body)
 	var result CrunchyrollWidevineLicenseResponse
 	if err := json.Unmarshal(res, &result); err != nil {
 		panic(fmt.Errorf("failed to get access token: %w", err))
 	}
+
 	decoded, err := base64.StdEncoding.DecodeString(result.License)
 	if err != nil {
 		panic(err)
 	}
+
 	return decoded
 }
 
 func getLicense(psshData, contentId, videoToken string) []*widevine.Key {
-	wvd, err := os.Open("./lenovo_lenovo_tb-j616f_16.1.0_d57ca855_22594_l1.wvd")
+	wvd, err := os.Open("./device.wvd")
 	if err != nil {
 		panic(err)
 	}
+
 	var content []byte
 	wvd.Read(content)
 	device, err := widevine.NewDevice(widevine.FromWVD(io.NopCloser(wvd)))
