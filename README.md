@@ -40,3 +40,15 @@ Usage of ./crunchyroll-downloader:
   -video-quality string
         Video quality (default "1080p")
 ```
+
+## Help
+
+### How do I get the `etp_rt` cookie value?
+
+This cookie is used to get an access token for your account.
+
+![](.github/screenshots/etp-rt-cookie.png)
+
+### What is a `.wvd` file?? Do I really need one?
+
+Yes, Crunchyroll uses DRM-only content. This file is used to get a Widevine license, which gives the keys to decrypt the media.
