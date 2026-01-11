@@ -181,7 +181,7 @@ func downloadEpisode(contentId string, videoQuality, audioQuality, subtitlesLang
 		_ = os.MkdirAll(renamed, 0777)
 	}
 	outputFile := fmt.Sprintf("%s/%s S%02vE%02v [%s].mkv",
-		renamed, info.EpisodeMetadata.SeriesTitle, info.EpisodeMetadata.EpisodeNumber, info.EpisodeMetadata.SeasonNumber,
+		renamed, info.EpisodeMetadata.SeriesTitle, info.EpisodeMetadata.SeasonNumber, info.EpisodeMetadata.EpisodeNumber,
 		*videoQuality,
 	)
 	mergeEverything(videoFile, audioFile, subsFile, outputFile, subtitlesLang, info)
