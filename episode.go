@@ -9,19 +9,20 @@ import (
 
 type Episode struct {
 	// Dash manifest file URL
-	ManifestUrl string `json:"url"`
+	ManifestURL string `json:"url"`
 	// List of .ass files
 	Subtitles map[string]*Subtitle `json:"subtitles"`
-	// Token to give to Widevine CDM challenge
-	Token string  `json:"token"`
+	// Token to give to the Widevine CDM challenge
+	Token string `json:"token"`
+	// Error, `nil` if there's no error
 	Error *string `json:"error"`
 }
 
 type Subtitle struct {
-	// example: en-US
+	// Language represents a subtitle language in the "en-US" format
 	Language string `json:"language"`
 	// Direct URL to the .ass file
-	Url string `json:"url"`
+	URL string `json:"url"`
 }
 
 func getEpisode(id string) Episode {

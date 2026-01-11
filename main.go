@@ -14,11 +14,10 @@ var token = ""
 func main() {
 	url := flag.String("url", "", "URL of the episode/season to download")
 	audioLang := flag.String("audio-lang", "jp-JP", "Audio language")
-	//videoLang := flag.String("video-lang", "en", "Video language")
 	subtitlesLang := flag.String("subtitles-lang", "en-US", "Subtitles language")
 	videoQuality := flag.String("video-quality", "1080p", "Video quality")
 	audioQuality := flag.String("audio-quality", "192k", "Audio quality")
-	etpRt := flag.String("etp-rt", "", "Idk what this means. This is the cookie value on your browser tho")
+	etpRt := flag.String("etp-rt", "", "The \"etp_rt\" cookie value of your account")
 	flag.Parse()
 
 	if *url == "" {
@@ -26,7 +25,7 @@ func main() {
 		os.Exit(1)
 	}
 	if *etpRt == "" {
-		fmt.Println("You must specify -etp-rt:\n- Open Crunchyroll on your browser, log in.\n- Open developer tools (Ctrl+Shift+I), go to \"Application\", and then \"Cookies\".\n- The value of the \"ept_rt\" cookie is what you need to input into this option.")
+		fmt.Println("You must specify the \"-etp-rt\" options!\n- Open Crunchyroll on your browser, log in.\n- Open developer tools (Ctrl+Shift+I), go to \"Application\", and then \"Cookies\".\n- The value of the \"ept_rt\" cookie is what you need to input into this option.")
 		os.Exit(1)
 	}
 
@@ -38,10 +37,11 @@ func main() {
 
 	// Fetch Crunchyroll access token
 	token = getAccessToken(*etpRt)
-	fmt.Println("Got token")
 
 	// Fetch some things
 	info := getEpisodeInfo(contentId)
+	// Crunchyroll GUIDs works like this: a GUID = an audio language of an episode (so one episode has a GUID for each
+	// audio language it has)
 	if info.EpisodeMetadata.AudioLocale != *audioLang {
 		// Run though info.EpisodeMetadata.Versions to find the correct episode GUID
 		correctGuidI := slices.IndexFunc(info.EpisodeMetadata.Versions, func(v *DubVersion) bool {
@@ -56,10 +56,10 @@ func main() {
 	}
 	episode := getEpisode(contentId)
 
-	manifest := parseManifest(episode.ManifestUrl)
+	manifest := parseManifest(episode.ManifestURL)
 	pssh := getPssh(manifest)
 	if pssh == nil {
-		panic("pssh not found")
+		panic("PSSH not found")
 	}
 	videoSet := findSet(manifest.Period[0].AdaptationSets, "video/mp4")
 	audioSet := findSet(manifest.Period[0].AdaptationSets, "audio/mp4")
@@ -71,7 +71,7 @@ func main() {
 	subtitles := episode.Subtitles[*subtitlesLang]
 	if subtitles != nil {
 		fmt.Printf("Downloading subtitles for language: %s...", languageNames[*subtitlesLang])
-		downloadSubs(subtitles.Url)
+		downloadSubs(subtitles.URL)
 		fmt.Println("Downloaded subtitles!")
 	}
 
