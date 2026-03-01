@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"flag"
 	"fmt"
 	"os"
@@ -18,55 +19,35 @@ var (
 	etpRt         = flag.String("etp-rt", "", "The \"etp_rt\" cookie value of your account")
 )
 
-func main() {
-	url := flag.String("url", "", "URL of the episode/season to download")
-	flag.Parse()
-
-	if *url == "" {
-		flag.Usage()
-		os.Exit(1)
-	}
-	if *etpRt == "" {
-		fmt.Println("You must specify the \"-etp-rt\" option!\n- Open Crunchyroll on your browser and log in.\n- Open developer tools (Ctrl+Shift+I), go to \"Application\", and then \"Cookies\".\n- The value of the \"ept_rt\" cookie is what you need to input into this option.")
-		os.Exit(1)
-	}
-
-	contentType := strings.Split(*url, "/")[3]
-	contentId := strings.Split(*url, "/")[4]
+func processUrl(url string) {
+	contentType := strings.Split(url, "/")[3]
+	contentId := strings.Split(url, "/")[4]
 	if len(contentId) != 9 && len(contentId) != 14 {
-		print("Invalid URL format, please paste a link like this: https://www.crunchyroll.com/watch/GWDU82Z05/water-hashira-giyu-tomiokas-pain\n")
-		os.Exit(1)
+		fmt.Printf("Invalid URL format: %s\n", url)
+		return
 	}
 	if contentType != "watch" && contentType != "series" {
-		print("Invalid URL!\n")
-		os.Exit(1)
+		fmt.Printf("Invalid URL (must be /watch/ or /series/): %s\n", url)
+		return
 	}
 
-	// Fetch Crunchyroll access token
-	token = GetAccessToken(*etpRt)
-
-	// Episode link
 	if contentType == "watch" {
-		// Fetch some things
 		info := getEpisodeInfo(contentId)
-		// Crunchyroll GUIDs works like this: a GUID = an audio language of an episode (so one episode has a GUID for each
-		// audio language it has)
 		if info.EpisodeMetadata.AudioLocale != *audioLang {
-			// Run though info.EpisodeMetadata.Versions to find the correct episode GUID
 			correctGuidI := slices.IndexFunc(info.EpisodeMetadata.Versions, func(v *DubVersion) bool {
 				return v.AudioLocale == *audioLang
 			})
 
 			if correctGuidI == -1 {
 				print("! Invalid audio locale. Please put the locale in the \"ja-JP\", \"en-US\"... format.\n")
-				os.Exit(1)
+				return
 			}
 			correctGuid := info.EpisodeMetadata.Versions[correctGuidI]
 			contentId = (*correctGuid).GUID
 		}
 
 		downloadEpisode(contentId, videoQuality, audioQuality, subtitlesLang, info)
-	} else { // Anime link
+	} else {
 		seasons := getSeasons(contentId)
 
 		if *seasonNumber != 0 {
@@ -78,19 +59,63 @@ func main() {
 				}
 			}
 			if seasonId == "" {
-				fmt.Printf("This anime has no season %v! (note that Crunchyroll may have put weird seasons numbers)", *seasonNumber)
-				os.Exit(1)
+				fmt.Printf("This anime has no season %v!\n", *seasonNumber)
+				return
 			}
 
 			episodes := getSeasonEpisodes(seasonId)
 			downloadSeason(videoQuality, audioQuality, subtitlesLang, episodes)
 		} else {
-			print("No season number precised, downloading all seasons...\n")
+			print("No season number specified, downloading all seasons...\n")
 
 			for _, season := range seasons {
 				episodes := getSeasonEpisodes(season.ID)
 				downloadSeason(videoQuality, audioQuality, subtitlesLang, episodes)
 			}
 		}
+	}
+}
+
+func main() {
+	url := flag.String("url", "", "URL of the episode/season to download")
+	urlsFile := flag.String("urls", "", "Path to a text file with one URL per line")
+	flag.Parse()
+
+	if *url == "" && *urlsFile == "" {
+		flag.Usage()
+		os.Exit(1)
+	}
+	if *etpRt == "" {
+		fmt.Println("You must specify the \"-etp-rt\" option!\n- Open Crunchyroll on your browser and log in.\n- Open developer tools (Ctrl+Shift+I), go to \"Application\", and then \"Cookies\".\n- The value of the \"ept_rt\" cookie is what you need to input into this option.")
+		os.Exit(1)
+	}
+
+	token = GetAccessToken(*etpRt)
+
+	if *urlsFile != "" {
+		file, err := os.Open(*urlsFile)
+		if err != nil {
+			fmt.Printf("Failed to open URLs file: %s\n", err)
+			os.Exit(1)
+		}
+		defer file.Close()
+
+		scanner := bufio.NewScanner(file)
+		var urls []string
+		for scanner.Scan() {
+			line := strings.TrimSpace(scanner.Text())
+			if line != "" && strings.HasPrefix(line, "http") {
+				urls = append(urls, line)
+			}
+		}
+
+		fmt.Printf("Found %d URLs to download\n\n", len(urls))
+		for i, u := range urls {
+			fmt.Printf("=== [%d/%d] %s ===\n", i+1, len(urls), u)
+			processUrl(u)
+			fmt.Println()
+		}
+	} else {
+		processUrl(*url)
 	}
 }

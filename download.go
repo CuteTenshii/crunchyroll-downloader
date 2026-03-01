@@ -7,10 +7,15 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
+	"sync/atomic"
+	"time"
 
 	widevine "github.com/iyear/gowidevine"
 	"github.com/unki2aut/go-mpd"
 )
+
+const maxWorkers = 10
 
 func buildUrl(base, representationId, file string, partNum *int64) string {
 	if partNum != nil {
@@ -20,33 +25,46 @@ func buildUrl(base, representationId, file string, partNum *int64) string {
 	return base + strings.ReplaceAll(file, "$RepresentationID$", representationId)
 }
 
-var parts []byte
+func downloadPart(url string) ([]byte, error) {
+	maxRetries := 5
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		if attempt > 0 {
+			time.Sleep(time.Duration(attempt) * 2 * time.Second)
+		}
 
-func downloadPart(url string) error {
-	req, err := http.NewRequest(http.MethodGet, url, nil)
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Origin", "https://static.crunchyroll.com")
-	req.Header.Set("Referer", "https://static.crunchyroll.com/")
-	req.Header.Set("User-Agent", "Mozilla/5.0 (X11; Linux x86_64; rv:147.0) Gecko/20100101 Firefox/147.0")
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		panic(err)
-	}
-	if resp.StatusCode != 200 {
-		// Retry downloading part
-		return downloadPart(url)
-	}
-	defer resp.Body.Close()
+		req, err := http.NewRequest(http.MethodGet, url, nil)
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Origin", "https://static.crunchyroll.com")
+		req.Header.Set("Referer", "https://static.crunchyroll.com/")
+		req.Header.Set("User-Agent", "Mozilla/5.0 (X11; Linux x86_64; rv:147.0) Gecko/20100101 Firefox/147.0")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			if attempt < maxRetries-1 {
+				continue
+			}
+			return nil, fmt.Errorf("failed after %d retries: %w", maxRetries, err)
+		}
+		if resp.StatusCode != 200 {
+			resp.Body.Close()
+			if attempt < maxRetries-1 {
+				continue
+			}
+			return nil, fmt.Errorf("failed after %d retries, status: %d", maxRetries, resp.StatusCode)
+		}
 
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return err
+		body, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if err != nil {
+			if attempt < maxRetries-1 {
+				continue
+			}
+			return nil, fmt.Errorf("failed reading body after %d retries: %w", maxRetries, err)
+		}
+		return body, nil
 	}
-	parts = append(parts, body...)
-
-	return nil
+	return nil, fmt.Errorf("failed after %d retries", maxRetries)
 }
 
 func getFilename(set *mpd.AdaptationSet) string {
@@ -66,24 +84,64 @@ func getFilename(set *mpd.AdaptationSet) string {
 	return ""
 }
 
+type segmentJob struct {
+	index int
+	url   string
+}
+
 func downloadParts(baseUrl, representationId *string, set *mpd.AdaptationSet) (string, error) {
 	initUrl := buildUrl(*baseUrl, *representationId, *set.SegmentTemplate.Initialization, nil)
-	if err := downloadPart(initUrl); err != nil {
+	initData, err := downloadPart(initUrl)
+	if err != nil {
 		return "", err
 	}
 
 	timeline := expandTimeline(set.SegmentTemplate.SegmentTimeline.S, 1)
+	total := len(timeline)
+	results := make([][]byte, total)
+	var downloadErr error
+	var errOnce sync.Once
+	var done atomic.Int64
+
+	jobs := make(chan segmentJob, total)
+	var wg sync.WaitGroup
+
+	for w := 0; w < maxWorkers; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for job := range jobs {
+				data, err := downloadPart(job.url)
+				if err != nil {
+					errOnce.Do(func() { downloadErr = err })
+					return
+				}
+				results[job.index] = data
+				count := done.Add(1)
+				fmt.Printf("\rDownloaded %v of %v segments (%v%%)", count, total, (100*count)/int64(total))
+			}
+		}()
+	}
+
 	for i, item := range timeline {
 		url := buildUrl(*baseUrl, *representationId, *set.SegmentTemplate.Media, &item)
-		if err := downloadPart(url); err != nil {
-			return "", err
-		}
-		fmt.Printf("\rDownloaded %v of %v segments (%v%%)", i+1, len(timeline), (100*(i+1))/len(timeline))
+		jobs <- segmentJob{index: i, url: url}
+	}
+	close(jobs)
+	wg.Wait()
+
+	if downloadErr != nil {
+		return "", downloadErr
 	}
 
 	fmt.Println("\nFinished downloading!")
 
-	// Write to a file
+	var parts []byte
+	parts = append(parts, initData...)
+	for _, data := range results {
+		parts = append(parts, data...)
+	}
+
 	filename := getFilename(set)
 	file, err := os.Create(filename)
 	if err != nil {
@@ -93,9 +151,6 @@ func downloadParts(baseUrl, representationId *string, set *mpd.AdaptationSet) (s
 	if err = widevine.DecryptMP4Auto(io.NopCloser(bytes.NewReader(parts)), keys, file); err != nil {
 		return "", fmt.Errorf("widevine.DecryptMP4Auto: %w", err)
 	}
-
-	// Clear parts to free up ram
-	parts = nil
 
 	return filename, nil
 }
@@ -119,7 +174,6 @@ func downloadSubs(url string) string {
 		panic(err)
 	}
 
-	// Write to a file
 	filename := getFilename(nil)
 	file, err := os.Create(filename)
 	if err != nil {
@@ -159,14 +213,12 @@ func downloadEpisode(contentId string, videoQuality, audioQuality, subtitlesLang
 	videoSet := manifest.Period[0].AdaptationSets[0]
 	audioSet := manifest.Period[0].AdaptationSets[1]
 
-	// Get Widevine license
 	err := getLicense(*pssh, contentId, episode.Token)
 	if err != nil {
 		fmt.Printf("Error: %s", err)
 		os.Exit(1)
 	}
 
-	// Download subtitles
 	subtitles := episode.Subtitles[*subtitlesLang]
 	var subsFile string
 	if subtitles != nil {
@@ -175,7 +227,6 @@ func downloadEpisode(contentId string, videoQuality, audioQuality, subtitlesLang
 		fmt.Println("Downloaded subtitles!")
 	}
 
-	// Download video
 	baseUrl, representationId := getBaseUrl(videoSet, true, *videoQuality)
 	if baseUrl == nil {
 		print("Failed to get the video base URL, maybe the video quality you entered is wrong?\n")
@@ -186,7 +237,6 @@ func downloadEpisode(contentId string, videoQuality, audioQuality, subtitlesLang
 		panic(err)
 	}
 
-	// Download audio
 	audioBaseUrl, audioRepresentationId := getBaseUrl(audioSet, false, *audioQuality)
 	if audioBaseUrl == nil {
 		print("Failed to get the audio base URL, maybe the audio quality you entered is wrong?\n")

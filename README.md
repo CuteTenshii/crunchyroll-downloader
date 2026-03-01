@@ -10,6 +10,9 @@ You won't be banned or anything, I downloaded all Kaguya-Sama seasons to test du
 - Supports choosing the audio and video quality
 - Decrypts Widevine DRM (requires: a `.wvd` file or `client_id.bin` and `private_key.pem` files)
 - Adds metadata (like episode name) to the MKV container
+- Parallel segment downloads (10 workers) for faster downloads
+- Retry with backoff on connection errors
+- Batch download from a list of URLs
 
 ## Requirements
 
@@ -39,6 +42,8 @@ Usage of ./crunchyroll-downloader:
         Subtitles language (default "en-US")
   -url string
         URL of the episode/season to download
+  -urls string
+        Path to a text file with one URL per line
   -video-quality string
         Video quality (default "1080p")
 ```
@@ -51,6 +56,11 @@ Ex: to download the first season of *Hell's Paradise*:
 To download a specific episode:
 ```shell
 ./crunchyroll-downloader --url https://www.crunchyroll.com/watch/GE00198973JAJP/dawn-and-confusion --etp-rt replace_this
+```
+
+To batch download from a file (one URL per line):
+```shell
+./crunchyroll-downloader --urls list.txt --etp-rt replace_this --subs-lang pt-BR
 ```
 
 ## Building
