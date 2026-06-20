@@ -69,9 +69,12 @@ func downloadPart(url string) ([]byte, error) {
 	return nil, fmt.Errorf("failed after %d retries", maxRetries)
 }
 
-func getFilename(set *mpd.AdaptationSet) string {
+func getFilename(set *mpd.AdaptationSet, subExt string) string {
 	if set == nil {
-		f, _ := os.CreateTemp("", "crdl-subs-*.ass")
+		if subExt == "" {
+			subExt = "ass"
+		}
+		f, _ := os.CreateTemp("", "crdl-subs-*."+subExt)
 		return f.Name()
 	}
 	for _, representation := range set.Representations {
@@ -144,7 +147,7 @@ func downloadParts(baseUrl, representationId *string, set *mpd.AdaptationSet) (s
 		parts = append(parts, data...)
 	}
 
-	filename := getFilename(set)
+	filename := getFilename(set, "")
 	file, err := os.Create(filename)
 	if err != nil {
 		return "", err
@@ -157,7 +160,7 @@ func downloadParts(baseUrl, representationId *string, set *mpd.AdaptationSet) (s
 	return filename, nil
 }
 
-func downloadSubs(url string) string {
+func downloadSubs(url, format string) string {
 	req, err := http.NewRequest(http.MethodGet, url, nil)
 	if err != nil {
 		panic(err)
@@ -176,7 +179,7 @@ func downloadSubs(url string) string {
 		panic(err)
 	}
 
-	filename := getFilename(nil)
+	filename := getFilename(nil, format)
 	file, err := os.Create(filename)
 	if err != nil {
 		panic(err)
@@ -187,7 +190,21 @@ func downloadSubs(url string) string {
 	return filename
 }
 
-func downloadEpisode(baseContentId string, info EpisodeInfo, audioLangs, subsLangs []string, videoQuality, audioQuality *string) {
+// resolveSubtitle picks either the closed-caption or the regular subtitle
+// entry for a locale, depending on useCC and what's available.
+func resolveSubtitle(episode Episode, locale string, useCC bool) *Subtitle {
+	if useCC {
+		if cc, ok := episode.Captions[locale]; ok && cc != nil && cc.URL != "" {
+			return cc
+		}
+	}
+	if sub, ok := episode.Subtitles[locale]; ok && sub != nil && sub.URL != "" {
+		return sub
+	}
+	return nil
+}
+
+func downloadEpisode(baseContentId string, info EpisodeInfo, audioLangs, subsLangs []string, videoQuality, audioQuality *string, useCC bool) {
 	sanitize := func(s string) string {
 		if s == "" {
 			return "Unknown"
@@ -288,10 +305,18 @@ func downloadEpisode(baseContentId string, info EpisodeInfo, audioLangs, subsLan
 	activeStreams[versions[0].contentId] = firstEpisode.Token
 
 	if len(subsLangs) == 1 && subsLangs[0] == "all" {
-		subsLangs = make([]string, 0, len(firstEpisode.Subtitles))
+		seen := map[string]bool{}
+		subsLangs = make([]string, 0, len(firstEpisode.Subtitles)+len(firstEpisode.Captions))
 		for locale, sub := range firstEpisode.Subtitles {
-			if sub != nil && sub.URL != "" {
+			if sub != nil && sub.URL != "" && !seen[locale] {
 				subsLangs = append(subsLangs, locale)
+				seen[locale] = true
+			}
+		}
+		for locale, cc := range firstEpisode.Captions {
+			if cc != nil && cc.URL != "" && !seen[locale] {
+				subsLangs = append(subsLangs, locale)
+				seen[locale] = true
 			}
 		}
 		sort.Strings(subsLangs)
@@ -300,7 +325,7 @@ func downloadEpisode(baseContentId string, info EpisodeInfo, audioLangs, subsLan
 	fmt.Printf("Audio locales: %s | Subtitle locales: %s\n", strings.Join(audioLangs, ", "), strings.Join(subsLangs, ", "))
 
 	for _, locale := range subsLangs {
-		if firstEpisode.Subtitles[locale] == nil {
+		if resolveSubtitle(firstEpisode, locale, useCC) == nil {
 			fmt.Printf("! Subtitle locale %s is not available for episode %v, aborting this episode.\n", locale, info.EpisodeMetadata.EpisodeNumber)
 			return
 		}
@@ -309,7 +334,12 @@ func downloadEpisode(baseContentId string, info EpisodeInfo, audioLangs, subsLan
 	var subTracks []mediaTrack
 	for _, locale := range subsLangs {
 		fmt.Printf("Downloading subtitles for %s...\n", trackTitle(locale))
-		subTracks = append(subTracks, mediaTrack{file: downloadSubs(firstEpisode.Subtitles[locale].URL), locale: locale})
+		sub := resolveSubtitle(firstEpisode, locale, useCC)
+		subTracks = append(subTracks, mediaTrack{
+			file:   downloadSubs(sub.URL, sub.Format),
+			locale: locale,
+			format: sub.Format,
+		})
 	}
 	if len(subTracks) > 0 {
 		fmt.Println("Downloaded subtitles!")
@@ -372,7 +402,7 @@ func downloadEpisode(baseContentId string, info EpisodeInfo, audioLangs, subsLan
 	mergeEverything(videoFile, audioTracks, subTracks, outputFile, info)
 }
 
-func downloadSeason(videoQuality, audioQuality *string, audioLangs, subsLangs []string, episodes []SeasonEpisode) {
+func downloadSeason(videoQuality, audioQuality *string, audioLangs, subsLangs []string, episodes []SeasonEpisode, useCC bool) {
 	fmt.Printf("Downloading season %v of %s (%v episodes)\n\n", episodes[0].SeasonNumber, episodes[0].SeriesTitle, len(episodes))
 
 	for _, episode := range episodes {
@@ -388,6 +418,6 @@ func downloadSeason(videoQuality, audioQuality *string, audioLangs, subsLangs []
 			Title: episode.Title,
 		}
 
-		downloadEpisode(episode.ID, info, audioLangs, subsLangs, videoQuality, audioQuality)
+		downloadEpisode(episode.ID, info, audioLangs, subsLangs, videoQuality, audioQuality, useCC)
 	}
 }

@@ -11,6 +11,7 @@ import (
 type mediaTrack struct {
 	file   string
 	locale string
+	format string // subtitle source format, e.g. "ass" or "vtt". Unused for audio tracks.
 }
 
 // trackTitle returns a human-readable track name for a locale, falling back to
@@ -44,8 +45,17 @@ func mergeEverything(videoFile string, audioTracks, subTracks []mediaTrack, outp
 	}
 
 	args = append(args, "-c:v", "copy", "-c:a", "copy")
-	if len(subTracks) > 0 {
-		args = append(args, "-c:s", "copy")
+	// WebVTT cue-positioning metadata (e.g. "line:90% align:center") isn't
+	// rendered correctly by most players when copied as-is into an MKV, so
+	// VTT subtitle tracks are transcoded to SRT (which has no positioning
+	// syntax) instead of stream-copied. ASS tracks keep "copy" to preserve
+	// their styling.
+	for j, sub := range subTracks {
+		if sub.format == "vtt" {
+			args = append(args, fmt.Sprintf("-c:s:%d", j), "srt")
+		} else {
+			args = append(args, fmt.Sprintf("-c:s:%d", j), "copy")
+		}
 	}
 
 	for i, audio := range audioTracks {
