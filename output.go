@@ -12,6 +12,7 @@ type mediaTrack struct {
 	file   string
 	locale string
 	format string // subtitle source format, e.g. "ass" or "vtt". Unused for audio tracks.
+	isCC   bool   // true if this track is a closed caption rather than a regular subtitle
 }
 
 // trackTitle returns a human-readable track name for a locale, falling back to
@@ -47,9 +48,9 @@ func mergeEverything(videoFile string, audioTracks, subTracks []mediaTrack, outp
 	args = append(args, "-c:v", "copy", "-c:a", "copy")
 	// WebVTT cue-positioning metadata (e.g. "line:90% align:center") isn't
 	// rendered correctly by most players when copied as-is into an MKV, so
-	// VTT subtitle tracks are transcoded to SRT (which has no positioning
-	// syntax) instead of stream-copied. ASS tracks keep "copy" to preserve
-	// their styling.
+	// VTT subtitle/caption tracks are transcoded to SRT (which has no
+	// positioning syntax) instead of stream-copied. ASS tracks keep "copy"
+	// to preserve their styling.
 	for j, sub := range subTracks {
 		if sub.format == "vtt" {
 			args = append(args, fmt.Sprintf("-c:s:%d", j), "srt")
@@ -65,16 +66,20 @@ func mergeEverything(videoFile string, audioTracks, subTracks []mediaTrack, outp
 		)
 	}
 	for j, sub := range subTracks {
+		title := trackTitle(sub.locale)
+		if sub.isCC {
+			title += " [CC]"
+		}
 		args = append(args,
 			fmt.Sprintf("-metadata:s:s:%d", j), "language="+languageCodes[sub.locale],
-			fmt.Sprintf("-metadata:s:s:%d", j), "title="+trackTitle(sub.locale),
+			fmt.Sprintf("-metadata:s:s:%d", j), "title="+title,
 		)
 	}
-
-	// Mark only the first audio/subtitle track (the primary requested locale) as
+	// Mark only the first audio track and the first non-CC subtitle track as
 	// default. Disposition must be set on every track: each downloaded audio
 	// file is a standalone default stream, so the non-primary ones must be
-	// explicitly cleared.
+	// explicitly cleared. Closed captions are never marked default; they're
+	// an opt-in extra a viewer toggles deliberately.
 	for i := range audioTracks {
 		disposition := "0"
 		if i == 0 {
@@ -82,10 +87,12 @@ func mergeEverything(videoFile string, audioTracks, subTracks []mediaTrack, outp
 		}
 		args = append(args, fmt.Sprintf("-disposition:a:%d", i), disposition)
 	}
-	for j := range subTracks {
+	defaultSubSet := false
+	for j, sub := range subTracks {
 		disposition := "0"
-		if j == 0 {
+		if !sub.isCC && !defaultSubSet {
 			disposition = "default"
+			defaultSubSet = true
 		}
 		args = append(args, fmt.Sprintf("-disposition:s:%d", j), disposition)
 	}
