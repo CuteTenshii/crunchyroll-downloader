@@ -94,7 +94,9 @@ func processURL(client *api.Client, url string) {
 				fmt.Printf("Error fetching episodes: %v\n", err)
 				return
 			}
-			download.Season(client, videoQuality, audioQuality, audioLangs, subsLangs, episodes)
+			if err := download.Season(client, videoQuality, audioQuality, audioLangs, subsLangs, episodes); err != nil {
+				fmt.Printf("Season completed with errors: %v\n", err)
+			}
 		} else {
 			fmt.Print("No season number specified, downloading all seasons...\n")
 
@@ -104,7 +106,9 @@ func processURL(client *api.Client, url string) {
 					fmt.Printf("Error fetching episodes for season %v: %v\n", season.SeasonNumber, err)
 					continue
 				}
-				download.Season(client, videoQuality, audioQuality, audioLangs, subsLangs, episodes)
+				if err := download.Season(client, videoQuality, audioQuality, audioLangs, subsLangs, episodes); err != nil {
+					fmt.Printf("Season %v completed with errors: %v\n", season.SeasonNumber, err)
+				}
 			}
 		}
 	}
