@@ -1,40 +1,36 @@
-package main
+package mux
 
 import (
 	"bytes"
 	"fmt"
 	"os"
 	"os/exec"
+
+	"crunchyroll-downloader/internal/api"
+	loc "crunchyroll-downloader/internal/locale"
 )
 
-// mediaTrack pairs a downloaded temporary file with the locale it represents.
-type mediaTrack struct {
-	file   string
-	locale string
+type MediaTrack struct {
+	File   string
+	Locale string
 }
 
-// trackTitle returns a human-readable track name for a locale, falling back to
-// the raw locale when it isn't in the known list.
-func trackTitle(locale string) string {
-	if name, ok := languageNames[locale]; ok {
+func TrackTitle(code string) string {
+	if name, ok := loc.LanguageNames[code]; ok {
 		return name
 	}
-	return locale
+	return code
 }
 
-// mergeEverything merges the video, all audio tracks and all subtitle tracks
-// into a single MKV container.
-func mergeEverything(videoFile string, audioTracks, subTracks []mediaTrack, outputFile string, info EpisodeInfo) {
+func MergeEverything(videoFile string, audioTracks, subTracks []MediaTrack, outputFile string, info *api.EpisodeInfo) {
 	args := []string{"-i", videoFile}
 	for _, audio := range audioTracks {
-		args = append(args, "-i", audio.file)
+		args = append(args, "-i", audio.File)
 	}
 	for _, sub := range subTracks {
-		args = append(args, "-i", sub.file)
+		args = append(args, "-i", sub.File)
 	}
 
-	// Map every input stream explicitly; without this ffmpeg keeps only one
-	// stream of each type.
 	args = append(args, "-map", "0:v:0")
 	for i := range audioTracks {
 		args = append(args, "-map", fmt.Sprintf("%d:a:0", 1+i))
@@ -50,21 +46,17 @@ func mergeEverything(videoFile string, audioTracks, subTracks []mediaTrack, outp
 
 	for i, audio := range audioTracks {
 		args = append(args,
-			fmt.Sprintf("-metadata:s:a:%d", i), "language="+languageCodes[audio.locale],
-			fmt.Sprintf("-metadata:s:a:%d", i), "title="+trackTitle(audio.locale),
+			fmt.Sprintf("-metadata:s:a:%d", i), "language="+loc.LanguageCodes[audio.Locale],
+			fmt.Sprintf("-metadata:s:a:%d", i), "title="+TrackTitle(audio.Locale),
 		)
 	}
 	for j, sub := range subTracks {
 		args = append(args,
-			fmt.Sprintf("-metadata:s:s:%d", j), "language="+languageCodes[sub.locale],
-			fmt.Sprintf("-metadata:s:s:%d", j), "title="+trackTitle(sub.locale),
+			fmt.Sprintf("-metadata:s:s:%d", j), "language="+loc.LanguageCodes[sub.Locale],
+			fmt.Sprintf("-metadata:s:s:%d", j), "title="+TrackTitle(sub.Locale),
 		)
 	}
 
-	// Mark only the first audio/subtitle track (the primary requested locale) as
-	// default. Disposition must be set on every track: each downloaded audio
-	// file is a standalone default stream, so the non-primary ones must be
-	// explicitly cleared.
 	for i := range audioTracks {
 		disposition := "0"
 		if i == 0 {
@@ -96,13 +88,12 @@ func mergeEverything(videoFile string, audioTracks, subTracks []mediaTrack, outp
 		panic(fmt.Sprintf("ffmpeg failed: %s\n%s", err, stderr.String()))
 	}
 
-	// Remove temporary files
 	_ = os.Remove(videoFile)
 	for _, audio := range audioTracks {
-		_ = os.Remove(audio.file)
+		_ = os.Remove(audio.File)
 	}
 	for _, sub := range subTracks {
-		_ = os.Remove(sub.file)
+		_ = os.Remove(sub.File)
 	}
 
 	fmt.Printf("\nDownload finished! Output file: %s\n\n", outputFile)

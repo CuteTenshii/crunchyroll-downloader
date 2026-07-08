@@ -6,10 +6,12 @@ import (
 	"fmt"
 	"os"
 	"strings"
+
+	"crunchyroll-downloader/internal/api"
+	"crunchyroll-downloader/internal/download"
 )
 
 var (
-	token         = ""
 	audioLang     = flag.String("audio-lang", "ja-JP", "Audio language(s), comma-separated for multiple (e.g. \"ja-JP,en-US\"). First is the default track")
 	subtitlesLang = flag.String("subs-lang", "en-US", "Subtitle language(s), comma-separated for multiple (e.g. \"en-US,es-419\"). First is the default track")
 	videoQuality  = flag.String("video-quality", "1080p", "Video quality")
@@ -19,8 +21,6 @@ var (
 	debug         = flag.Bool("debug-manifest", false, "Log raw episode playback JSON and manifest XML")
 )
 
-// parseLangs splits a comma-separated locale list, trimming spaces and dropping
-// empties.
 func parseLangs(s string) []string {
 	var out []string
 	for _, p := range strings.Split(s, ",") {
@@ -31,10 +31,15 @@ func parseLangs(s string) []string {
 	return out
 }
 
-func processUrl(url string) {
-	contentType := strings.Split(url, "/")[3]
-	contentId := strings.Split(url, "/")[4]
-	if len(contentId) < 9 && len(contentId) > 14 {
+func processURL(client *api.Client, url string) {
+	parts := strings.Split(url, "/")
+	if len(parts) < 5 {
+		fmt.Printf("Invalid URL format: %s\n", url)
+		return
+	}
+	contentType := parts[3]
+	contentID := parts[4]
+	if len(contentID) < 9 || len(contentID) > 14 {
 		fmt.Printf("Invalid URL format: %s\n", url)
 		return
 	}
@@ -49,9 +54,6 @@ func processUrl(url string) {
 	}
 	subsLangs := parseLangs(*subtitlesLang)
 
-	// The season/series API endpoints take a single preferred locale; use the
-	// primary (first) requested one. All dub versions are still listed per
-	// episode, so the other languages remain resolvable.
 	primaryAudio := audioLangs[0]
 	primarySubs := "en-US"
 	if len(subsLangs) > 0 {
@@ -59,32 +61,50 @@ func processUrl(url string) {
 	}
 
 	if contentType == "watch" {
-		info := getEpisodeInfo(contentId)
-		downloadEpisode(contentId, info, audioLangs, subsLangs, videoQuality, audioQuality)
+		info, err := client.GetEpisodeInfo(contentID)
+		if err != nil {
+			fmt.Printf("Error fetching episode info: %v\n", err)
+			return
+		}
+		if err := download.Episode(client, contentID, info, audioLangs, subsLangs, videoQuality, audioQuality); err != nil {
+			fmt.Printf("Error downloading episode: %v\n", err)
+		}
 	} else {
-		seasons := getSeasons(contentId, primaryAudio, primarySubs)
+		seasons, err := client.GetSeasons(contentID, primaryAudio, primarySubs)
+		if err != nil {
+			fmt.Printf("Error fetching seasons: %v\n", err)
+			return
+		}
 
 		if *seasonNumber != 0 {
-			var seasonId string
+			var seasonID string
 			for _, season := range seasons {
 				if season.SeasonNumber == *seasonNumber {
-					seasonId = season.ID
+					seasonID = season.ID
 					break
 				}
 			}
-			if seasonId == "" {
+			if seasonID == "" {
 				fmt.Printf("This anime has no season %v!\n", *seasonNumber)
 				return
 			}
 
-			episodes := getSeasonEpisodes(seasonId, primaryAudio, primarySubs)
-			downloadSeason(videoQuality, audioQuality, audioLangs, subsLangs, episodes)
+			episodes, err := client.GetSeasonEpisodes(seasonID, primaryAudio, primarySubs)
+			if err != nil {
+				fmt.Printf("Error fetching episodes: %v\n", err)
+				return
+			}
+			download.Season(client, videoQuality, audioQuality, audioLangs, subsLangs, episodes)
 		} else {
-			print("No season number specified, downloading all seasons...\n")
+			fmt.Print("No season number specified, downloading all seasons...\n")
 
 			for _, season := range seasons {
-				episodes := getSeasonEpisodes(season.ID, primaryAudio, primarySubs)
-				downloadSeason(videoQuality, audioQuality, audioLangs, subsLangs, episodes)
+				episodes, err := client.GetSeasonEpisodes(season.ID, primaryAudio, primarySubs)
+				if err != nil {
+					fmt.Printf("Error fetching episodes for season %v: %v\n", season.SeasonNumber, err)
+					continue
+				}
+				download.Season(client, videoQuality, audioQuality, audioLangs, subsLangs, episodes)
 			}
 		}
 	}
@@ -100,12 +120,12 @@ func main() {
 		os.Exit(1)
 	}
 
-	if *etpRt == "" {
-		fmt.Println("You must specify the \"-etp-rt\" option!\n- Open Crunchyroll on your browser and log in.\n- Open developer tools (Ctrl+Shift+I), go to \"Application\", and then \"Cookies\".\n- The value of the \"ept_rt\" cookie is what you need to input into this option.")
+	client, err := api.New(*etpRt)
+	if err != nil {
+		fmt.Printf("Failed to initialize API client: %v\n", err)
 		os.Exit(1)
 	}
-
-	token = GetAccessToken(*etpRt)
+	client.Debug = *debug
 
 	if *urlsFile != "" {
 		file, err := os.Open(*urlsFile)
@@ -127,10 +147,10 @@ func main() {
 		fmt.Printf("Found %d URLs to download\n\n", len(urls))
 		for i, u := range urls {
 			fmt.Printf("=== [%d/%d] %s ===\n", i+1, len(urls), u)
-			processUrl(u)
+			processURL(client, u)
 			fmt.Println()
 		}
 	} else {
-		processUrl(*url)
+		processURL(client, *url)
 	}
 }

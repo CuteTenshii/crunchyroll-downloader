@@ -1,43 +1,21 @@
-package main
+package media
 
 import (
-	"fmt"
-	"io"
-	"net/http"
 	"strconv"
 	"strings"
 
 	"github.com/unki2aut/go-mpd"
 )
 
-func parseManifest(url string) *mpd.MPD {
-	req, err := http.NewRequest(http.MethodGet, url, nil)
-	if err != nil {
-		panic(err)
-	}
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("User-Agent", "Mozilla/5.0 (X11; Linux x86_64; rv:147.0) Gecko/20100101 Firefox/147.0")
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		panic(err)
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		panic(err)
-	}
+func ParseManifest(data []byte) (*mpd.MPD, error) {
 	mpd := new(mpd.MPD)
-	mpd.Decode(body)
-
-	if *debug {
-		fmt.Printf("\n%s\n", string(body))
+	if err := mpd.Decode(data); err != nil {
+		return nil, err
 	}
-
-	return mpd
+	return mpd, nil
 }
 
-func getBaseUrl(set *mpd.AdaptationSet, isVideoSet bool, quality string) (*string, *string) {
+func GetBaseUrl(set *mpd.AdaptationSet, isVideoSet bool, quality string) (*string, *string) {
 	for _, representation := range set.Representations {
 		if isVideoSet {
 			toInt, _ := strconv.ParseInt(strings.ReplaceAll(quality, "p", ""), 10, 64)
@@ -51,8 +29,6 @@ func getBaseUrl(set *mpd.AdaptationSet, isVideoSet bool, quality string) (*strin
 				}
 			} else if representation.Bandwidth != nil {
 				num := strings.ReplaceAll(quality, "k", "")
-
-				// Crunchyroll MPDs are weird on the "bandwidth" value, it can be 192002 (not just 192000) on certain manifests
 				if num == "192" && *representation.Bandwidth >= 192000 {
 					return &representation.BaseURL[0].Value, representation.ID
 				} else if num == "128" && *representation.Bandwidth >= 128000 {
@@ -67,11 +43,10 @@ func getBaseUrl(set *mpd.AdaptationSet, isVideoSet bool, quality string) (*strin
 		return nil, nil
 	}
 	firstRep := set.Representations[0]
-	fmt.Printf("Audio quality %s not found, deferring to %s\n", quality, *firstRep.ID)
 	return &firstRep.BaseURL[0].Value, firstRep.ID
 }
 
-func expandTimeline(timeline []*mpd.SegmentTimelineS, startNumber int64) []int64 {
+func ExpandTimeline(timeline []*mpd.SegmentTimelineS, startNumber int64) []int64 {
 	var result []int64
 	segNum := startNumber
 
@@ -81,8 +56,7 @@ func expandTimeline(timeline []*mpd.SegmentTimelineS, startNumber int64) []int64
 			repeat = *s.R
 		}
 
-		total := repeat + 1 // DASH rule: total segments = r + 1
-
+		total := repeat + 1
 		for i := int64(0); i < total; i++ {
 			result = append(result, segNum)
 			segNum++
