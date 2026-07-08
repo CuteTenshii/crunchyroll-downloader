@@ -120,7 +120,7 @@ func discoverWidevineDeviceConfig() (widevineDeviceConfig, error) {
 		return config, nil
 	}
 
-	return widevineDeviceConfig{}, errors.New("no Widevine device configured: set WIDEVINE_DEVICE_PATH to a .wvd file, or set WIDEVINE_CLIENT_ID_PATH and WIDEVINE_PRIVATE_KEY_PATH together")
+	return widevineDeviceConfig{}, missingWidevineDeviceError()
 }
 
 func envValue(key string, envFileValues map[string]string) string {
@@ -169,13 +169,17 @@ func readDotEnv(path string) (map[string]string, error) {
 	return values, nil
 }
 
+func missingWidevineDeviceError() error {
+	return errors.New("no Widevine device configured: set WIDEVINE_DEVICE_PATH to a .wvd file, or set WIDEVINE_CLIENT_ID_PATH and WIDEVINE_PRIVATE_KEY_PATH together")
+}
+
 func GetLicense(ctx context.Context, client *api.Client, psshData, contentId, videoToken string) ([]*widevine.Key, error) {
 	device, err := GetWidevineDevice()
 	if err != nil {
 		return nil, err
 	}
 	if device == nil {
-		return nil, errors.New("no widevine device provided. You either need:\n- a \".wvd\" file,\n- or \"client_id.bin\" and \"private_key.pem\" files.\n")
+		return nil, missingWidevineDeviceError()
 	}
 
 	cdm := widevine.NewCDM(device)
