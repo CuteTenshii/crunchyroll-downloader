@@ -1,6 +1,7 @@
 package drm
 
 import (
+	"context"
 	"encoding/base64"
 	"errors"
 	"io"
@@ -70,7 +71,7 @@ func GetWidevineDevice() (*widevine.Device, error) {
 	return nil, nil
 }
 
-func GetLicense(client *api.Client, psshData, contentId, videoToken string) ([]*widevine.Key, error) {
+func GetLicense(ctx context.Context, client *api.Client, psshData, contentId, videoToken string) ([]*widevine.Key, error) {
 	device, err := GetWidevineDevice()
 	if err != nil {
 		return nil, err
@@ -96,7 +97,7 @@ func GetLicense(client *api.Client, psshData, contentId, videoToken string) ([]*
 		return nil, err
 	}
 
-	resp, err := client.SendChallenge(contentId, videoToken, challenge)
+	resp, err := client.SendChallenge(ctx, contentId, videoToken, challenge)
 	if err != nil {
 		return nil, err
 	}

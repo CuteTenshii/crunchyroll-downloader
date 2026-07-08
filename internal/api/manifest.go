@@ -1,13 +1,14 @@
 package api
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net/http"
 )
 
-func (c *Client) FetchManifest(url string) ([]byte, error) {
-	req, err := c.newRequest(http.MethodGet, url)
+func (c *Client) FetchManifest(ctx context.Context, url string) ([]byte, error) {
+	req, err := c.newRequest(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
 	}

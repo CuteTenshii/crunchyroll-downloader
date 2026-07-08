@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -9,20 +10,18 @@ import (
 	"net/http"
 )
 
-func (c *Client) SendChallenge(contentId, videoToken string, challenge []byte) ([]byte, error) {
-	req, err := http.NewRequest(http.MethodPost,
-		"https://www.crunchyroll.com/license/v1/license/widevine",
-		io.NopCloser(bytes.NewReader(challenge)))
+func (c *Client) SendChallenge(ctx context.Context, contentId, videoToken string, challenge []byte) ([]byte, error) {
+	req, err := c.newRequest(ctx, http.MethodPost,
+		c.licenseURL,
+		bytes.NewReader(challenge))
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/octet-stream")
 	req.Header.Set("X-Cr-Content-Id", contentId)
 	req.Header.Set("X-Cr-Video-Token", videoToken)
-	req.Header.Set("Authorization", "Bearer "+c.token)
 	req.Header.Set("Origin", "https://static.crunchyroll.com")
 	req.Header.Set("Referer", "https://static.crunchyroll.com/")
-	req.Header.Set("User-Agent", userAgent)
 
 	resp, err := c.Do(req)
 	if err != nil {

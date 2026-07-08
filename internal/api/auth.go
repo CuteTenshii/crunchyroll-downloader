@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -11,7 +12,7 @@ import (
 	"github.com/google/uuid"
 )
 
-func (c *Client) fetchAccessToken() (string, error) {
+func (c *Client) fetchAccessToken(ctx context.Context) (string, error) {
 	c.deviceID = uuid.NewString()
 
 	body := url.Values{}
@@ -19,7 +20,7 @@ func (c *Client) fetchAccessToken() (string, error) {
 	body.Set("device_type", "Firefox on Linux")
 	body.Set("grant_type", "etp_rt_cookie")
 
-	req, err := http.NewRequest(http.MethodPost, "https://www.crunchyroll.com/auth/v1/token",
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.authURL,
 		strings.NewReader(body.Encode()))
 	if err != nil {
 		return "", err

@@ -62,7 +62,7 @@ func processURL(ctx context.Context, client *api.Client, url string) {
 	}
 
 	if contentType == "watch" {
-		info, err := client.GetEpisodeInfo(contentID)
+		info, err := client.GetEpisodeInfo(ctx, contentID)
 		if err != nil {
 			fmt.Printf("Error fetching episode info: %v\n", err)
 			return
@@ -71,7 +71,7 @@ func processURL(ctx context.Context, client *api.Client, url string) {
 			fmt.Printf("Error downloading episode: %v\n", err)
 		}
 	} else {
-		seasons, err := client.GetSeasons(contentID, primaryAudio, primarySubs)
+		seasons, err := client.GetSeasons(ctx, contentID, primaryAudio, primarySubs)
 		if err != nil {
 			fmt.Printf("Error fetching seasons: %v\n", err)
 			return
@@ -90,7 +90,7 @@ func processURL(ctx context.Context, client *api.Client, url string) {
 				return
 			}
 
-			episodes, err := client.GetSeasonEpisodes(seasonID, primaryAudio, primarySubs)
+			episodes, err := client.GetSeasonEpisodes(ctx, seasonID, primaryAudio, primarySubs)
 			if err != nil {
 				fmt.Printf("Error fetching episodes: %v\n", err)
 				return
@@ -102,7 +102,7 @@ func processURL(ctx context.Context, client *api.Client, url string) {
 			fmt.Print("No season number specified, downloading all seasons...\n")
 
 			for _, season := range seasons {
-				episodes, err := client.GetSeasonEpisodes(season.ID, primaryAudio, primarySubs)
+				episodes, err := client.GetSeasonEpisodes(ctx, season.ID, primaryAudio, primarySubs)
 				if err != nil {
 					fmt.Printf("Error fetching episodes for season %v: %v\n", season.SeasonNumber, err)
 					continue
@@ -126,7 +126,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	client, err := api.New(*etpRt)
+	client, err := api.NewWithContext(ctx, *etpRt)
 	if err != nil {
 		fmt.Printf("Failed to initialize API client: %v\n", err)
 		os.Exit(1)

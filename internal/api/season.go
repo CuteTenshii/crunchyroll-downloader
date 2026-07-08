@@ -1,13 +1,14 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 )
 
-func (c *Client) GetSeasonEpisodes(contentId, audioLocale, subLocale string) ([]SeasonEpisode, error) {
+func (c *Client) GetSeasonEpisodes(ctx context.Context, contentId, audioLocale, subLocale string) ([]SeasonEpisode, error) {
 	if audioLocale == "" {
 		audioLocale = "ja-JP"
 	}
@@ -15,9 +16,9 @@ func (c *Client) GetSeasonEpisodes(contentId, audioLocale, subLocale string) ([]
 		subLocale = "en-US"
 	}
 
-	req, err := c.newRequest(http.MethodGet,
-		fmt.Sprintf("https://www.crunchyroll.com/content/v2/cms/seasons/%s/episodes?preferred_audio_language=%s&locale=%s",
-			contentId, audioLocale, subLocale))
+	req, err := c.newRequest(ctx, http.MethodGet,
+		c.url(fmt.Sprintf("/content/v2/cms/seasons/%s/episodes?preferred_audio_language=%s&locale=%s",
+			contentId, audioLocale, subLocale)), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -41,7 +42,7 @@ func (c *Client) GetSeasonEpisodes(contentId, audioLocale, subLocale string) ([]
 	return episodes.Data, nil
 }
 
-func (c *Client) GetSeasons(contentId, audioLocale, subLocale string) ([]Season, error) {
+func (c *Client) GetSeasons(ctx context.Context, contentId, audioLocale, subLocale string) ([]Season, error) {
 	if audioLocale == "" {
 		audioLocale = "ja-JP"
 	}
@@ -49,9 +50,9 @@ func (c *Client) GetSeasons(contentId, audioLocale, subLocale string) ([]Season,
 		subLocale = "en-US"
 	}
 
-	req, err := c.newRequest(http.MethodGet,
-		fmt.Sprintf("https://www.crunchyroll.com/content/v2/cms/series/%s/seasons?force_locale=&preferred_audio_language=%s&locale=%s",
-			contentId, audioLocale, subLocale))
+	req, err := c.newRequest(ctx, http.MethodGet,
+		c.url(fmt.Sprintf("/content/v2/cms/series/%s/seasons?force_locale=&preferred_audio_language=%s&locale=%s",
+			contentId, audioLocale, subLocale)), nil)
 	if err != nil {
 		return nil, err
 	}

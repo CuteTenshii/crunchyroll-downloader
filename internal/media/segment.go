@@ -2,6 +2,7 @@ package media
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -17,6 +18,10 @@ import (
 
 const maxWorkers = 10
 
+type httpDoer interface {
+	Do(*http.Request) (*http.Response, error)
+}
+
 type segmentJob struct {
 	index int
 	url   string
@@ -30,14 +35,22 @@ func BuildUrl(base, representationId, file string, partNum *int64) string {
 	return base + strings.ReplaceAll(file, "$RepresentationID$", representationId)
 }
 
-func DownloadPart(url string) ([]byte, error) {
+func DownloadPart(ctx context.Context, client httpDoer, url string) ([]byte, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
 	maxRetries := 5
 	for attempt := 0; attempt < maxRetries; attempt++ {
 		if attempt > 0 {
-			time.Sleep(time.Duration(attempt) * 2 * time.Second)
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(time.Duration(attempt) * 2 * time.Second):
+			}
 		}
 
-		req, err := http.NewRequest(http.MethodGet, url, nil)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 		if err != nil {
 			return nil, err
 		}
@@ -45,7 +58,7 @@ func DownloadPart(url string) ([]byte, error) {
 		req.Header.Set("Referer", "https://static.crunchyroll.com/")
 		req.Header.Set("User-Agent", "Mozilla/5.0 (X11; Linux x86_64; rv:147.0) Gecko/20100101 Firefox/147.0")
 
-		resp, err := http.DefaultClient.Do(req)
+		resp, err := client.Do(req)
 		if err != nil {
 			if attempt < maxRetries-1 {
 				continue
@@ -90,9 +103,9 @@ func getFilename(set *mpd.AdaptationSet) string {
 	return ""
 }
 
-func DownloadParts(baseUrl, representationId *string, set *mpd.AdaptationSet, keys []*widevine.Key) (string, error) {
+func DownloadParts(ctx context.Context, client httpDoer, baseUrl, representationId *string, set *mpd.AdaptationSet, keys []*widevine.Key) (string, error) {
 	initUrl := BuildUrl(*baseUrl, *representationId, *set.SegmentTemplate.Initialization, nil)
-	initData, err := DownloadPart(initUrl)
+	initData, err := DownloadPart(ctx, client, initUrl)
 	if err != nil {
 		return "", err
 	}
@@ -112,7 +125,7 @@ func DownloadParts(baseUrl, representationId *string, set *mpd.AdaptationSet, ke
 		go func() {
 			defer wg.Done()
 			for job := range jobs {
-				data, err := DownloadPart(job.url)
+				data, err := DownloadPart(ctx, client, job.url)
 				if err != nil {
 					errOnce.Do(func() { downloadErr = err })
 					return
@@ -156,8 +169,8 @@ func DownloadParts(baseUrl, representationId *string, set *mpd.AdaptationSet, ke
 	return filename, nil
 }
 
-func DownloadSubs(url string) (string, error) {
-	req, err := http.NewRequest(http.MethodGet, url, nil)
+func DownloadSubs(ctx context.Context, client httpDoer, url string) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return "", err
 	}
@@ -165,7 +178,7 @@ func DownloadSubs(url string) (string, error) {
 	req.Header.Set("Referer", "https://static.crunchyroll.com/")
 	req.Header.Set("User-Agent", "Mozilla/5.0 (X11; Linux x86_64; rv:147.0) Gecko/20100101 Firefox/147.0")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return "", err
 	}

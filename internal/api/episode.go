@@ -1,15 +1,16 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 )
 
-func (c *Client) GetEpisode(id string) (*Episode, error) {
-	req, err := c.newRequest(http.MethodGet,
-		fmt.Sprintf("https://www.crunchyroll.com/playback/v3/%s/web/firefox/play", id))
+func (c *Client) GetEpisode(ctx context.Context, id string) (*Episode, error) {
+	req, err := c.newRequest(ctx, http.MethodGet,
+		c.url(fmt.Sprintf("/playback/v3/%s/web/firefox/play", id)), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -41,9 +42,9 @@ func (c *Client) GetEpisode(id string) (*Episode, error) {
 	return &episode, nil
 }
 
-func (c *Client) GetEpisodeInfo(id string) (*EpisodeInfo, error) {
-	req, err := c.newRequest(http.MethodGet,
-		fmt.Sprintf("https://www.crunchyroll.com/content/v2/cms/objects/%s?ratings=true&preferred_audio_language=ja-JP&locale=en-US", id))
+func (c *Client) GetEpisodeInfo(ctx context.Context, id string) (*EpisodeInfo, error) {
+	req, err := c.newRequest(ctx, http.MethodGet,
+		c.url(fmt.Sprintf("/content/v2/cms/objects/%s?ratings=true&preferred_audio_language=ja-JP&locale=en-US", id)), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -71,9 +72,9 @@ func (c *Client) GetEpisodeInfo(id string) (*EpisodeInfo, error) {
 	return &info.Data[0], nil
 }
 
-func (c *Client) DeleteStream(contentId, sToken string) (bool, error) {
-	req, err := c.newRequest(http.MethodDelete,
-		fmt.Sprintf("https://www.crunchyroll.com/playback/v1/token/%s/%s", contentId, sToken))
+func (c *Client) DeleteStream(ctx context.Context, contentId, sToken string) (bool, error) {
+	req, err := c.newRequest(ctx, http.MethodDelete,
+		c.url(fmt.Sprintf("/playback/v1/token/%s/%s", contentId, sToken)), nil)
 	if err != nil {
 		return false, err
 	}
