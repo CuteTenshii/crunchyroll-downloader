@@ -7,12 +7,20 @@ import (
 	"io"
 	"os"
 	"strings"
+	"sync"
 
 	"github.com/iyear/gowidevine"
 	"github.com/iyear/gowidevine/widevinepb"
 	"github.com/unki2aut/go-mpd"
 
 	"crunchyroll-downloader/internal/api"
+)
+
+var (
+	widevineDeviceOnce   sync.Once
+	widevineDevice       *widevine.Device
+	widevineDeviceErr    error
+	widevineDeviceLoader = loadWidevineDevice
 )
 
 func GetPssh(mpd *mpd.MPD) *string {
@@ -31,6 +39,14 @@ func GetPssh(mpd *mpd.MPD) *string {
 }
 
 func GetWidevineDevice() (*widevine.Device, error) {
+	widevineDeviceOnce.Do(func() {
+		widevineDevice, widevineDeviceErr = widevineDeviceLoader()
+	})
+
+	return widevineDevice, widevineDeviceErr
+}
+
+func loadWidevineDevice() (*widevine.Device, error) {
 	var clientID []byte
 	var privateKey []byte
 	files, _ := os.ReadDir(".")
