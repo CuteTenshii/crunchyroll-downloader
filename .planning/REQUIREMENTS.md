@@ -11,7 +11,7 @@
 - [x] **PERF-02**: HTTP transport configured with keep-alive, `MaxIdleConnsPerHost` ≥ 10, and connection reuse for segment downloads — eliminate per-request TCP/TLS handshake
 - [x] **PERF-03**: `http.Client.Timeout` set (30s connect, 60s overall) and `context.Context` propagated through all HTTP calls — prevent indefinite hangs
 - [ ] **PERF-04**: Parsed MPD manifests cached per `contentId` — avoid redundant fetch/re-parse when downloading multiple audio versions of the same episode
-- [ ] **PERF-05**: Widevine device loaded once at startup, cached and reused across license requests — eliminate repeated `os.ReadDir(".")` per audio version
+- [x] **PERF-05**: Widevine device loaded once at startup, cached and reused across license requests — eliminate repeated `os.ReadDir(".")` per audio version
 - [ ] **PERF-06**: Audio version manifest fetching and license challenges parallelized via goroutines — reduce multi-dub overhead from sequential to concurrent
 - [x] **PERF-07**: `DownloadPart()` and `DownloadSubs()` use configured `http.Client` instead of `http.DefaultClient.Do()` — enable keep-alive, timeouts, and auth for all HTTP paths
 - [x] **PERF-08**: Fix file descriptor leak in `getFilename()` — close `*os.File` handle immediately after creating temp file instead of discarding it
@@ -54,7 +54,7 @@
 - [x] **QOL-10**: FFmpeg merge failures return `error` instead of `panic` — graceful cleanup of partial output
 - [x] **QOL-11**: Log warnings instead of silent `_ = os.Remove()` discards in mux cleanup — propagate cleanup failures via log instead of swallowing
 - [x] **QOL-12**: Fix `getFilename()` empty return when `set.Representations` is empty — guard against nil/empty adaptation set to prevent downstream panic
-- [ ] **QOL-13**: Check and propagate `os.ReadDir(".")` error in `GetWidevineDevice()` instead of silent discard with `_`
+- [x] **QOL-13**: Check and propagate `os.ReadDir(".")` error in `GetWidevineDevice()` instead of silent discard with `_`
 
 ## v2 Requirements
 
@@ -97,7 +97,7 @@
 | PERF-02 | Phase 1 | Complete |
 | PERF-03 | Phase 1 | Complete |
 | PERF-04 | Phase 2 | Pending |
-| PERF-05 | Phase 1 | Pending |
+| PERF-05 | Phase 1 | Complete |
 | PERF-06 | Phase 2 | Pending |
 | PERF-07 | Phase 1 | Complete |
 | PERF-08 | Phase 1 | Complete |
@@ -128,7 +128,7 @@
 | QOL-10 | Phase 1 | Complete |
 | QOL-11 | Phase 1 | Complete |
 | QOL-12 | Phase 1 | Complete |
-| QOL-13 | Phase 1 | Pending |
+| QOL-13 | Phase 1 | Complete |
 
 **Coverage:**
 - v1 requirements: 37 total
@@ -137,4 +137,4 @@
 
 ---
 *Requirements defined: 2026-07-08*
-*Last updated: 2026-07-08 after completing plan 01-03*
+*Last updated: 2026-07-08 after completing plan 01-04*
