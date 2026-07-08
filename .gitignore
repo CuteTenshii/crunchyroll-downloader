@@ -28,9 +28,6 @@ private_key.pem
 *.mp4
 *.ass
 
-# === Project planning (local-only) ===
-.planning/
-
 # === GSD / AI agents ===
 .codex/
 .agents/
