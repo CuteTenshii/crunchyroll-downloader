@@ -1,7 +1,6 @@
 package media
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -25,6 +24,11 @@ type httpDoer interface {
 type segmentJob struct {
 	index int
 	url   string
+}
+
+type segmentResult struct {
+	index int
+	data  []byte
 }
 
 func BuildUrl(base, representationId, file string, partNum *int64) string {
@@ -107,6 +111,9 @@ func DownloadParts(ctx context.Context, client httpDoer, baseUrl, representation
 	if workers <= 0 {
 		workers = defaultWorkers
 	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
 
 	initUrl := BuildUrl(*baseUrl, *representationId, *set.SegmentTemplate.Initialization, nil)
 	initData, err := DownloadPart(ctx, client, initUrl)
@@ -114,12 +121,26 @@ func DownloadParts(ctx context.Context, client httpDoer, baseUrl, representation
 		return "", err
 	}
 
+	encryptedFile, err := os.CreateTemp("", "crdl-encrypted-*.mp4")
+	if err != nil {
+		return "", err
+	}
+	encryptedFilename := encryptedFile.Name()
+	defer os.Remove(encryptedFilename)
+
+	if _, err := encryptedFile.Write(initData); err != nil {
+		encryptedFile.Close()
+		return "", err
+	}
+
 	timeline := ExpandTimeline(set.SegmentTemplate.SegmentTimeline.S, 1)
 	total := len(timeline)
-	results := make([][]byte, total)
+	results := make(chan segmentResult, total)
 	var downloadErr error
 	var errOnce sync.Once
 	var done atomic.Int64
+	downloadCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
 
 	jobs := make(chan segmentJob, total)
 	var wg sync.WaitGroup
@@ -129,12 +150,15 @@ func DownloadParts(ctx context.Context, client httpDoer, baseUrl, representation
 		go func() {
 			defer wg.Done()
 			for job := range jobs {
-				data, err := DownloadPart(ctx, client, job.url)
+				data, err := DownloadPart(downloadCtx, client, job.url)
 				if err != nil {
-					errOnce.Do(func() { downloadErr = err })
+					errOnce.Do(func() {
+						downloadErr = err
+						cancel()
+					})
 					return
 				}
-				results[job.index] = data
+				results <- segmentResult{index: job.index, data: data}
 				count := done.Add(1)
 				fmt.Printf("\rDownloaded %v of %v segments (%v%%)", count, total, (100*count)/int64(total))
 			}
@@ -147,26 +171,60 @@ func DownloadParts(ctx context.Context, client httpDoer, baseUrl, representation
 	}
 	close(jobs)
 	wg.Wait()
+	close(results)
 
 	if downloadErr != nil {
+		encryptedFile.Close()
 		return "", downloadErr
 	}
 
-	fmt.Println("\nFinished downloading!")
-
-	var parts []byte
-	parts = append(parts, initData...)
-	for _, data := range results {
-		parts = append(parts, data...)
+	nextIndex := 0
+	pending := make(map[int][]byte)
+	for result := range results {
+		pending[result.index] = result.data
+		for {
+			data, ok := pending[nextIndex]
+			if !ok {
+				break
+			}
+			if _, err := encryptedFile.Write(data); err != nil {
+				encryptedFile.Close()
+				return "", err
+			}
+			delete(pending, nextIndex)
+			nextIndex++
+		}
 	}
+	if nextIndex != total {
+		encryptedFile.Close()
+		return "", fmt.Errorf("downloaded %d of %d segments", nextIndex, total)
+	}
+	if err := encryptedFile.Close(); err != nil {
+		return "", err
+	}
+
+	fmt.Println("\nFinished downloading!")
 
 	filename := getFilename(set)
 	file, err := os.Create(filename)
 	if err != nil {
 		return "", err
 	}
-	defer file.Close()
-	if err := widevine.DecryptMP4Auto(io.NopCloser(bytes.NewReader(parts)), keys, file); err != nil {
+	defer func() {
+		if err := file.Close(); err != nil {
+			fmt.Printf("Failed to close output file %s: %v\n", filename, err)
+		}
+	}()
+
+	encryptedInput, err := os.Open(encryptedFilename)
+	if err != nil {
+		os.Remove(filename)
+		return "", err
+	}
+	defer encryptedInput.Close()
+
+	if err := widevine.DecryptMP4Auto(encryptedInput, keys, file); err != nil {
+		os.Remove(filename)
 		return "", fmt.Errorf("widevine.DecryptMP4Auto: %w", err)
 	}
 
