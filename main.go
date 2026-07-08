@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"flag"
 	"fmt"
 	"os"
@@ -31,7 +32,7 @@ func parseLangs(s string) []string {
 	return out
 }
 
-func processURL(client *api.Client, url string) {
+func processURL(ctx context.Context, client *api.Client, url string) {
 	parts := strings.Split(url, "/")
 	if len(parts) < 5 {
 		fmt.Printf("Invalid URL format: %s\n", url)
@@ -66,7 +67,7 @@ func processURL(client *api.Client, url string) {
 			fmt.Printf("Error fetching episode info: %v\n", err)
 			return
 		}
-		if err := download.Episode(client, contentID, info, audioLangs, subsLangs, videoQuality, audioQuality); err != nil {
+		if err := download.Episode(ctx, client, contentID, info, audioLangs, subsLangs, videoQuality, audioQuality); err != nil {
 			fmt.Printf("Error downloading episode: %v\n", err)
 		}
 	} else {
@@ -94,7 +95,7 @@ func processURL(client *api.Client, url string) {
 				fmt.Printf("Error fetching episodes: %v\n", err)
 				return
 			}
-			if err := download.Season(client, videoQuality, audioQuality, audioLangs, subsLangs, episodes); err != nil {
+			if err := download.Season(ctx, client, videoQuality, audioQuality, audioLangs, subsLangs, episodes); err != nil {
 				fmt.Printf("Season completed with errors: %v\n", err)
 			}
 		} else {
@@ -106,7 +107,7 @@ func processURL(client *api.Client, url string) {
 					fmt.Printf("Error fetching episodes for season %v: %v\n", season.SeasonNumber, err)
 					continue
 				}
-				if err := download.Season(client, videoQuality, audioQuality, audioLangs, subsLangs, episodes); err != nil {
+				if err := download.Season(ctx, client, videoQuality, audioQuality, audioLangs, subsLangs, episodes); err != nil {
 					fmt.Printf("Season %v completed with errors: %v\n", season.SeasonNumber, err)
 				}
 			}
@@ -115,6 +116,7 @@ func processURL(client *api.Client, url string) {
 }
 
 func main() {
+	ctx := context.Background()
 	url := flag.String("url", "", "URL of the episode/season to download")
 	urlsFile := flag.String("file", "", "Path to a text file with one URL per line")
 	flag.Parse()
@@ -151,10 +153,10 @@ func main() {
 		fmt.Printf("Found %d URLs to download\n\n", len(urls))
 		for i, u := range urls {
 			fmt.Printf("=== [%d/%d] %s ===\n", i+1, len(urls), u)
-			processURL(client, u)
+			processURL(ctx, client, u)
 			fmt.Println()
 		}
 	} else {
-		processURL(client, *url)
+		processURL(ctx, client, *url)
 	}
 }

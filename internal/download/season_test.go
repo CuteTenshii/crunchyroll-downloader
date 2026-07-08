@@ -1,6 +1,7 @@
 package download
 
 import (
+	"context"
 	"errors"
 	"testing"
 
@@ -31,8 +32,8 @@ func TestRunSeasonContinuesAfterEpisodeFailure(t *testing.T) {
 
 	firstErr := errors.New("first episode failed")
 	var calls []int
-	err := runSeason(nil, &videoQuality, &audioQuality, []string{"ja-JP"}, nil, episodes,
-		func(_ *api.Client, _ string, info *api.EpisodeInfo, _ []string, _ []string, _ *string, _ *string) error {
+	err := runSeason(context.Background(), nil, &videoQuality, &audioQuality, []string{"ja-JP"}, nil, episodes,
+		func(_ context.Context, _ *api.Client, _ string, info *api.EpisodeInfo, _ []string, _ []string, _ *string, _ *string) error {
 			calls = append(calls, info.EpisodeMetadata.EpisodeNumber)
 			if info.EpisodeMetadata.EpisodeNumber == 1 {
 				return firstErr

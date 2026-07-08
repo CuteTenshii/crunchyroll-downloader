@@ -1,13 +1,14 @@
 package download
 
 import (
+	"context"
 	"errors"
 	"fmt"
 
 	"crunchyroll-downloader/internal/api"
 )
 
-type episodeDownloader func(client *api.Client, baseContentID string, info *api.EpisodeInfo, audioLangs, subsLangs []string, videoQuality, audioQuality *string) error
+type episodeDownloader func(ctx context.Context, client *api.Client, baseContentID string, info *api.EpisodeInfo, audioLangs, subsLangs []string, videoQuality, audioQuality *string) error
 
 type SeasonError struct {
 	Failed int
@@ -23,11 +24,11 @@ func (e *SeasonError) Unwrap() error {
 	return e.err
 }
 
-func Season(client *api.Client, videoQuality, audioQuality *string, audioLangs, subsLangs []string, episodes []api.SeasonEpisode) error {
-	return runSeason(client, videoQuality, audioQuality, audioLangs, subsLangs, episodes, Episode)
+func Season(ctx context.Context, client *api.Client, videoQuality, audioQuality *string, audioLangs, subsLangs []string, episodes []api.SeasonEpisode) error {
+	return runSeason(ctx, client, videoQuality, audioQuality, audioLangs, subsLangs, episodes, Episode)
 }
 
-func runSeason(client *api.Client, videoQuality, audioQuality *string, audioLangs, subsLangs []string, episodes []api.SeasonEpisode, downloadEpisode episodeDownloader) error {
+func runSeason(ctx context.Context, client *api.Client, videoQuality, audioQuality *string, audioLangs, subsLangs []string, episodes []api.SeasonEpisode, downloadEpisode episodeDownloader) error {
 	if len(episodes) == 0 {
 		return nil
 	}
@@ -48,7 +49,7 @@ func runSeason(client *api.Client, videoQuality, audioQuality *string, audioLang
 			Title: episode.Title,
 		}
 
-		if err := downloadEpisode(client, episode.ID, info, audioLangs, subsLangs, videoQuality, audioQuality); err != nil {
+		if err := downloadEpisode(ctx, client, episode.ID, info, audioLangs, subsLangs, videoQuality, audioQuality); err != nil {
 			fmt.Printf("Error downloading episode %v: %v\n", episode.EpisodeNumber, err)
 			failures = append(failures, fmt.Errorf("episode %v: %w", episode.EpisodeNumber, err))
 		}
