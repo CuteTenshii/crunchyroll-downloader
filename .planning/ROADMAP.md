@@ -9,10 +9,11 @@
 ## Phase 1: Foundation — Error Handling, HTTP, Memory
 
 **Goal:** Eliminate crashes, reduce RAM, and fix the most dangerous bugs in the download pipeline.
+**Progress:** 1/5 Phase 1 plan files complete (01-01 completed 2026-07-08).
 
 | Plan | Req | Description |
 |------|-----|-------------|
-| 1.1 | UX-01, UX-05, QOL-10 | Replace all `panic()` with `error` returns — FFmpeg merge, API calls, file I/O |
+| 1.1 | UX-01, UX-05, QOL-10, QOL-11 | ✓ Completed 2026-07-08 — Replace all `panic()` with `error` returns — FFmpeg merge, API calls, file I/O, mux cleanup warnings |
 | 1.2 | PERF-01 | Streaming segment assembly — write segments to temp file incrementally, pass reader to `DecryptMP4Auto` |
 | 1.3 | PERF-02, PERF-03, PERF-07 | Configured HTTP transport (keep-alive, timeouts, context propagation, `MaxIdleConnsPerHost`) — also fix `DownloadPart`/`DownloadSubs` to use configured client instead of `http.DefaultClient` |
 | 1.4 | PERF-05, QOL-13 | Cache Widevine device at startup — load once, reuse across license requests; check `os.ReadDir(".")` error |
@@ -94,4 +95,4 @@
 ---
 
 *Roadmap created: 2026-07-08*
-*Last updated: 2026-07-08 after adding missing improvement requirements*
+*Last updated: 2026-07-08 after completing plan 01-01*

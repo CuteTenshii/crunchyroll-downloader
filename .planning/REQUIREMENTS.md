@@ -28,11 +28,11 @@
 
 ### User Experience (UX)
 
-- [ ] **UX-01**: All `panic()` calls replaced with proper `error` returns — network blips, API errors, and parsing failures handled gracefully instead of crashing
+- [x] **UX-01**: All `panic()` calls replaced with proper `error` returns — network blips, API errors, and parsing failures handled gracefully instead of crashing
 - [ ] **UX-02**: Season download shows `[Episode 3/24] Title — Downloading... ✓` with per-episode result and cumulative progress
 - [ ] **UX-03**: Download speed (MB/s) and estimated time remaining displayed during segment downloads
 - [ ] **UX-04**: `--quiet` flag suppresses all progress output (only errors); `--json` flag outputs machine-parseable progress events as NDJSON
-- [ ] **UX-05**: No stack traces shown to user on error — user-facing messages are clean, actionable, and suggest next steps
+- [x] **UX-05**: No stack traces shown to user on error — user-facing messages are clean, actionable, and suggest next steps
 - [ ] **UX-06**: Season/batch error accumulation — report total failed episodes at end instead of silent `continue` in `Season()`
 - [ ] **UX-07**: Graceful SIGINT/SIGTERM handling — cleanup temp files and release Crunchyroll playback streams on interrupt instead of leaving orphaned state
 - [ ] **UX-08**: Structured logging with levels (info, warn, error) and optional JSON output — replace raw `fmt.Printf` scatter
@@ -51,8 +51,8 @@
 - [ ] **QOL-07**: `sanitizeFilename` uses regex (`_{2,}` → `_`) instead of O(n²) `for strings.Contains` loop
 - [ ] **QOL-08**: `parseLangs` called once at flag parse time instead of per-URL in batch mode
 - [ ] **QOL-09**: `os.CreateTemp` errors checked and propagated — no silent discards
-- [ ] **QOL-10**: FFmpeg merge failures return `error` instead of `panic` — graceful cleanup of partial output
-- [ ] **QOL-11**: Log warnings instead of silent `_ = os.Remove()` discards in mux cleanup — propagate cleanup failures via log instead of swallowing
+- [x] **QOL-10**: FFmpeg merge failures return `error` instead of `panic` — graceful cleanup of partial output
+- [x] **QOL-11**: Log warnings instead of silent `_ = os.Remove()` discards in mux cleanup — propagate cleanup failures via log instead of swallowing
 - [ ] **QOL-12**: Fix `getFilename()` empty return when `set.Representations` is empty — guard against nil/empty adaptation set to prevent downstream panic
 - [ ] **QOL-13**: Check and propagate `os.ReadDir(".")` error in `GetWidevineDevice()` instead of silent discard with `_`
 
@@ -108,11 +108,11 @@
 | USAB-05 | Phase 3 | Pending |
 | USAB-06 | Phase 3 | Pending |
 | USAB-07 | Phase 3 | Pending |
-| UX-01 | Phase 1 | Pending |
+| UX-01 | Phase 1 | Complete |
 | UX-02 | Phase 4 | Pending |
 | UX-03 | Phase 4 | Pending |
 | UX-04 | Phase 4 | Pending |
-| UX-05 | Phase 1 | Pending |
+| UX-05 | Phase 1 | Complete |
 | UX-06 | Phase 4 | Pending |
 | UX-07 | Phase 1 | Pending |
 | UX-08 | Phase 4 | Pending |
@@ -125,8 +125,8 @@
 | QOL-07 | Phase 3 | Pending |
 | QOL-08 | Phase 3 | Pending |
 | QOL-09 | Phase 1 | Pending |
-| QOL-10 | Phase 1 | Pending |
-| QOL-11 | Phase 1 | Pending |
+| QOL-10 | Phase 1 | Complete |
+| QOL-11 | Phase 1 | Complete |
 | QOL-12 | Phase 1 | Pending |
 | QOL-13 | Phase 1 | Pending |
 
@@ -137,4 +137,4 @@
 
 ---
 *Requirements defined: 2026-07-08*
-*Last updated: 2026-07-08 after adding 9 missing improvement requirements*
+*Last updated: 2026-07-08 after completing plan 01-01*
