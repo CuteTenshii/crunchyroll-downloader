@@ -1,9 +1,37 @@
-.idea
-.DS_Store
+# === Build ===
+dist/
+crunchyroll-downloader
+crunchyroll-downloader.exe
 
-# Widevine stuff
+# === IDE / Editors ===
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# === OS ===
+.DS_Store
+Thumbs.db
+.directory
+
+# === Go ===
+vendor/
+
+# === Widevine DRM (sensitive — do not commit) ===
 *.wvd
 client_id.bin
 private_key.pem
 
+# === Downloaded media ===
 *.mkv
+*.mp4
+*.ass
+
+# === Project planning (local-only) ===
+.planning/
+
+# === GSD / AI agents ===
+.codex/
+.agents/
+.opencode/
