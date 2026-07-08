@@ -2,6 +2,7 @@ package mux
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -15,7 +16,7 @@ type MediaTrack struct {
 	Locale string
 }
 
-var ffmpegCommand = exec.Command
+var ffmpegCommand = exec.CommandContext
 
 func TrackTitle(code string) string {
 	if name, ok := loc.LanguageNames[code]; ok {
@@ -24,7 +25,11 @@ func TrackTitle(code string) string {
 	return code
 }
 
-func MergeEverything(videoFile string, audioTracks, subTracks []MediaTrack, outputFile string, info *api.EpisodeInfo) error {
+func MergeEverything(ctx context.Context, videoFile string, audioTracks, subTracks []MediaTrack, outputFile string, info *api.EpisodeInfo) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
 	args := []string{"-i", videoFile}
 	for _, audio := range audioTracks {
 		args = append(args, "-i", audio.File)
@@ -82,7 +87,7 @@ func MergeEverything(videoFile string, audioTracks, subTracks []MediaTrack, outp
 		outputFile,
 	)
 
-	cmd := ffmpegCommand("ffmpeg", args...)
+	cmd := ffmpegCommand(ctx, "ffmpeg", args...)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {

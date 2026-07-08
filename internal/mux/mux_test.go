@@ -2,6 +2,7 @@ package mux
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"os"
 	"os/exec"
@@ -20,7 +21,7 @@ func TestMergeEverythingReturnsErrorAndRemovesPartialOutputOnFFmpegFailure(t *te
 	audioFile := writeTempFile(t, dir, "audio.mp3")
 	outputFile := writeTempFile(t, dir, "partial.mkv")
 
-	err := MergeEverything(videoFile, []MediaTrack{{File: audioFile, Locale: "ja-JP"}}, nil, outputFile, testEpisodeInfo())
+	err := MergeEverything(context.Background(), videoFile, []MediaTrack{{File: audioFile, Locale: "ja-JP"}}, nil, outputFile, testEpisodeInfo())
 	if err == nil {
 		t.Fatal("MergeEverything() error = nil, want ffmpeg error")
 	}
@@ -41,7 +42,7 @@ func TestMergeEverythingWarnsButSucceedsWhenCleanupFails(t *testing.T) {
 	outputFile := filepath.Join(dir, "output.mkv")
 
 	stdout := captureStdout(t, func() {
-		err := MergeEverything(missingVideoFile, []MediaTrack{{File: audioFile, Locale: "ja-JP"}}, nil, outputFile, testEpisodeInfo())
+		err := MergeEverything(context.Background(), missingVideoFile, []MediaTrack{{File: audioFile, Locale: "ja-JP"}}, nil, outputFile, testEpisodeInfo())
 		if err != nil {
 			t.Fatalf("MergeEverything() error = %v, want nil despite cleanup warning", err)
 		}
@@ -55,7 +56,7 @@ func TestMergeEverythingWarnsButSucceedsWhenCleanupFails(t *testing.T) {
 func restoreFFmpegCommand(t *testing.T, exitCode, stderr string) {
 	t.Helper()
 	original := ffmpegCommand
-	ffmpegCommand = func(command string, args ...string) *exec.Cmd {
+	ffmpegCommand = func(ctx context.Context, command string, args ...string) *exec.Cmd {
 		cs := []string{"-test.run=TestHelperProcess", "--", command}
 		cs = append(cs, args...)
 		cmd := exec.Command(os.Args[0], cs...)

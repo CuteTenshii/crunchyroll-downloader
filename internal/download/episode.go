@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"crunchyroll-downloader/internal/api"
 	"crunchyroll-downloader/internal/drm"
@@ -91,12 +92,19 @@ func Episode(ctx context.Context, client *api.Client, baseContentID string, info
 	fmt.Printf("Downloading: %s (S%02vE%02v) from %s\n", info.Title, info.EpisodeMetadata.SeasonNumber, info.EpisodeMetadata.EpisodeNumber, info.EpisodeMetadata.SeriesTitle)
 
 	activeStreams := map[string]string{}
+	var tempFiles []string
+	completed := false
 	defer func() {
 		fmt.Print("Cleaning up...")
+		cleanupCtx, cancelCleanup := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancelCleanup()
 		for id, sToken := range activeStreams {
-			if _, err := client.DeleteStream(ctx, id, sToken); err != nil {
+			if _, err := client.DeleteStream(cleanupCtx, id, sToken); err != nil {
 				fmt.Printf("\nFailed to remove stream %s: %v\n", id, err)
 			}
+		}
+		if !completed {
+			cleanupEpisodeArtifacts(outputFile, tempFiles)
 		}
 	}()
 
@@ -131,6 +139,7 @@ func Episode(ctx context.Context, client *api.Client, baseContentID string, info
 		if err != nil {
 			return fmt.Errorf("downloading subtitles for %s: %w", locale, err)
 		}
+		tempFiles = append(tempFiles, file)
 		subTracks = append(subTracks, mux.MediaTrack{File: file, Locale: locale})
 	}
 	if len(subTracks) > 0 {
@@ -181,6 +190,7 @@ func Episode(ctx context.Context, client *api.Client, baseContentID string, info
 		if err != nil {
 			return fmt.Errorf("downloading audio for %s: %w", version.locale, err)
 		}
+		tempFiles = append(tempFiles, audioFile)
 		audioTracks = append(audioTracks, mux.MediaTrack{File: audioFile, Locale: version.locale})
 
 		if i == 0 {
@@ -194,6 +204,7 @@ func Episode(ctx context.Context, client *api.Client, baseContentID string, info
 			if err != nil {
 				return fmt.Errorf("downloading video: %w", err)
 			}
+			tempFiles = append(tempFiles, videoFile)
 		}
 
 		if success, err := client.DeleteStream(ctx, version.contentId, episode.Token); err != nil {
@@ -204,8 +215,20 @@ func Episode(ctx context.Context, client *api.Client, baseContentID string, info
 		delete(activeStreams, version.contentId)
 	}
 
-	if err := mux.MergeEverything(videoFile, audioTracks, subTracks, outputFile, info); err != nil {
+	if err := mux.MergeEverything(ctx, videoFile, audioTracks, subTracks, outputFile, info); err != nil {
 		return fmt.Errorf("muxing episode: %w", err)
 	}
+	completed = true
 	return nil
+}
+
+func cleanupEpisodeArtifacts(outputFile string, tempFiles []string) {
+	for _, path := range append(tempFiles, outputFile) {
+		if path == "" {
+			continue
+		}
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			fmt.Printf("\nWarning: failed to remove partial file %s: %v", path, err)
+		}
+	}
 }
