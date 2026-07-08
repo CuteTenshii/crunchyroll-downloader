@@ -90,21 +90,31 @@ func DownloadPart(ctx context.Context, client httpDoer, url string) ([]byte, err
 	return nil, fmt.Errorf("failed after %d retries", maxRetries)
 }
 
-func getFilename(set *mpd.AdaptationSet) string {
+func getFilename(set *mpd.AdaptationSet) (string, error) {
 	if set == nil {
-		f, _ := os.CreateTemp("", "crdl-subs-*.ass")
-		return f.Name()
+		return createTempFilename("crdl-subs-*.ass")
 	}
 	for _, representation := range set.Representations {
 		if representation.Height != nil {
-			f, _ := os.CreateTemp("", "crdl-video-*.mp4")
-			return f.Name()
+			return createTempFilename("crdl-video-*.mp4")
 		} else if representation.Bandwidth != nil {
-			f, _ := os.CreateTemp("", "crdl-audio-*.mp3")
-			return f.Name()
+			return createTempFilename("crdl-audio-*.mp3")
 		}
 	}
-	return ""
+	return "", fmt.Errorf("adaptation set has no audio or video representations")
+}
+
+func createTempFilename(pattern string) (string, error) {
+	file, err := os.CreateTemp("", pattern)
+	if err != nil {
+		return "", err
+	}
+	name := file.Name()
+	if err := file.Close(); err != nil {
+		os.Remove(name)
+		return "", err
+	}
+	return name, nil
 }
 
 func DownloadParts(ctx context.Context, client httpDoer, baseUrl, representationId *string, set *mpd.AdaptationSet, keys []*widevine.Key, workers int) (string, error) {
@@ -205,27 +215,36 @@ func DownloadParts(ctx context.Context, client httpDoer, baseUrl, representation
 
 	fmt.Println("\nFinished downloading!")
 
-	filename := getFilename(set)
+	filename, err := getFilename(set)
+	if err != nil {
+		return "", err
+	}
 	file, err := os.Create(filename)
 	if err != nil {
 		return "", err
 	}
-	defer func() {
-		if err := file.Close(); err != nil {
-			fmt.Printf("Failed to close output file %s: %v\n", filename, err)
-		}
-	}()
 
 	encryptedInput, err := os.Open(encryptedFilename)
 	if err != nil {
+		file.Close()
 		os.Remove(filename)
 		return "", err
 	}
-	defer encryptedInput.Close()
 
 	if err := widevine.DecryptMP4Auto(encryptedInput, keys, file); err != nil {
+		encryptedInput.Close()
+		file.Close()
 		os.Remove(filename)
 		return "", fmt.Errorf("widevine.DecryptMP4Auto: %w", err)
+	}
+	if err := encryptedInput.Close(); err != nil {
+		file.Close()
+		os.Remove(filename)
+		return "", err
+	}
+	if err := file.Close(); err != nil {
+		os.Remove(filename)
+		return "", err
 	}
 
 	return filename, nil
@@ -251,7 +270,10 @@ func DownloadSubs(ctx context.Context, client httpDoer, url string) (string, err
 		return "", err
 	}
 
-	filename := getFilename(nil)
+	filename, err := getFilename(nil)
+	if err != nil {
+		return "", err
+	}
 	if err := os.WriteFile(filename, body, 0644); err != nil {
 		return "", err
 	}
