@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -126,6 +127,43 @@ func TestDoReturnsErrorAfterOneFailedRefreshRetry(t *testing.T) {
 	}
 	if resourceCalls != 2 {
 		t.Fatalf("resource calls = %d, want 2", resourceCalls)
+	}
+}
+
+func TestDoReturnsErrorForNonRewindableUnauthorizedRequest(t *testing.T) {
+	var authCalls int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/auth/v1/token":
+			authCalls++
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{"access_token":"refreshed-token"}`)
+		case "/resource":
+			http.Error(w, "expired", http.StatusUnauthorized)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	client := newTestClient(server.URL)
+	req, err := client.newRequest(context.Background(), http.MethodPost, server.URL+"/resource", io.NopCloser(strings.NewReader("body")))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	resp, err := client.Do(req)
+	if resp != nil {
+		resp.Body.Close()
+	}
+	if err == nil {
+		t.Fatal("Do() error = nil, want non-rewindable retry error")
+	}
+	if !strings.Contains(err.Error(), "cannot retry request with non-rewindable body") {
+		t.Fatalf("Do() error = %q, want non-rewindable body message", err)
+	}
+	if authCalls != 1 {
+		t.Fatalf("auth calls = %d, want 1", authCalls)
 	}
 }
 

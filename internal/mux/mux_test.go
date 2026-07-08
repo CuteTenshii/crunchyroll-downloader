@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"crunchyroll-downloader/internal/api"
 )
@@ -53,13 +54,33 @@ func TestMergeEverythingWarnsButSucceedsWhenCleanupFails(t *testing.T) {
 	}
 }
 
+func TestMergeEverythingKillsFFmpegAndRemovesPartialOutputOnCancellation(t *testing.T) {
+	restoreFFmpegCommand(t, "0", "")
+
+	dir := t.TempDir()
+	videoFile := writeTempFile(t, dir, "video.mp4")
+	audioFile := writeTempFile(t, dir, "audio.mp3")
+	outputFile := writeTempFile(t, dir, "partial.mkv")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := MergeEverything(ctx, videoFile, []MediaTrack{{File: audioFile, Locale: "ja-JP"}}, nil, outputFile, testEpisodeInfo())
+	if err == nil {
+		t.Fatal("MergeEverything() error = nil, want cancellation error")
+	}
+	if _, statErr := os.Stat(outputFile); !os.IsNotExist(statErr) {
+		t.Fatalf("partial output still exists after cancellation; stat error = %v", statErr)
+	}
+}
+
 func restoreFFmpegCommand(t *testing.T, exitCode, stderr string) {
 	t.Helper()
 	original := ffmpegCommand
 	ffmpegCommand = func(ctx context.Context, command string, args ...string) *exec.Cmd {
 		cs := []string{"-test.run=TestHelperProcess", "--", command}
 		cs = append(cs, args...)
-		cmd := exec.Command(os.Args[0], cs...)
+		cmd := exec.CommandContext(ctx, os.Args[0], cs...)
 		cmd.Env = append(os.Environ(),
 			"GO_WANT_HELPER_PROCESS=1",
 			"GO_HELPER_EXIT_CODE="+exitCode,
@@ -78,6 +99,13 @@ func TestHelperProcess(t *testing.T) {
 	}
 	if msg := os.Getenv("GO_HELPER_STDERR"); msg != "" {
 		_, _ = os.Stderr.WriteString(msg)
+	}
+	if sleep := os.Getenv("GO_HELPER_SLEEP"); sleep != "" {
+		duration, err := time.ParseDuration(sleep)
+		if err != nil {
+			os.Exit(2)
+		}
+		time.Sleep(duration)
 	}
 	if os.Getenv("GO_HELPER_EXIT_CODE") == "0" {
 		os.Exit(0)

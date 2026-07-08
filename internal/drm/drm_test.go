@@ -68,6 +68,26 @@ func TestDiscoverWidevineDeviceConfigPrefersWVDFromDotEnv(t *testing.T) {
 	}
 }
 
+func TestDiscoverWidevineDeviceConfigEnvOverridesDotEnv(t *testing.T) {
+	clearWidevineEnv(t)
+	chdirTemp(t)
+
+	dotEnvPath := filepath.Join(t.TempDir(), "dotenv.wvd")
+	envPath := filepath.Join(t.TempDir(), "env.wvd")
+	writeFile(t, dotEnvPath, "dotenv")
+	writeFile(t, envPath, "env")
+	writeFile(t, widevineEnvFile, widevineDevicePathEnv+"="+dotEnvPath)
+	t.Setenv(widevineDevicePathEnv, envPath)
+
+	config, err := discoverWidevineDeviceConfig()
+	if err != nil {
+		t.Fatalf("discoverWidevineDeviceConfig() error = %v", err)
+	}
+	if config.wvdPath != envPath {
+		t.Fatalf("wvdPath = %q, want env override %q", config.wvdPath, envPath)
+	}
+}
+
 func TestLoadWidevineDeviceDoesNotFallbackWhenWVDConfigured(t *testing.T) {
 	clearWidevineEnv(t)
 	chdirTemp(t)

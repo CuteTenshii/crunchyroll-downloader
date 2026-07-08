@@ -2,6 +2,8 @@ package download
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -30,4 +32,28 @@ func TestEpisodeReturnsErrorForUnavailableAudioLocale(t *testing.T) {
 	if !strings.Contains(err.Error(), "audio locale en-US is not available") {
 		t.Fatalf("Episode() error = %q, want unavailable audio locale message", err)
 	}
+}
+
+func TestCleanupEpisodeArtifactsRemovesPartialOutputAndTempFiles(t *testing.T) {
+	dir := t.TempDir()
+	outputFile := writeEpisodeTestFile(t, dir, "partial.mkv")
+	audioFile := writeEpisodeTestFile(t, dir, "audio.mp3")
+	videoFile := writeEpisodeTestFile(t, dir, "video.mp4")
+
+	cleanupEpisodeArtifacts(outputFile, []string{audioFile, videoFile, ""})
+
+	for _, path := range []string{outputFile, audioFile, videoFile} {
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Fatalf("%s still exists after cleanup; stat error = %v", filepath.Base(path), err)
+		}
+	}
+}
+
+func writeEpisodeTestFile(t *testing.T, dir, name string) string {
+	t.Helper()
+	path := filepath.Join(dir, name)
+	if err := os.WriteFile(path, []byte("partial"), 0o600); err != nil {
+		t.Fatalf("WriteFile(%s): %v", path, err)
+	}
+	return path
 }

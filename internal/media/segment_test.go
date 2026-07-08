@@ -51,6 +51,24 @@ func TestDownloadPartUsesInjectedClient(t *testing.T) {
 	}
 }
 
+func TestDownloadPartStopsRetryBackoffWhenContextCanceled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	calls := 0
+	client := fakeDoer(func(req *http.Request) (*http.Response, error) {
+		calls++
+		cancel()
+		return nil, errors.New("temporary network failure")
+	})
+
+	_, err := DownloadPart(ctx, client, "https://media.example/segment.m4s")
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("DownloadPart() error = %v, want context.Canceled", err)
+	}
+	if calls != 1 {
+		t.Fatalf("client calls = %d, want one attempt before canceled backoff", calls)
+	}
+}
+
 func TestDownloadSubsUsesInjectedClientAndTempFile(t *testing.T) {
 	tempDir := t.TempDir()
 	t.Setenv("TMPDIR", tempDir)
