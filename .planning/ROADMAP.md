@@ -9,7 +9,7 @@
 ## Phase 1: Foundation — Error Handling, HTTP, Memory
 
 **Goal:** Eliminate crashes, reduce RAM, and fix the most dangerous bugs in the download pipeline.
-**Progress:** 4/5 Phase 1 plan files complete (01-04 completed 2026-07-08).
+**Progress:** 5/5 Phase 1 plan files complete (01-05 completed 2026-07-08).
 
 | Plan | Req | Description |
 |------|-----|-------------|
@@ -18,9 +18,9 @@
 | 1.3 | PERF-02, PERF-03, PERF-07, QOL-06 | ✓ Completed 2026-07-08 — Configured HTTP transport (keep-alive, timeouts, context propagation, `MaxIdleConnsPerHost`) — also fix `DownloadPart`/`DownloadSubs` to use configured client instead of `http.DefaultClient`; bounded 401 refresh to one retry |
 | 1.4 | PERF-05, QOL-13 | ✓ Completed 2026-07-08 — Widevine device is loaded once per process, reused across license requests, and discovered from explicit environment or `.env` paths without `os.ReadDir(".")` scanning |
 | 1.5 | QOL-02, QOL-09, QOL-12 | ✓ Completed 2026-07-08 — `--workers` flag, checked `os.CreateTemp` errors, and guarded empty adaptation sets |
-| 1.6 | QOL-01 | Test scaffolding — add `go test` infrastructure, mock HTTP server, first batch of unit tests for `media/` and `download/` |
+| 1.6 | QOL-01 | ✓ Completed 2026-07-08 — First useful test batch covers error contracts, HTTP retry/cancellation, segment assembly, Widevine discovery, cleanup/interruption, and CLI parsing |
 | 1.7 | PERF-08, QOL-11 | ✓ Completed 2026-07-08 — Closed temp handles in `getFilename()`; mux cleanup warnings were completed in 01-01 |
-| 1.8 | UX-07 | Graceful SIGINT/SIGTERM handling — cleanup temp files and release Crunchyroll streams on interrupt |
+| 1.8 | UX-07 | ✓ Completed 2026-07-08 — Graceful SIGINT/SIGTERM handling cancels active work, terminates ffmpeg, removes local partial artifacts, and releases Crunchyroll streams on interrupt |
 
 **Details:**
 - 1.1 touches every internal package — this is the most invasive change but unblocks everything else
@@ -95,4 +95,4 @@
 ---
 
 *Roadmap created: 2026-07-08*
-*Last updated: 2026-07-08 after completing plan 01-04*
+*Last updated: 2026-07-08 after completing plan 01-05*

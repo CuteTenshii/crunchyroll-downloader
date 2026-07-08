@@ -34,12 +34,12 @@
 - [ ] **UX-04**: `--quiet` flag suppresses all progress output (only errors); `--json` flag outputs machine-parseable progress events as NDJSON
 - [x] **UX-05**: No stack traces shown to user on error — user-facing messages are clean, actionable, and suggest next steps
 - [ ] **UX-06**: Season/batch error accumulation — report total failed episodes at end instead of silent `continue` in `Season()`
-- [ ] **UX-07**: Graceful SIGINT/SIGTERM handling — cleanup temp files and release Crunchyroll playback streams on interrupt instead of leaving orphaned state
+- [x] **UX-07**: Graceful SIGINT/SIGTERM handling — cleanup temp files and release Crunchyroll playback streams on interrupt instead of leaving orphaned state
 - [ ] **UX-08**: Structured logging with levels (info, warn, error) and optional JSON output — replace raw `fmt.Printf` scatter
 
 ### Quality of Life (QOL)
 
-- [ ] **QOL-01**: Test suite with:
+- [x] **QOL-01**: Test suite with:
   - Unit tests for `parseLangs`, `sanitizeFilename`, `ExpandTimeline`, `GetBaseUrl`, `BuildUrl`
   - Integration tests for `processURL` (mock HTTP server for Crunchyroll API)
   - Test coverage target ≥ 60% for `internal/media/`, `internal/download/`, `internal/locale/`
@@ -114,9 +114,9 @@
 | UX-04 | Phase 4 | Pending |
 | UX-05 | Phase 1 | Complete |
 | UX-06 | Phase 4 | Pending |
-| UX-07 | Phase 1 | Pending |
+| UX-07 | Phase 1 | Complete |
 | UX-08 | Phase 4 | Pending |
-| QOL-01 | Phase 5 | Pending |
+| QOL-01 | Phase 1 | Complete |
 | QOL-02 | Phase 1 | Complete |
 | QOL-03 | Phase 2 | Pending |
 | QOL-04 | Phase 3 | Pending |
@@ -137,4 +137,4 @@
 
 ---
 *Requirements defined: 2026-07-08*
-*Last updated: 2026-07-08 after completing plan 01-04*
+*Last updated: 2026-07-08 after completing plan 01-05*
