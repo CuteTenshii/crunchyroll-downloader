@@ -23,7 +23,7 @@ func TestEpisodeReturnsErrorForUnavailableAudioLocale(t *testing.T) {
 		Title: "Test Episode",
 	}
 
-	err := Episode(context.Background(), nil, "base-content-id", info, []string{"en-US"}, nil, &videoQuality, &audioQuality)
+	err := Episode(context.Background(), nil, "base-content-id", info, []string{"en-US"}, nil, &videoQuality, &audioQuality, 2)
 	if err == nil {
 		t.Fatal("Episode() error = nil, want unavailable audio locale error")
 	}

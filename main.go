@@ -20,6 +20,7 @@ var (
 	seasonNumber  = flag.Int("season", 0, "Season number. Not used if an episode link is entered")
 	etpRt         = flag.String("etp-rt", "", "The \"etp_rt\" cookie value of your account")
 	debug         = flag.Bool("debug-manifest", false, "Log raw episode playback JSON and manifest XML")
+	workers       = flag.Int("workers", 10, "Number of concurrent segment download workers")
 )
 
 func parseLangs(s string) []string {
@@ -67,7 +68,7 @@ func processURL(ctx context.Context, client *api.Client, url string) {
 			fmt.Printf("Error fetching episode info: %v\n", err)
 			return
 		}
-		if err := download.Episode(ctx, client, contentID, info, audioLangs, subsLangs, videoQuality, audioQuality); err != nil {
+		if err := download.Episode(ctx, client, contentID, info, audioLangs, subsLangs, videoQuality, audioQuality, *workers); err != nil {
 			fmt.Printf("Error downloading episode: %v\n", err)
 		}
 	} else {
@@ -95,7 +96,7 @@ func processURL(ctx context.Context, client *api.Client, url string) {
 				fmt.Printf("Error fetching episodes: %v\n", err)
 				return
 			}
-			if err := download.Season(ctx, client, videoQuality, audioQuality, audioLangs, subsLangs, episodes); err != nil {
+			if err := download.Season(ctx, client, videoQuality, audioQuality, audioLangs, subsLangs, episodes, *workers); err != nil {
 				fmt.Printf("Season completed with errors: %v\n", err)
 			}
 		} else {
@@ -107,7 +108,7 @@ func processURL(ctx context.Context, client *api.Client, url string) {
 					fmt.Printf("Error fetching episodes for season %v: %v\n", season.SeasonNumber, err)
 					continue
 				}
-				if err := download.Season(ctx, client, videoQuality, audioQuality, audioLangs, subsLangs, episodes); err != nil {
+				if err := download.Season(ctx, client, videoQuality, audioQuality, audioLangs, subsLangs, episodes, *workers); err != nil {
 					fmt.Printf("Season %v completed with errors: %v\n", season.SeasonNumber, err)
 				}
 			}

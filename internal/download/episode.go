@@ -29,7 +29,7 @@ func sanitizeFilename(s string) string {
 	return strings.TrimRight(res, " .")
 }
 
-func Episode(ctx context.Context, client *api.Client, baseContentID string, info *api.EpisodeInfo, audioLangs, subsLangs []string, videoQuality, audioQuality *string) error {
+func Episode(ctx context.Context, client *api.Client, baseContentID string, info *api.EpisodeInfo, audioLangs, subsLangs []string, videoQuality, audioQuality *string, workers int) error {
 	cleanSeriesTitle := sanitizeFilename(info.EpisodeMetadata.SeriesTitle)
 	cleanEpisodeTitle := sanitizeFilename(info.Title)
 
@@ -177,7 +177,7 @@ func Episode(ctx context.Context, client *api.Client, baseContentID string, info
 			return fmt.Errorf("failed to get audio base URL for %s", version.locale)
 		}
 
-		audioFile, err := media.DownloadParts(ctx, client, audioBaseUrl, audioRepresentationId, audioSet, keys)
+		audioFile, err := media.DownloadParts(ctx, client, audioBaseUrl, audioRepresentationId, audioSet, keys, workers)
 		if err != nil {
 			return fmt.Errorf("downloading audio for %s: %w", version.locale, err)
 		}
@@ -190,7 +190,7 @@ func Episode(ctx context.Context, client *api.Client, baseContentID string, info
 			if baseUrl == nil {
 				return fmt.Errorf("failed to get video base URL")
 			}
-			videoFile, err = media.DownloadParts(ctx, client, baseUrl, representationId, videoSet, keys)
+			videoFile, err = media.DownloadParts(ctx, client, baseUrl, representationId, videoSet, keys, workers)
 			if err != nil {
 				return fmt.Errorf("downloading video: %w", err)
 			}

@@ -16,7 +16,7 @@ import (
 	"github.com/unki2aut/go-mpd"
 )
 
-const maxWorkers = 10
+const defaultWorkers = 10
 
 type httpDoer interface {
 	Do(*http.Request) (*http.Response, error)
@@ -103,7 +103,11 @@ func getFilename(set *mpd.AdaptationSet) string {
 	return ""
 }
 
-func DownloadParts(ctx context.Context, client httpDoer, baseUrl, representationId *string, set *mpd.AdaptationSet, keys []*widevine.Key) (string, error) {
+func DownloadParts(ctx context.Context, client httpDoer, baseUrl, representationId *string, set *mpd.AdaptationSet, keys []*widevine.Key, workers int) (string, error) {
+	if workers <= 0 {
+		workers = defaultWorkers
+	}
+
 	initUrl := BuildUrl(*baseUrl, *representationId, *set.SegmentTemplate.Initialization, nil)
 	initData, err := DownloadPart(ctx, client, initUrl)
 	if err != nil {
@@ -120,7 +124,7 @@ func DownloadParts(ctx context.Context, client httpDoer, baseUrl, representation
 	jobs := make(chan segmentJob, total)
 	var wg sync.WaitGroup
 
-	for w := 0; w < maxWorkers; w++ {
+	for w := 0; w < workers; w++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
