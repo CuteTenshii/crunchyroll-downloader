@@ -203,6 +203,8 @@ func Episode(client *api.Client, baseContentID string, info *api.EpisodeInfo, au
 		delete(activeStreams, version.contentId)
 	}
 
-	mux.MergeEverything(videoFile, audioTracks, subTracks, outputFile, info)
+	if err := mux.MergeEverything(videoFile, audioTracks, subTracks, outputFile, info); err != nil {
+		return fmt.Errorf("muxing episode: %w", err)
+	}
 	return nil
 }

@@ -15,6 +15,8 @@ type MediaTrack struct {
 	Locale string
 }
 
+var ffmpegCommand = exec.Command
+
 func TrackTitle(code string) string {
 	if name, ok := loc.LanguageNames[code]; ok {
 		return name
@@ -22,7 +24,7 @@ func TrackTitle(code string) string {
 	return code
 }
 
-func MergeEverything(videoFile string, audioTracks, subTracks []MediaTrack, outputFile string, info *api.EpisodeInfo) {
+func MergeEverything(videoFile string, audioTracks, subTracks []MediaTrack, outputFile string, info *api.EpisodeInfo) error {
 	args := []string{"-i", videoFile}
 	for _, audio := range audioTracks {
 		args = append(args, "-i", audio.File)
@@ -80,21 +82,31 @@ func MergeEverything(videoFile string, audioTracks, subTracks []MediaTrack, outp
 		outputFile,
 	)
 
-	cmd := exec.Command("ffmpeg", args...)
+	cmd := ffmpegCommand("ffmpeg", args...)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
-		_ = os.Remove(outputFile)
-		panic(fmt.Sprintf("ffmpeg failed: %s\n%s", err, stderr.String()))
+		cleanupErr := os.Remove(outputFile)
+		if cleanupErr != nil && !os.IsNotExist(cleanupErr) {
+			return fmt.Errorf("ffmpeg failed: %w: %s; cleanup output: %v", err, stderr.String(), cleanupErr)
+		}
+		return fmt.Errorf("ffmpeg failed: %w: %s", err, stderr.String())
 	}
 
-	_ = os.Remove(videoFile)
+	warnRemove(videoFile)
 	for _, audio := range audioTracks {
-		_ = os.Remove(audio.File)
+		warnRemove(audio.File)
 	}
 	for _, sub := range subTracks {
-		_ = os.Remove(sub.File)
+		warnRemove(sub.File)
 	}
 
 	fmt.Printf("\nDownload finished! Output file: %s\n\n", outputFile)
+	return nil
+}
+
+func warnRemove(path string) {
+	if err := os.Remove(path); err != nil {
+		fmt.Printf("Warning: failed to remove temporary file %s: %v\n", path, err)
+	}
 }
