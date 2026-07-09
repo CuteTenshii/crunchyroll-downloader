@@ -23,6 +23,7 @@
 | 1.8 | UX-07 | ✓ Completed 2026-07-08 — Graceful SIGINT/SIGTERM handling cancels active work, terminates ffmpeg, removes local partial artifacts, and releases Crunchyroll streams on interrupt |
 
 **Details:**
+
 - 1.1 touches every internal package — this is the most invasive change but unblocks everything else
 - 1.2 is the highest-impact performance fix (400MB → ~64KB per-episode RAM)
 - 1.6 is intentionally last in the phase so tests can validate the refactored code
@@ -33,15 +34,16 @@
 ## Phase 2: Performance — Caching & Parallelism
 
 **Goal:** Optimize multi-dub downloads and eliminate redundant work.
-**Progress:** 3/3 Phase 2 plan files created (2026-07-08).
+**Progress:** 3/3 complete (2026-07-09).
 
 | Plan | Req | Description |
 |------|-----|-------------|
-| 2.1 | PERF-04 | ✓ Planned 2026-07-08 — MPD manifest cache (sync.RWMutex + map), wired into sequential loop, cache miss/hit/concurrent tests |
-| 2.2 | PERF-06 | ✓ Planned 2026-07-08 — errgroup parallel audio fan-out for versions [1..N], fail-fast, deferred stream cleanup, mutex-protected shared state |
-| 2.3 | QOL-03 | ✓ Planned 2026-07-08 — GetBaseUrl split into GetVideoBaseUrl/GetAudioBaseUrl with explicit switch/case bandwidth matching |
+| 2.1 | PERF-04 | ✓ Completed 2026-07-09 — MPD manifest cache (sync.RWMutex + map), wired into sequential loop, cache miss/hit/concurrent tests |
+| 2.2 | PERF-06 | ✓ Completed 2026-07-09 — errgroup parallel audio fan-out for versions [1..N], fail-fast, deferred stream cleanup, mutex-protected shared state |
+| 2.3 | QOL-03 | ✓ Completed 2026-07-09 — GetBaseUrl split into GetVideoBaseUrl/GetAudioBaseUrl with explicit switch/case bandwidth matching |
 
 **Details:**
+
 - Plans 2.1 and 2.3 are Wave 1 (independent, both modify manifest.go + episode.go)
 - Plan 2.2 is Wave 2 (depends on 2.1 for MPD cache, also benefits from 2.3 for GetAudioBaseUrl)
 - 2.2 depends on Phase 1's error handling (no `panic()` in goroutines) and PERF-05 (cached Widevine device) for concurrent license requests
@@ -51,14 +53,22 @@
 ## Phase 3: Usability — Configuration & Validation
 
 **Goal:** Better CLI ergonomics — env vars, config files, validation.
+**Plans:** 5 plans (all created 2026-07-09).
 
 | Plan | Req | Description |
 |------|-----|-------------|
-| 3.1 | USAB-01, USAB-02 | Env var support (`CRUNCHYROLL_ETP_RT`), config file (`~/.config/animeheaven/config.json`) |
-| 3.2 | USAB-03, USAB-04 | `--output-dir` flag, batch URL validation upfront |
-| 3.3 | USAB-05, USAB-06 | FFmpeg check at startup, explicit Widevine device paths |
-| 3.4 | QOL-04, QOL-05, QOL-07, QOL-08 | Fix URL validation (`&&`→`||`), `url.Parse()` instead of string split, regex sanitize, parseLangs once |
-| 3.5 | USAB-07 | Document hardcoded Basic Auth credential and add `CRUNCHYROLL_CLIENT_AUTH` env var override |
+| 3.1 | USAB-01, USAB-02 | ✓ Planned — Config infrastructure, env var support, precedence hierarchy |
+| 3.2 | USAB-03, USAB-04 | ✓ Planned — `--output-dir` flag, batch URL validation upfront |
+| 3.3 | USAB-05, USAB-06 | ✓ Planned — FFmpeg check, explicit Widevine device paths |
+| 3.4 | QOL-04, QOL-05, QOL-07, QOL-08 | ✓ Planned — URL validation fix, url.Parse(), regex sanitize, parseLangs once |
+| 3.5 | USAB-07 | ✓ Planned — CRUNCHYROLL_CLIENT_AUTH env var override |
+
+Plans:
+- [ ] 03-01-PLAN.md — Config infrastructure (internal/config package, env vars, precedence)
+- [ ] 03-02-PLAN.md — Output dir + batch URL validation
+- [ ] 03-03-PLAN.md — FFmpeg check + explicit Widevine device paths
+- [ ] 03-04-PLAN.md — Code quality fixes (URL, regex, parseLangs)
+- [ ] 03-05-PLAN.md — CRUNCHYROLL_CLIENT_AUTH env var
 
 ---
 
@@ -90,7 +100,7 @@
 | Phase | Focus | Plans | Req Count | Est. Effort |
 |-------|-------|-------|-----------|-------------|
 | 1 | Foundation (errors, HTTP, memory) | 8 | 18 | High |
-| 2 | Performance (caching, parallelism) | 3 | 3 | Medium |
+| 2 | Performance (caching, parallelism) | 3/3 | Complete    | 2026-07-09 |
 | 3 | Usability (CLI, config, validation) | 5 | 11 | Medium |
 | 4 | UX (progress, output) | 3 | 5 | Low |
 | 5 | Testing & CI | 2 | 1 | Medium |
