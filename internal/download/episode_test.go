@@ -138,6 +138,40 @@ func TestEpisodeParallelAudioZeroVersions(t *testing.T) {
 	}
 }
 
+func TestOutputDirCreatesSeriesSubfolderInOutputDir(t *testing.T) {
+	outputDir := t.TempDir()
+
+	videoQuality := "1080p"
+	audioQuality := "192k"
+	info := &api.EpisodeInfo{
+		EpisodeMetadata: api.EpisodeMetadata{
+			SeriesTitle:   "Test Series",
+			SeasonNumber:  1,
+			EpisodeNumber: 1,
+			AudioLocale:   "ja-JP",
+		},
+		Title: "Test Episode",
+	}
+
+	// Use a cancelled context so GetEpisode fails fast (no real HTTP call).
+	// The outputDir's series subfolder should be created before the API call.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	client := api.NewTestClient(nil, "https://example.com", "test-token")
+
+	err := Episode(ctx, client, "content-id", info, []string{"ja-JP"}, nil, &videoQuality, &audioQuality, 2, outputDir)
+	if err == nil {
+		t.Fatal("Episode() error = nil, want error from cancelled context (GetEpisode)")
+	}
+
+	// Verify the series subfolder was created inside outputDir
+	expectedDir := filepath.Join(outputDir, sanitizeFilename("Test Series"))
+	if _, err := os.Stat(expectedDir); os.IsNotExist(err) {
+		t.Fatalf("Episode() did not create series subfolder at %s", expectedDir)
+	}
+}
+
 func writeEpisodeTestFile(t *testing.T, dir, name string) string {
 	t.Helper()
 	path := filepath.Join(dir, name)
