@@ -4,7 +4,7 @@ type Episode struct {
 	ManifestURL string                `json:"url"`
 	Subtitles   map[string]*Subtitle  `json:"subtitles"`
 	Token       string                `json:"token"`
-	Error       *string               `json:"error"`
+	Error       any                   `json:"error"`
 }
 
 type Subtitle struct {

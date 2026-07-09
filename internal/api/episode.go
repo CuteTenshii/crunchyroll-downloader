@@ -32,7 +32,7 @@ func (c *Client) GetEpisode(ctx context.Context, id string) (*Episode, error) {
 	}
 
 	if episode.Error != nil {
-		return nil, fmt.Errorf("API error: %s", *episode.Error)
+		return nil, fmt.Errorf("API error: %v", episode.Error)
 	}
 
 	if c.Debug {
