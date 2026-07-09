@@ -33,9 +33,9 @@ Download any anime episode or full season from Crunchyroll into a single playabl
 - [ ] **PERF-01**: Streaming segment assembly — write segments incrementally instead of buffering entire video in RAM
 - [ ] **PERF-02**: HTTP connection reuse via configured transport — reduce TCP/TLS overhead per segment
 - [ ] **PERF-03**: HTTP timeouts and context propagation — prevent hangs on stalled connections
-- [ ] **PERF-04**: Cache parsed MPD manifests per contentId — avoid redundant re-fetch/re-parse for multi-dub
+- ✓ **PERF-04**: Cache parsed MPD manifests per contentId — avoid redundant re-fetch/re-parse for multi-dub (Phase 2)
 - [ ] **PERF-05**: Cache Widevine device at startup — avoid `os.ReadDir(".")` per license request
-- [ ] **PERF-06**: Concurrent manifest fetching for audio versions — parallelize independent license flows
+- ✓ **PERF-06**: Concurrent manifest fetching for audio versions — parallelize independent license flows (Phase 2)
 - [ ] **PERF-07**: Fix `http.DefaultClient` bypass in segment/subtitle downloads
 - [ ] **PERF-08**: Fix file descriptor leak in `getFilename()`
 - [ ] **USAB-01**: Support `CRUNCHYROLL_ETP_RT` environment variable for `etp_rt` cookie
@@ -55,7 +55,7 @@ Download any anime episode or full season from Crunchyroll into a single playabl
 - [ ] **UX-08**: Structured logging with levels replacing raw `fmt.Printf`
 - [ ] **QOL-01**: Add comprehensive test suite (unit + integration)
 - [ ] **QOL-02**: Configurable `--workers` flag for segment concurrency
-- [ ] **QOL-03**: Separate `GetBaseUrl` by media type instead of `isVideoSet` boolean
+- ✓ **QOL-03**: Separate `GetBaseUrl` by media type instead of `isVideoSet` boolean (Phase 2)
 - [ ] **QOL-04**: Fix URL validation bug — `&&` should be `||` in content ID length check
 - [ ] **QOL-05**: Proper URL parsing via `url.Parse()` instead of string splitting
 - [ ] **QOL-06**: Remove recursive retry in `DoRequest()` — add recursion-depth guard

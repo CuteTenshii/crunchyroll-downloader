@@ -18,13 +18,13 @@
 
 ### Usability (USAB)
 
-- [ ] **USAB-01**: `CRUNCHYROLL_ETP_RT` environment variable supported as alternative to `--etp-rt` flag (flag takes precedence when both provided)
-- [ ] **USAB-02**: Config file support at `~/.config/animeheaven/config.json` for persistent defaults (quality, langs, output dir, workers)
-- [ ] **USAB-03**: `--output-dir` flag to specify custom output directory (default: current directory / series title subfolder)
-- [ ] **USAB-04**: Batch file URLs validated upfront — report all invalid URLs before starting any downloads, instead of failing mid-batch
-- [ ] **USAB-05**: FFmpeg availability checked at startup (before any download work) — clear error if not found on `$PATH`
-- [ ] **USAB-06**: `--widevine-device` and `--widevine-key` CLI flags for explicit paths to `.wvd` / `client_id.bin` / `private_key.pem` — stop scanning CWD
-- [ ] **USAB-07**: Document hardcoded Basic Auth credential in `auth.go` (public client ID?) and support `CRUNCHYROLL_CLIENT_AUTH` env var as override — prevent breakage if Crunchyroll rotates the credential
+- [x] **USAB-01**: `CRUNCHYROLL_ETP_RT` environment variable supported as alternative to `--etp-rt` flag (flag takes precedence when both provided)
+- [x] **USAB-02**: Config file support at `~/.config/animeheaven/config.json` for persistent defaults (quality, langs, output dir, workers)
+- [x] **USAB-03**: `--output-dir` flag to specify custom output directory (default: current directory / series title subfolder)
+- [x] **USAB-04**: Batch file URLs validated upfront — report all invalid URLs before starting any downloads, instead of failing mid-batch
+- [x] **USAB-05**: FFmpeg availability checked at startup (before any download work) — clear error if not found on `$PATH`
+- [x] **USAB-06**: `--widevine-device` CLI flag for explicit path to `.wvd` file or directory with `client_id.bin` + `private_key.pem` — auto-detect format; stop scanning CWD and no longer reads `.env`
+- [x] **USAB-07**: Document hardcoded Basic Auth credential in `auth.go` (public client ID?) and support `CRUNCHYROLL_CLIENT_AUTH` env var as override — prevent breakage if Crunchyroll rotates the credential
 
 ### User Experience (UX)
 
@@ -101,13 +101,13 @@
 | PERF-06 | Phase 2 | Pending |
 | PERF-07 | Phase 1 | Complete |
 | PERF-08 | Phase 1 | Complete |
-| USAB-01 | Phase 3 | Pending |
-| USAB-02 | Phase 3 | Pending |
-| USAB-03 | Phase 3 | Pending |
-| USAB-04 | Phase 3 | Pending |
-| USAB-05 | Phase 3 | Pending |
-| USAB-06 | Phase 3 | Pending |
-| USAB-07 | Phase 3 | Pending |
+| USAB-01 | Phase 3 | Complete |
+| USAB-02 | Phase 3 | Complete |
+| USAB-03 | Phase 3 | Complete |
+| USAB-04 | Phase 3 | Complete |
+| USAB-05 | Phase 3 | Complete |
+| USAB-06 | Phase 3 | Complete |
+| USAB-07 | Phase 3 | Complete |
 | UX-01 | Phase 1 | Complete |
 | UX-02 | Phase 4 | Pending |
 | UX-03 | Phase 4 | Pending |
@@ -131,6 +131,7 @@
 | QOL-13 | Phase 1 | Complete |
 
 **Coverage:**
+
 - v1 requirements: 37 total
 - Mapped to phases: 37
 - Unmapped: 0 ✓

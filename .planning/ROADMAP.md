@@ -53,22 +53,23 @@
 ## Phase 3: Usability — Configuration & Validation
 
 **Goal:** Better CLI ergonomics — env vars, config files, validation.
-**Plans:** 5 plans (all created 2026-07-09).
+**Progress:** 5/5 complete (2026-07-09).
 
 | Plan | Req | Description |
 |------|-----|-------------|
-| 3.1 | USAB-01, USAB-02 | ✓ Planned — Config infrastructure, env var support, precedence hierarchy |
-| 3.2 | USAB-03, USAB-04 | ✓ Planned — `--output-dir` flag, batch URL validation upfront |
-| 3.3 | USAB-05, USAB-06 | ✓ Planned — FFmpeg check, explicit Widevine device paths |
-| 3.4 | QOL-04, QOL-05, QOL-07, QOL-08 | ✓ Planned — URL validation fix, url.Parse(), regex sanitize, parseLangs once |
-| 3.5 | USAB-07 | ✓ Planned — CRUNCHYROLL_CLIENT_AUTH env var override |
+| 3.1 | USAB-01, USAB-02 | ✓ Completed 2026-07-09 — Config infrastructure, env var support, precedence hierarchy |
+| 3.2 | USAB-03, USAB-04 | ✓ Completed 2026-07-09 — `--output-dir` flag, batch URL validation upfront |
+| 3.3 | USAB-05, USAB-06 | ✓ Completed 2026-07-09 — FFmpeg check, explicit Widevine device paths |
+| 3.4 | QOL-04, QOL-05, QOL-07, QOL-08 | ✓ Completed 2026-07-09 — URL validation fix, url.Parse(), regex sanitize, parseLangs once |
+| 3.5 | USAB-07 | ✓ Completed 2026-07-09 — CRUNCHYROLL_CLIENT_AUTH env var override |
 
 Plans:
-- [ ] 03-01-PLAN.md — Config infrastructure (internal/config package, env vars, precedence)
-- [ ] 03-02-PLAN.md — Output dir + batch URL validation
-- [ ] 03-03-PLAN.md — FFmpeg check + explicit Widevine device paths
-- [ ] 03-04-PLAN.md — Code quality fixes (URL, regex, parseLangs)
-- [ ] 03-05-PLAN.md — CRUNCHYROLL_CLIENT_AUTH env var
+
+- [x] 03-01-PLAN.md — Config infrastructure (internal/config package, env vars, precedence)
+- [x] 03-02-PLAN.md — Output dir + batch URL validation
+- [x] 03-03-PLAN.md — FFmpeg check + explicit Widevine device paths
+- [x] 03-04-PLAN.md — Code quality fixes (URL, regex, parseLangs)
+- [x] 03-05-PLAN.md — CRUNCHYROLL_CLIENT_AUTH env var
 
 ---
 
@@ -101,10 +102,10 @@ Plans:
 |-------|-------|-------|-----------|-------------|
 | 1 | Foundation (errors, HTTP, memory) | 8 | 18 | High |
 | 2 | Performance (caching, parallelism) | 3/3 | Complete    | 2026-07-09 |
-| 3 | Usability (CLI, config, validation) | 5 | 11 | Medium |
+| 3 | Usability (CLI, config, validation) | 5/5 | Complete    | 2026-07-09 |
 | 4 | UX (progress, output) | 3 | 5 | Low |
 | 5 | Testing & CI | 2 | 1 | Medium |
 ---
 
 *Roadmap created: 2026-07-08*
-*Last updated: 2026-07-08 after completing plan 01-05*
+*Last updated: 2026-07-09 after completing Phase 3*
