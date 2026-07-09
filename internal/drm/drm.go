@@ -1,13 +1,13 @@
 package drm
 
 import (
-	"bufio"
 	"context"
 	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 
@@ -22,7 +22,6 @@ const (
 	widevineDevicePathEnv     = "WIDEVINE_DEVICE_PATH"
 	widevineClientIDPathEnv   = "WIDEVINE_CLIENT_ID_PATH"
 	widevinePrivateKeyPathEnv = "WIDEVINE_PRIVATE_KEY_PATH"
-	widevineEnvFile           = ".env"
 )
 
 var (
@@ -30,7 +29,46 @@ var (
 	widevineDevice       *widevine.Device
 	widevineDeviceErr    error
 	widevineDeviceLoader = loadWidevineDevice
+	widevineDevicePath   string // set by SetWidevinePath before first GetWidevineDevice call
 )
+
+// SetWidevinePath sets the explicit device path from CLI/config resolution.
+// Must be called before any call to GetWidevineDevice.
+func SetWidevinePath(path string) {
+	widevineDevicePath = path
+}
+
+// DevicePathFormat indicates the type of Widevine device path provided.
+type DevicePathFormat int
+
+const (
+	FormatUnknown DevicePathFormat = iota
+	FormatWVD
+	FormatRawDir
+)
+
+// DetectDevicePath examines a path and determines its format.
+func DetectDevicePath(path string) (DevicePathFormat, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return FormatUnknown, fmt.Errorf("accessing Widevine device path: %w", err)
+	}
+
+	if info.IsDir() {
+		_, errCID := os.Stat(filepath.Join(path, "client_id.bin"))
+		_, errPk := os.Stat(filepath.Join(path, "private_key.pem"))
+		if errCID == nil && errPk == nil {
+			return FormatRawDir, nil
+		}
+		return FormatUnknown, fmt.Errorf("directory does not contain client_id.bin and private_key.pem")
+	}
+
+	if strings.HasSuffix(strings.ToLower(path), ".wvd") {
+		return FormatWVD, nil
+	}
+
+	return FormatUnknown, fmt.Errorf("unrecognized file format (expected .wvd file or directory with client_id.bin + private_key.pem)")
+}
 
 type widevineDeviceConfig struct {
 	wvdPath        string
@@ -91,24 +129,31 @@ func loadWidevineDevice() (*widevine.Device, error) {
 }
 
 func discoverWidevineDeviceConfig() (widevineDeviceConfig, error) {
-	envFileValues, err := readDotEnv(widevineEnvFile)
-	if err != nil {
-		return widevineDeviceConfig{}, err
+	// Priority: explicit path (from SetWidevinePath) > env vars (legacy names) > error
+	if widevineDevicePath != "" {
+		fmt, err := DetectDevicePath(widevineDevicePath)
+		if err != nil {
+			return widevineDeviceConfig{}, err
+		}
+		switch fmt {
+		case FormatWVD:
+			return widevineDeviceConfig{wvdPath: widevineDevicePath}, nil
+		case FormatRawDir:
+			return widevineDeviceConfig{
+				clientIDPath:   filepath.Join(widevineDevicePath, "client_id.bin"),
+				privateKeyPath: filepath.Join(widevineDevicePath, "private_key.pem"),
+			}, nil
+		}
 	}
 
-	config := widevineDeviceConfig{
-		wvdPath:        envValue(widevineDevicePathEnv, envFileValues),
-		clientIDPath:   envValue(widevineClientIDPathEnv, envFileValues),
-		privateKeyPath: envValue(widevinePrivateKeyPathEnv, envFileValues),
+	// Fallback: legacy env var names (keep per D-15)
+	if v, ok := os.LookupEnv(widevineDevicePathEnv); ok && v != "" {
+		return widevineDeviceConfig{wvdPath: v}, nil
 	}
-
-	if config.wvdPath != "" {
-		return config, nil
-	}
-
-	hasClientID := config.clientIDPath != ""
-	hasPrivateKey := config.privateKeyPath != ""
-	if hasClientID != hasPrivateKey {
+	if cid, ok := os.LookupEnv(widevineClientIDPathEnv); ok && cid != "" {
+		if pk, ok := os.LookupEnv(widevinePrivateKeyPathEnv); ok && pk != "" {
+			return widevineDeviceConfig{clientIDPath: cid, privateKeyPath: pk}, nil
+		}
 		return widevineDeviceConfig{}, fmt.Errorf("incomplete Widevine device configuration: set %s and %s together, or set %s to a .wvd file",
 			widevineClientIDPathEnv,
 			widevinePrivateKeyPathEnv,
@@ -116,61 +161,11 @@ func discoverWidevineDeviceConfig() (widevineDeviceConfig, error) {
 		)
 	}
 
-	if hasClientID && hasPrivateKey {
-		return config, nil
-	}
-
 	return widevineDeviceConfig{}, missingWidevineDeviceError()
 }
 
-func envValue(key string, envFileValues map[string]string) string {
-	if value, ok := os.LookupEnv(key); ok {
-		return strings.TrimSpace(value)
-	}
-
-	return strings.TrimSpace(envFileValues[key])
-}
-
-func readDotEnv(path string) (map[string]string, error) {
-	values := map[string]string{}
-	file, err := os.Open(path)
-	if errors.Is(err, os.ErrNotExist) {
-		return values, nil
-	}
-	if err != nil {
-		return nil, fmt.Errorf("read %s: %w", path, err)
-	}
-	defer file.Close()
-
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		line = strings.TrimPrefix(line, "export ")
-
-		key, value, ok := strings.Cut(line, "=")
-		if !ok {
-			continue
-		}
-
-		key = strings.TrimSpace(key)
-		value = strings.TrimSpace(value)
-		value = strings.Trim(value, `"'`)
-		if key != "" {
-			values[key] = value
-		}
-	}
-	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("scan %s: %w", path, err)
-	}
-
-	return values, nil
-}
-
 func missingWidevineDeviceError() error {
-	return errors.New("no Widevine device configured: set WIDEVINE_DEVICE_PATH to a .wvd file, or set WIDEVINE_CLIENT_ID_PATH and WIDEVINE_PRIVATE_KEY_PATH together")
+	return errors.New("no Widevine device configured: pass --widevine-device flag with a .wvd file or directory containing client_id.bin + private_key.pem, or set WIDEVINE_DEVICE_PATH / WIDEVINE_CLIENT_ID_PATH + WIDEVINE_PRIVATE_KEY_PATH environment variables")
 }
 
 func GetLicense(ctx context.Context, client *api.Client, psshData, contentId, videoToken string) ([]*widevine.Key, error) {
