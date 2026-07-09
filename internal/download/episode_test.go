@@ -138,6 +138,30 @@ func TestEpisodeParallelAudioZeroVersions(t *testing.T) {
 	}
 }
 
+func TestSanitizeFilenameCollapsesMultiUnderscore(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{name: "single underscore unchanged", input: "a_b", want: "a_b"},
+		{name: "double underscore collapses", input: "a__b", want: "a_b"},
+		{name: "triple underscore collapses", input: "a___b", want: "a_b"},
+		{name: "illegal chars with multi-underscore collapsed", input: "a__:__b", want: "a_b"},
+		{name: "trailing space trimmed", input: "a ", want: "a"},
+		{name: "empty returns Unknown", input: "", want: "Unknown"},
+		{name: "illegal chars become underscore", input: "a:b", want: "a_b"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := sanitizeFilename(tt.input)
+			if got != tt.want {
+				t.Fatalf("sanitizeFilename(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestOutputDirCreatesSeriesSubfolderInOutputDir(t *testing.T) {
 	outputDir := t.TempDir()
 
