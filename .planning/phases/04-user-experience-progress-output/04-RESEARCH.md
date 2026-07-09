@@ -647,11 +647,11 @@ if !isTTY {
 | A2 | `bufio.Writer` is not needed — stdout writes at 1/sec are fast enough | Don't Hand-Roll | Low — if JSON mode outputs many events at once, a buffer may help; can be added later |
 | A3 | ANSI `\033[K` (erase to end of line) works on all target terminals | Pitfalls | Low — widely supported across xterm, gnome-terminal, Windows Terminal, iTerm2, Alacritty |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
-1. **Should quiet mode suppress warnings?** D-16 says quiet mode suppresses "progress output only" and "Errors and warnings still print." The warning status line (`⚠`) is not a progress line but a logged message, so it stays. Confirmed by D-16 text.
+1. **Should quiet mode suppress warnings?** — RESOLVED: No, quiet mode only suppresses progress output per D-16. Warnings (`⚠`) and errors (`✗`) always print. Confirmed by D-16 text: "suppresses progress output only."
 
-2. **Should `--json` output go to stdout and human output to stderr?** The standard design pattern (two-stream rule) puts machine-readable output on stdout and human-readable on stderr. However, D-04/D-13 say human-friendly output with colors goes to "terminal output" (stdout by default). **Recommendation:** Human mode uses stdout (current behavior). JSON mode uses stdout for NDJSON events. This matches the current pattern and doesn't break existing usage.
+2. **Should `--json` output go to stdout and human output to stderr?** — RESOLVED: Human mode uses stdout for colored terminal output (current behavior, per D-04). JSON mode uses stdout for NDJSON events (per D-13). Stderr is reserved for crash/panic messages only. This matches the two-stream convention while preserving backwards compatibility.
 
 ## Sources
 
