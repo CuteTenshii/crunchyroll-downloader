@@ -3,9 +3,35 @@ package media
 import (
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/unki2aut/go-mpd"
 )
+
+// mpdCache is a thread-safe read-mostly cache for parsed MPD manifests.
+// Keyed by contentId, stores *mpd.MPD. No eviction (max ~5 entries per episode).
+type mpdCache struct {
+	mu    sync.RWMutex
+	items map[string]*mpd.MPD
+}
+
+var manifestCache = &mpdCache{
+	items: make(map[string]*mpd.MPD),
+}
+
+// GetCachedManifest returns the cached manifest for contentId, or nil on miss.
+func GetCachedManifest(contentId string) *mpd.MPD {
+	manifestCache.mu.RLock()
+	defer manifestCache.mu.RUnlock()
+	return manifestCache.items[contentId]
+}
+
+// SetCachedManifest stores a parsed manifest for contentId.
+func SetCachedManifest(contentId string, manifest *mpd.MPD) {
+	manifestCache.mu.Lock()
+	defer manifestCache.mu.Unlock()
+	manifestCache.items[contentId] = manifest
+}
 
 func ParseManifest(data []byte) (*mpd.MPD, error) {
 	mpd := new(mpd.MPD)
