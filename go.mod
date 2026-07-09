@@ -1,6 +1,6 @@
 module crunchyroll-downloader
 
-go 1.25
+go 1.25.0
 
 require (
 	github.com/google/uuid v1.6.0
@@ -12,5 +12,6 @@ require (
 	github.com/Eyevinn/mp4ff v0.48.0 // indirect
 	github.com/chmike/cmac-go v1.1.0 // indirect
 	github.com/unki2aut/go-xsd-types v0.0.0-20200220223938-30e5405398f8 // indirect
+	golang.org/x/sync v0.22.0 // indirect
 	google.golang.org/protobuf v1.36.2 // indirect
 )
