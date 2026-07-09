@@ -9,19 +9,185 @@ import (
 )
 
 func TestGetBaseUrlRejectsEmptyAdaptationSet(t *testing.T) {
-	baseURL, representationID := GetBaseUrl(&mpd.AdaptationSet{}, true, "1080p")
+	baseURL, representationID := GetVideoBaseUrl(&mpd.AdaptationSet{}, "1080p")
 	if baseURL != nil || representationID != nil {
-		t.Fatalf("GetBaseUrl(empty) = %v, %v; want nil, nil", baseURL, representationID)
+		t.Fatalf("GetVideoBaseUrl(empty) = %v, %v; want nil, nil", baseURL, representationID)
 	}
 }
 
 func TestGetBaseUrlSkipsMalformedRepresentation(t *testing.T) {
-	baseURL, representationID := GetBaseUrl(&mpd.AdaptationSet{
+	baseURL, representationID := GetVideoBaseUrl(&mpd.AdaptationSet{
 		Representations: []mpd.Representation{{}},
-	}, true, "1080p")
+	}, "1080p")
 	if baseURL != nil || representationID != nil {
-		t.Fatalf("GetBaseUrl(malformed) = %v, %v; want nil, nil", baseURL, representationID)
+		t.Fatalf("GetVideoBaseUrl(malformed) = %v, %v; want nil, nil", baseURL, representationID)
 	}
+}
+
+func TestGetVideoBaseUrlMatchesHeight(t *testing.T) {
+	h720 := uint64(720)
+	id720 := "vid-720"
+	h1080 := uint64(1080)
+	id1080 := "vid-1080"
+
+	set := &mpd.AdaptationSet{
+		Representations: []mpd.Representation{
+			{
+				ID:     &id720,
+				Height: &h720,
+				BaseURL: []*mpd.BaseURL{
+					{Value: "https://example.com/video/720p"},
+				},
+			},
+			{
+				ID:     &id1080,
+				Height: &h1080,
+				BaseURL: []*mpd.BaseURL{
+					{Value: "https://example.com/video/1080p"},
+				},
+			},
+		},
+	}
+
+	t.Run("matches 1080p by height", func(t *testing.T) {
+		baseURL, repID := GetVideoBaseUrl(set, "1080p")
+		if baseURL == nil || repID == nil {
+			t.Fatal("GetVideoBaseUrl(1080p) = nil, nil; want non-nil")
+		}
+		if *baseURL != "https://example.com/video/1080p" {
+			t.Fatalf("GetVideoBaseUrl(1080p) baseURL = %s; want https://example.com/video/1080p", *baseURL)
+		}
+		if *repID != "vid-1080" {
+			t.Fatalf("GetVideoBaseUrl(1080p) repID = %s; want vid-1080", *repID)
+		}
+	})
+
+	t.Run("matches 720p by height", func(t *testing.T) {
+		baseURL, repID := GetVideoBaseUrl(set, "720p")
+		if baseURL == nil || repID == nil {
+			t.Fatal("GetVideoBaseUrl(720p) = nil, nil; want non-nil")
+		}
+		if *baseURL != "https://example.com/video/720p" {
+			t.Fatalf("GetVideoBaseUrl(720p) baseURL = %s; want https://example.com/video/720p", *baseURL)
+		}
+		if *repID != "vid-720" {
+			t.Fatalf("GetVideoBaseUrl(720p) repID = %s; want vid-720", *repID)
+		}
+	})
+
+	t.Run("returns nil for unmatched height", func(t *testing.T) {
+		baseURL, repID := GetVideoBaseUrl(set, "480p")
+		if baseURL == nil || repID == nil {
+			t.Fatal("GetVideoBaseUrl(480p) = nil, nil; want fallback (first rep)")
+		}
+		if *baseURL != "https://example.com/video/720p" {
+			t.Fatalf("GetVideoBaseUrl(480p) baseURL = %s; want fallback to first rep", *baseURL)
+		}
+	})
+}
+
+func TestGetAudioBaseUrlBandwidth192k(t *testing.T) {
+	bw := uint64(200000)
+	repID := "audio-192"
+	set := &mpd.AdaptationSet{
+		Representations: []mpd.Representation{
+			{
+				ID:        &repID,
+				Bandwidth: &bw,
+				BaseURL: []*mpd.BaseURL{
+					{Value: "https://example.com/audio/192k"},
+				},
+			},
+		},
+	}
+	baseURL, rid := GetAudioBaseUrl(set, "192k")
+	if baseURL == nil || rid == nil {
+		t.Fatal("GetAudioBaseUrl(192k) = nil, nil; want non-nil")
+	}
+	if *baseURL != "https://example.com/audio/192k" {
+		t.Fatalf("GetAudioBaseUrl(192k) baseURL = %s; want https://example.com/audio/192k", *baseURL)
+	}
+}
+
+func TestGetAudioBaseUrlBandwidth128k(t *testing.T) {
+	bw := uint64(150000)
+	repID := "audio-128"
+	set := &mpd.AdaptationSet{
+		Representations: []mpd.Representation{
+			{
+				ID:        &repID,
+				Bandwidth: &bw,
+				BaseURL: []*mpd.BaseURL{
+					{Value: "https://example.com/audio/128k"},
+				},
+			},
+		},
+	}
+	baseURL, rid := GetAudioBaseUrl(set, "128k")
+	if baseURL == nil || rid == nil {
+		t.Fatal("GetAudioBaseUrl(128k) = nil, nil; want non-nil")
+	}
+	if *baseURL != "https://example.com/audio/128k" {
+		t.Fatalf("GetAudioBaseUrl(128k) baseURL = %s; want https://example.com/audio/128k", *baseURL)
+	}
+}
+
+func TestGetAudioBaseUrlBandwidth96k(t *testing.T) {
+	bw := uint64(100000)
+	repID := "audio-96"
+	set := &mpd.AdaptationSet{
+		Representations: []mpd.Representation{
+			{
+				ID:        &repID,
+				Bandwidth: &bw,
+				BaseURL: []*mpd.BaseURL{
+					{Value: "https://example.com/audio/96k"},
+				},
+			},
+		},
+	}
+	baseURL, rid := GetAudioBaseUrl(set, "96k")
+	if baseURL == nil || rid == nil {
+		t.Fatal("GetAudioBaseUrl(96k) = nil, nil; want non-nil")
+	}
+	if *baseURL != "https://example.com/audio/96k" {
+		t.Fatalf("GetAudioBaseUrl(96k) baseURL = %s; want https://example.com/audio/96k", *baseURL)
+	}
+}
+
+func TestGetAudioBaseUrlFallback(t *testing.T) {
+	repID := "fallback-rep"
+	set := &mpd.AdaptationSet{
+		Representations: []mpd.Representation{
+			{
+				ID: &repID,
+				BaseURL: []*mpd.BaseURL{
+					{Value: "https://example.com/audio/fallback"},
+				},
+				// No Bandwidth — won't match any switch case
+			},
+		},
+	}
+
+	t.Run("unmatched quality returns first representation", func(t *testing.T) {
+		baseURL, rid := GetAudioBaseUrl(set, "999k")
+		if baseURL == nil || rid == nil {
+			t.Fatal("GetAudioBaseUrl(fallback) = nil, nil; want fallback match")
+		}
+		if *baseURL != "https://example.com/audio/fallback" {
+			t.Fatalf("expected fallback URL, got %s", *baseURL)
+		}
+		if *rid != "fallback-rep" {
+			t.Fatalf("expected fallback-rep, got %s", *rid)
+		}
+	})
+
+	t.Run("empty set returns nil", func(t *testing.T) {
+		baseURL, rid := GetAudioBaseUrl(&mpd.AdaptationSet{}, "192k")
+		if baseURL != nil || rid != nil {
+			t.Fatalf("GetAudioBaseUrl(empty) = %v, %v; want nil, nil", baseURL, rid)
+		}
+	})
 }
 
 func TestMPDCacheMiss(t *testing.T) {
