@@ -33,16 +33,18 @@
 ## Phase 2: Performance — Caching & Parallelism
 
 **Goal:** Optimize multi-dub downloads and eliminate redundant work.
+**Progress:** 3/3 Phase 2 plan files created (2026-07-08).
 
 | Plan | Req | Description |
 |------|-----|-------------|
-| 2.1 | PERF-04 | Cache parsed MPD manifests per `contentId` — avoid re-fetch/re-parse for additional audio versions |
-| 2.2 | PERF-06 | Parallelize manifest fetching and license challenges across audio versions |
-| 2.3 | QOL-03 | Split `GetBaseUrl` into `GetVideoBaseUrl` and `GetAudioBaseUrl` — remove `isVideoSet` bool |
+| 2.1 | PERF-04 | ✓ Planned 2026-07-08 — MPD manifest cache (sync.RWMutex + map), wired into sequential loop, cache miss/hit/concurrent tests |
+| 2.2 | PERF-06 | ✓ Planned 2026-07-08 — errgroup parallel audio fan-out for versions [1..N], fail-fast, deferred stream cleanup, mutex-protected shared state |
+| 2.3 | QOL-03 | ✓ Planned 2026-07-08 — GetBaseUrl split into GetVideoBaseUrl/GetAudioBaseUrl with explicit switch/case bandwidth matching |
 
 **Details:**
-- 2.2 depends on Phase 1's error handling (no `panic()` in goroutines)
-- 2.2 also depends on PERF-05 (cached Widevine device) from Phase 1 — concurrent license requests need thread-safe device access
+- Plans 2.1 and 2.3 are Wave 1 (independent, both modify manifest.go + episode.go)
+- Plan 2.2 is Wave 2 (depends on 2.1 for MPD cache, also benefits from 2.3 for GetAudioBaseUrl)
+- 2.2 depends on Phase 1's error handling (no `panic()` in goroutines) and PERF-05 (cached Widevine device) for concurrent license requests
 
 ---
 
