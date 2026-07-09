@@ -42,7 +42,8 @@ func TestGetWidevineDeviceCachesLoader(t *testing.T) {
 	}
 }
 
-func TestDiscoverWidevineDeviceConfigPrefersWVDFromDotEnv(t *testing.T) {
+func TestDiscoverWidevineDeviceConfigPrefersWVD(t *testing.T) {
+	resetWidevineDeviceCache(t)
 	clearWidevineEnv(t)
 	chdirTemp(t)
 
@@ -52,11 +53,7 @@ func TestDiscoverWidevineDeviceConfigPrefersWVDFromDotEnv(t *testing.T) {
 	writeFile(t, wvdPath, "wvd")
 	writeFile(t, clientIDPath, "client")
 	writeFile(t, privateKeyPath, "key")
-	writeFile(t, widevineEnvFile, strings.Join([]string{
-		widevineDevicePathEnv + "=" + wvdPath,
-		widevineClientIDPathEnv + "=" + clientIDPath,
-		widevinePrivateKeyPathEnv + "=" + privateKeyPath,
-	}, "\n"))
+	t.Setenv(widevineDevicePathEnv, wvdPath)
 
 	config, err := discoverWidevineDeviceConfig()
 	if err != nil {
@@ -68,27 +65,38 @@ func TestDiscoverWidevineDeviceConfigPrefersWVDFromDotEnv(t *testing.T) {
 	}
 }
 
-func TestDiscoverWidevineDeviceConfigEnvOverridesDotEnv(t *testing.T) {
+func TestDiscoverWidevineDeviceConfigEnvOverrideWithSetWidevinePath(t *testing.T) {
+	resetWidevineDeviceCache(t)
 	clearWidevineEnv(t)
 	chdirTemp(t)
 
-	dotEnvPath := filepath.Join(t.TempDir(), "dotenv.wvd")
-	envPath := filepath.Join(t.TempDir(), "env.wvd")
-	writeFile(t, dotEnvPath, "dotenv")
-	writeFile(t, envPath, "env")
-	writeFile(t, widevineEnvFile, widevineDevicePathEnv+"="+dotEnvPath)
-	t.Setenv(widevineDevicePathEnv, envPath)
+	rawDir := t.TempDir()
+	writeFile(t, filepath.Join(rawDir, "client_id.bin"), "client")
+	writeFile(t, filepath.Join(rawDir, "private_key.pem"), "key")
+	wvdPath := filepath.Join(t.TempDir(), "fallback.wvd")
+	writeFile(t, wvdPath, "fallback")
+
+	// Set env var to a valid WVD path, but set explicit path via SetWidevinePath
+	t.Setenv(widevineDevicePathEnv, wvdPath)
+	SetWidevinePath(rawDir)
 
 	config, err := discoverWidevineDeviceConfig()
 	if err != nil {
 		t.Fatalf("discoverWidevineDeviceConfig() error = %v", err)
 	}
-	if config.wvdPath != envPath {
-		t.Fatalf("wvdPath = %q, want env override %q", config.wvdPath, envPath)
+	if config.wvdPath != "" {
+		t.Fatalf("wvdPath = %q, want empty (should use raw dir)", config.wvdPath)
+	}
+	if config.clientIDPath != filepath.Join(rawDir, "client_id.bin") {
+		t.Fatalf("clientIDPath = %q, want %q", config.clientIDPath, filepath.Join(rawDir, "client_id.bin"))
+	}
+	if config.privateKeyPath != filepath.Join(rawDir, "private_key.pem") {
+		t.Fatalf("privateKeyPath = %q, want %q", config.privateKeyPath, filepath.Join(rawDir, "private_key.pem"))
 	}
 }
 
 func TestLoadWidevineDeviceDoesNotFallbackWhenWVDConfigured(t *testing.T) {
+	resetWidevineDeviceCache(t)
 	clearWidevineEnv(t)
 	chdirTemp(t)
 
@@ -130,6 +138,7 @@ func TestDiscoverWidevineDeviceConfigRequiresRawPairTogether(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			resetWidevineDeviceCache(t)
 			clearWidevineEnv(t)
 			chdirTemp(t)
 			for key, value := range tt.env {
@@ -148,6 +157,7 @@ func TestDiscoverWidevineDeviceConfigRequiresRawPairTogether(t *testing.T) {
 }
 
 func TestDiscoverWidevineDeviceConfigAcceptsRawPair(t *testing.T) {
+	resetWidevineDeviceCache(t)
 	clearWidevineEnv(t)
 	chdirTemp(t)
 
@@ -166,6 +176,7 @@ func TestDiscoverWidevineDeviceConfigAcceptsRawPair(t *testing.T) {
 }
 
 func TestDiscoverWidevineDeviceConfigMissingDeviceError(t *testing.T) {
+	resetWidevineDeviceCache(t)
 	clearWidevineEnv(t)
 	chdirTemp(t)
 
@@ -173,10 +184,124 @@ func TestDiscoverWidevineDeviceConfigMissingDeviceError(t *testing.T) {
 	if err == nil {
 		t.Fatal("discoverWidevineDeviceConfig() error = nil, want missing config error")
 	}
-	for _, want := range []string{widevineDevicePathEnv, widevineClientIDPathEnv, widevinePrivateKeyPathEnv} {
+	for _, want := range []string{"--widevine-device", "WIDEVINE_DEVICE_PATH", "WIDEVINE_CLIENT_ID_PATH", "WIDEVINE_PRIVATE_KEY_PATH"} {
 		if !strings.Contains(err.Error(), want) {
-			t.Fatalf("discoverWidevineDeviceConfig() error = %q, want %s", err, want)
+			t.Fatalf("discoverWidevineDeviceConfig() error = %q, want %q", err, want)
 		}
+	}
+}
+
+func TestDetectDevicePathAcceptsWVD(t *testing.T) {
+	wvdPath := filepath.Join(t.TempDir(), "device.wvd")
+	writeFile(t, wvdPath, "some-wvd-content")
+
+	format, err := DetectDevicePath(wvdPath)
+	if err != nil {
+		t.Fatalf("DetectDevicePath() error = %v", err)
+	}
+	if format != FormatWVD {
+		t.Fatalf("format = %d, want FormatWVD (%d)", format, FormatWVD)
+	}
+}
+
+func TestDetectDevicePathAcceptsRawDir(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "client_id.bin"), "client")
+	writeFile(t, filepath.Join(dir, "private_key.pem"), "key")
+
+	format, err := DetectDevicePath(dir)
+	if err != nil {
+		t.Fatalf("DetectDevicePath() error = %v", err)
+	}
+	if format != FormatRawDir {
+		t.Fatalf("format = %d, want FormatRawDir (%d)", format, FormatRawDir)
+	}
+}
+
+func TestDetectDevicePathRejectsMissingPath(t *testing.T) {
+	_, err := DetectDevicePath("/nonexistent/path/device.wvd")
+	if err == nil {
+		t.Fatal("DetectDevicePath() error = nil, want error for missing path")
+	}
+	if !strings.Contains(err.Error(), "accessing Widevine device path") {
+		t.Fatalf("DetectDevicePath() error = %q, want 'accessing Widevine device path'", err)
+	}
+}
+
+func TestDetectDevicePathRejectsPlainFile(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "notes.txt"), "hello")
+
+	_, err := DetectDevicePath(filepath.Join(dir, "notes.txt"))
+	if err == nil {
+		t.Fatal("DetectDevicePath() error = nil, want error for unrecognized file")
+	}
+	if !strings.Contains(err.Error(), "unrecognized file format") {
+		t.Fatalf("DetectDevicePath() error = %q, want 'unrecognized file format'", err)
+	}
+}
+
+func TestDetectDevicePathRejectsEmptyDir(t *testing.T) {
+	dir := t.TempDir()
+
+	_, err := DetectDevicePath(dir)
+	if err == nil {
+		t.Fatal("DetectDevicePath() error = nil, want error for empty directory")
+	}
+	if !strings.Contains(err.Error(), "does not contain client_id.bin") {
+		t.Fatalf("DetectDevicePath() error = %q, want 'does not contain client_id.bin'", err)
+	}
+}
+
+func TestSetWidevinePathOverridesEnvVars(t *testing.T) {
+	resetWidevineDeviceCache(t)
+	clearWidevineEnv(t)
+	chdirTemp(t)
+
+	// Create a raw dir to use via SetWidevinePath
+	rawDir := t.TempDir()
+	writeFile(t, filepath.Join(rawDir, "client_id.bin"), "client")
+	writeFile(t, filepath.Join(rawDir, "private_key.pem"), "key")
+
+	// Create a WVD file to use as env var (should be ignored)
+	wvdPath := filepath.Join(t.TempDir(), "ignored.wvd")
+	writeFile(t, wvdPath, "ignored")
+	t.Setenv(widevineDevicePathEnv, wvdPath)
+
+	// Set explicit path — should take priority
+	SetWidevinePath(rawDir)
+
+	config, err := discoverWidevineDeviceConfig()
+	if err != nil {
+		t.Fatalf("discoverWidevineDeviceConfig() error = %v", err)
+	}
+	if config.clientIDPath != filepath.Join(rawDir, "client_id.bin") {
+		t.Fatalf("clientIDPath = %q, want %q", config.clientIDPath, filepath.Join(rawDir, "client_id.bin"))
+	}
+	if config.privateKeyPath != filepath.Join(rawDir, "private_key.pem") {
+		t.Fatalf("privateKeyPath = %q, want %q", config.privateKeyPath, filepath.Join(rawDir, "private_key.pem"))
+	}
+}
+
+func TestSetWidevinePathWVDOverridesEnvVars(t *testing.T) {
+	resetWidevineDeviceCache(t)
+	clearWidevineEnv(t)
+	chdirTemp(t)
+
+	wvdPath := filepath.Join(t.TempDir(), "device.wvd")
+	writeFile(t, wvdPath, "wvd-content")
+	envPath := filepath.Join(t.TempDir(), "env.wvd")
+	writeFile(t, envPath, "env-content")
+	t.Setenv(widevineDevicePathEnv, envPath)
+
+	SetWidevinePath(wvdPath)
+
+	config, err := discoverWidevineDeviceConfig()
+	if err != nil {
+		t.Fatalf("discoverWidevineDeviceConfig() error = %v", err)
+	}
+	if config.wvdPath != wvdPath {
+		t.Fatalf("wvdPath = %q, want %q", config.wvdPath, wvdPath)
 	}
 }
 
@@ -184,15 +309,18 @@ func resetWidevineDeviceCache(t *testing.T) {
 	t.Helper()
 
 	originalLoader := widevineDeviceLoader
+	originalPath := widevineDevicePath
 	widevineDeviceOnce = sync.Once{}
 	widevineDevice = nil
 	widevineDeviceErr = nil
+	widevineDevicePath = ""
 
 	t.Cleanup(func() {
 		widevineDeviceOnce = sync.Once{}
 		widevineDevice = nil
 		widevineDeviceErr = nil
 		widevineDeviceLoader = originalLoader
+		widevineDevicePath = originalPath
 	})
 }
 
