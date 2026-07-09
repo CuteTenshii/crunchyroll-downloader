@@ -11,7 +11,7 @@ import (
 
 func TestProcessURLRejectsInvalidContentIDLength(t *testing.T) {
 	output := captureMainStdout(t, func() {
-		processURL(context.Background(), nil, "https://www.crunchyroll.com/watch/short/title")
+		processURL(context.Background(), nil, "https://www.crunchyroll.com/watch/short/title", "")
 	})
 
 	if !strings.Contains(output, "Invalid URL format") {
@@ -21,7 +21,7 @@ func TestProcessURLRejectsInvalidContentIDLength(t *testing.T) {
 
 func TestProcessURLRejectsUnsupportedContentType(t *testing.T) {
 	output := captureMainStdout(t, func() {
-		processURL(context.Background(), nil, "https://www.crunchyroll.com/browse/G123456789/title")
+		processURL(context.Background(), nil, "https://www.crunchyroll.com/browse/G123456789/title", "")
 	})
 
 	if !strings.Contains(output, "Invalid URL (must be /watch/ or /series/)") {

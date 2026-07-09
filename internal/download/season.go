@@ -8,7 +8,7 @@ import (
 	"crunchyroll-downloader/internal/api"
 )
 
-type episodeDownloader func(ctx context.Context, client *api.Client, baseContentID string, info *api.EpisodeInfo, audioLangs, subsLangs []string, videoQuality, audioQuality *string, workers int) error
+type episodeDownloader func(ctx context.Context, client *api.Client, baseContentID string, info *api.EpisodeInfo, audioLangs, subsLangs []string, videoQuality, audioQuality *string, workers int, outputDir string) error
 
 type SeasonError struct {
 	Failed int
@@ -24,11 +24,11 @@ func (e *SeasonError) Unwrap() error {
 	return e.err
 }
 
-func Season(ctx context.Context, client *api.Client, videoQuality, audioQuality *string, audioLangs, subsLangs []string, episodes []api.SeasonEpisode, workers int) error {
-	return runSeason(ctx, client, videoQuality, audioQuality, audioLangs, subsLangs, episodes, workers, Episode)
+func Season(ctx context.Context, client *api.Client, videoQuality, audioQuality *string, audioLangs, subsLangs []string, episodes []api.SeasonEpisode, workers int, outputDir string) error {
+	return runSeason(ctx, client, videoQuality, audioQuality, audioLangs, subsLangs, episodes, workers, outputDir, Episode)
 }
 
-func runSeason(ctx context.Context, client *api.Client, videoQuality, audioQuality *string, audioLangs, subsLangs []string, episodes []api.SeasonEpisode, workers int, downloadEpisode episodeDownloader) error {
+func runSeason(ctx context.Context, client *api.Client, videoQuality, audioQuality *string, audioLangs, subsLangs []string, episodes []api.SeasonEpisode, workers int, outputDir string, downloadEpisode episodeDownloader) error {
 	if len(episodes) == 0 {
 		return nil
 	}
@@ -49,7 +49,7 @@ func runSeason(ctx context.Context, client *api.Client, videoQuality, audioQuali
 			Title: episode.Title,
 		}
 
-		if err := downloadEpisode(ctx, client, episode.ID, info, audioLangs, subsLangs, videoQuality, audioQuality, workers); err != nil {
+		if err := downloadEpisode(ctx, client, episode.ID, info, audioLangs, subsLangs, videoQuality, audioQuality, workers, outputDir); err != nil {
 			fmt.Printf("Error downloading episode %v: %v\n", episode.EpisodeNumber, err)
 			failures = append(failures, fmt.Errorf("episode %v: %w", episode.EpisodeNumber, err))
 		}

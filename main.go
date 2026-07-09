@@ -38,7 +38,7 @@ func parseLangs(s string) []string {
 	return out
 }
 
-func processURL(ctx context.Context, client *api.Client, url string) {
+func processURL(ctx context.Context, client *api.Client, url string, outputDir string) {
 	parts := strings.Split(url, "/")
 	if len(parts) < 5 {
 		fmt.Printf("Invalid URL format: %s\n", url)
@@ -73,7 +73,7 @@ func processURL(ctx context.Context, client *api.Client, url string) {
 			fmt.Printf("Error fetching episode info: %v\n", err)
 			return
 		}
-		if err := download.Episode(ctx, client, contentID, info, audioLangs, subsLangs, videoQuality, audioQuality, *workers); err != nil {
+		if err := download.Episode(ctx, client, contentID, info, audioLangs, subsLangs, videoQuality, audioQuality, *workers, outputDir); err != nil {
 			fmt.Printf("Error downloading episode: %v\n", err)
 		}
 	} else {
@@ -101,7 +101,7 @@ func processURL(ctx context.Context, client *api.Client, url string) {
 				fmt.Printf("Error fetching episodes: %v\n", err)
 				return
 			}
-			if err := download.Season(ctx, client, videoQuality, audioQuality, audioLangs, subsLangs, episodes, *workers); err != nil {
+			if err := download.Season(ctx, client, videoQuality, audioQuality, audioLangs, subsLangs, episodes, *workers, outputDir); err != nil {
 				fmt.Printf("Season completed with errors: %v\n", err)
 			}
 		} else {
@@ -113,7 +113,7 @@ func processURL(ctx context.Context, client *api.Client, url string) {
 					fmt.Printf("Error fetching episodes for season %v: %v\n", season.SeasonNumber, err)
 					continue
 				}
-				if err := download.Season(ctx, client, videoQuality, audioQuality, audioLangs, subsLangs, episodes, *workers); err != nil {
+				if err := download.Season(ctx, client, videoQuality, audioQuality, audioLangs, subsLangs, episodes, *workers, outputDir); err != nil {
 					fmt.Printf("Season %v completed with errors: %v\n", season.SeasonNumber, err)
 				}
 			}
@@ -218,7 +218,19 @@ func main() {
 		os.Exit(1)
 	}
 	client.Debug = *debug
-	_ = resolvedOutputDir // Will be wired in Plan 3.2
+	// Validate output directory exists if specified (D-11)
+	if resolvedOutputDir != "" {
+		if fi, err := os.Stat(resolvedOutputDir); os.IsNotExist(err) {
+			fmt.Printf("Output directory %s does not exist. Create it first or omit --output-dir to use the current directory.\n", resolvedOutputDir)
+			os.Exit(1)
+		} else if err != nil {
+			fmt.Printf("Error accessing output directory %s: %v\n", resolvedOutputDir, err)
+			os.Exit(1)
+		} else if !fi.IsDir() {
+			fmt.Printf("Output directory %s is not a directory.\n", resolvedOutputDir)
+			os.Exit(1)
+		}
+	}
 
 	if *urlsFile != "" {
 		file, err := os.Open(*urlsFile)
@@ -240,10 +252,10 @@ func main() {
 		fmt.Printf("Found %d URLs to download\n\n", len(urls))
 		for i, u := range urls {
 			fmt.Printf("=== [%d/%d] %s ===\n", i+1, len(urls), u)
-			processURL(ctx, client, u)
+			processURL(ctx, client, u, resolvedOutputDir)
 			fmt.Println()
 		}
 	} else {
-		processURL(ctx, client, *url)
+		processURL(ctx, client, *url, resolvedOutputDir)
 	}
 }

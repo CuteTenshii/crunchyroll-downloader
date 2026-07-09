@@ -33,15 +33,20 @@ func sanitizeFilename(s string) string {
 	return strings.TrimRight(res, " .")
 }
 
-func Episode(ctx context.Context, client *api.Client, baseContentID string, info *api.EpisodeInfo, audioLangs, subsLangs []string, videoQuality, audioQuality *string, workers int) error {
+func Episode(ctx context.Context, client *api.Client, baseContentID string, info *api.EpisodeInfo, audioLangs, subsLangs []string, videoQuality, audioQuality *string, workers int, outputDir string) error {
 	cleanSeriesTitle := sanitizeFilename(info.EpisodeMetadata.SeriesTitle)
 	cleanEpisodeTitle := sanitizeFilename(info.Title)
 
-	if err := os.MkdirAll(cleanSeriesTitle, 0777); err != nil {
+	outputBase := cleanSeriesTitle
+	if outputDir != "" {
+		outputBase = filepath.Join(outputDir, cleanSeriesTitle)
+	}
+
+	if err := os.MkdirAll(outputBase, 0777); err != nil {
 		return fmt.Errorf("creating output directory: %w", err)
 	}
 
-	outputFile := filepath.Join(cleanSeriesTitle, fmt.Sprintf("%s S%02dE%02d - %s [%s].mkv",
+	outputFile := filepath.Join(outputBase, fmt.Sprintf("%s S%02dE%02d - %s [%s].mkv",
 		cleanSeriesTitle,
 		info.EpisodeMetadata.SeasonNumber,
 		info.EpisodeMetadata.EpisodeNumber,
