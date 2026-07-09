@@ -18,6 +18,9 @@ Thumbs.db
 # === Go ===
 vendor/
 
+# === Environment variables ===
+.env
+
 # === Widevine DRM (sensitive — do not commit) ===
 *.wvd
 client_id.bin
@@ -32,3 +35,4 @@ private_key.pem
 .codex/
 .agents/
 .opencode/
+.serena/
