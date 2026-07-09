@@ -101,7 +101,7 @@ func validateAllURLs(urls []string) []invalidURL {
 	return invalid
 }
 
-func processURL(ctx context.Context, client *api.Client, rawURL string, outputDir string) {
+func processURL(ctx context.Context, client *api.Client, rawURL string, outputDir string, audioLangs, subsLangs []string) {
 	parsed, err := url.Parse(rawURL)
 	if err != nil {
 		fmt.Printf("Invalid URL: %v\n", err)
@@ -124,11 +124,9 @@ func processURL(ctx context.Context, client *api.Client, rawURL string, outputDi
 		return
 	}
 
-	audioLangs := parseLangs(*audioLang)
 	if len(audioLangs) == 0 {
 		audioLangs = []string{"ja-JP"}
 	}
-	subsLangs := parseLangs(*subtitlesLang)
 
 	primaryAudio := audioLangs[0]
 	primarySubs := "en-US"
@@ -303,6 +301,10 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Parse language flags once after config resolution (QOL-08, D-22)
+	audioLangs := parseLangs(*audioLang)
+	subsLangs := parseLangs(*subtitlesLang)
+
 	// Resolve Widevine device path through precedence and set it before
 	// any API client call, ensuring sync.Once uses the correct path.
 	resolvedWidevineDev := resolveString(explicitFlags, "widevine-device", *widevineDev, "WIDEVINE_DEVICE_PATH", cfg.WidevineDevice, "")
@@ -351,10 +353,10 @@ func main() {
 		fmt.Printf("Found %d URLs to download\n\n", len(urls))
 		for i, u := range urls {
 			fmt.Printf("=== [%d/%d] %s ===\n", i+1, len(urls), u)
-			processURL(ctx, client, u, resolvedOutputDir)
+			processURL(ctx, client, u, resolvedOutputDir, audioLangs, subsLangs)
 			fmt.Println()
 		}
 	} else {
-		processURL(ctx, client, *url, resolvedOutputDir)
+		processURL(ctx, client, *url, resolvedOutputDir, audioLangs, subsLangs)
 	}
 }
