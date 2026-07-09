@@ -11,6 +11,7 @@ import (
 	"syscall"
 
 	"crunchyroll-downloader/internal/api"
+	"crunchyroll-downloader/internal/config"
 	"crunchyroll-downloader/internal/download"
 )
 
@@ -23,6 +24,8 @@ var (
 	etpRt         = flag.String("etp-rt", "", "The \"etp_rt\" cookie value of your account")
 	debug         = flag.Bool("debug-manifest", false, "Log raw episode playback JSON and manifest XML")
 	workers       = flag.Int("workers", 10, "Number of concurrent segment download workers")
+	outputDir     = flag.String("output-dir", "", "Custom output directory for downloads")
+	widevineDev   = flag.String("widevine-device", "", "Path to .wvd file or directory with client_id.bin + private_key.pem")
 )
 
 func parseLangs(s string) []string {
@@ -118,6 +121,50 @@ func processURL(ctx context.Context, client *api.Client, url string) {
 	}
 }
 
+// isAllNilConfig returns true if all pointer fields in cfg are nil,
+// indicating the config file did not exist or was empty.
+func isAllNilConfig(cfg *config.Config) bool {
+	return cfg.AudioLang == nil &&
+		cfg.SubsLang == nil &&
+		cfg.VideoQuality == nil &&
+		cfg.AudioQuality == nil &&
+		cfg.Workers == nil &&
+		cfg.OutputDir == nil &&
+		cfg.EtpRt == nil &&
+		cfg.WidevineDevice == nil
+}
+
+// resolveString resolves a string value through the precedence hierarchy:
+// explicit CLI flag > env var > config value > default value.
+// The explicitFlags map should be built via flag.Visit().
+func resolveString(explicitFlags map[string]bool, flagName string, flagVal string, envName string, configVal *string, defaultVal string) string {
+	if explicitFlags[flagName] {
+		return flagVal
+	}
+	if v, ok := os.LookupEnv(envName); ok && v != "" {
+		return v
+	}
+	if configVal != nil && *configVal != "" {
+		return *configVal
+	}
+	return defaultVal
+}
+
+// resolveEtpRt resolves the etp_rt value through the precedence hierarchy:
+// explicit --etp-rt CLI flag > CRUNCHYROLL_ETP_RT env var > config file value.
+func resolveEtpRt(explicitFlags map[string]bool, flagVal string, configVal *string) string {
+	if explicitFlags["etp-rt"] && flagVal != "" {
+		return flagVal
+	}
+	if v, ok := os.LookupEnv("CRUNCHYROLL_ETP_RT"); ok && v != "" {
+		return v
+	}
+	if configVal != nil && *configVal != "" {
+		return *configVal
+	}
+	return ""
+}
+
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -131,12 +178,47 @@ func main() {
 		os.Exit(1)
 	}
 
-	client, err := api.NewWithContext(ctx, *etpRt)
+	// Track explicitly-set flags via flag.Visit()
+	explicitFlags := make(map[string]bool)
+	flag.Visit(func(f *flag.Flag) {
+		explicitFlags[f.Name] = true
+	})
+
+	// Resolve config path
+	cfgPath, err := config.ConfigPath()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: cannot determine config path: %v — skipping config file\n", err)
+	}
+
+	// Load config (if config path was resolved)
+	cfg := &config.Config{}
+	if err == nil {
+		cfg, err = config.Load(cfgPath)
+		if err != nil {
+			// Invalid JSON: warn and continue with defaults
+			fmt.Fprintf(os.Stderr, "Warning: %v — using defaults\n", err)
+			cfg = &config.Config{}
+		} else if isAllNilConfig(cfg) {
+			// Config file does not exist: create skeleton
+			if err := config.WriteSkeleton(cfgPath); err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: could not create default config: %v\n", err)
+			} else {
+				fmt.Printf("Created default config at %s\n", cfgPath)
+			}
+		}
+	}
+
+	// Resolve precedence: CLI flag > env var > config file > default
+	resolvedEtpRt := resolveEtpRt(explicitFlags, *etpRt, cfg.EtpRt)
+	resolvedOutputDir := resolveString(explicitFlags, "output-dir", *outputDir, "", cfg.OutputDir, "")
+
+	client, err := api.NewWithContext(ctx, resolvedEtpRt)
 	if err != nil {
 		fmt.Printf("Failed to initialize API client: %v\n", err)
 		os.Exit(1)
 	}
 	client.Debug = *debug
+	_ = resolvedOutputDir // Will be wired in Plan 3.2
 
 	if *urlsFile != "" {
 		file, err := os.Open(*urlsFile)

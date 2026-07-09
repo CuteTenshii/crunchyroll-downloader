@@ -29,6 +29,49 @@ func TestProcessURLRejectsUnsupportedContentType(t *testing.T) {
 	}
 }
 
+func TestResolveEtpRtPrefersFlag(t *testing.T) {
+	flags := map[string]bool{"etp-rt": true}
+	result := resolveEtpRt(flags, "my-cookie", nil)
+	if result != "my-cookie" {
+		t.Fatalf("resolveEtpRt() = %q, want 'my-cookie'", result)
+	}
+}
+
+func TestResolveEtpRtPrefersFlagOverEnv(t *testing.T) {
+	t.Setenv("CRUNCHYROLL_ETP_RT", "env-cookie")
+	flags := map[string]bool{"etp-rt": true}
+	result := resolveEtpRt(flags, "flag-cookie", nil)
+	if result != "flag-cookie" {
+		t.Fatalf("resolveEtpRt() = %q, want 'flag-cookie'", result)
+	}
+}
+
+func TestResolveEtpRtFallsBackToEnv(t *testing.T) {
+	t.Setenv("CRUNCHYROLL_ETP_RT", "env-cookie")
+	flags := map[string]bool{} // etp-rt not explicitly set
+	result := resolveEtpRt(flags, "", nil)
+	if result != "env-cookie" {
+		t.Fatalf("resolveEtpRt() = %q, want 'env-cookie'", result)
+	}
+}
+
+func TestResolveEtpRtFallsBackToConfig(t *testing.T) {
+	configVal := "config-cookie"
+	flags := map[string]bool{} // etp-rt not explicitly set
+	result := resolveEtpRt(flags, "", &configVal)
+	if result != "config-cookie" {
+		t.Fatalf("resolveEtpRt() = %q, want 'config-cookie'", result)
+	}
+}
+
+func TestResolveEtpRtReturnsEmptyWhenUnset(t *testing.T) {
+	flags := map[string]bool{}
+	result := resolveEtpRt(flags, "", nil)
+	if result != "" {
+		t.Fatalf("resolveEtpRt() = %q, want ''", result)
+	}
+}
+
 func captureMainStdout(t *testing.T, fn func()) string {
 	t.Helper()
 
