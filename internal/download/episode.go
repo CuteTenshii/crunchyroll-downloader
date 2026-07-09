@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"crunchyroll-downloader/internal/api"
@@ -14,6 +15,7 @@ import (
 	"crunchyroll-downloader/internal/media"
 	"crunchyroll-downloader/internal/mux"
 	"github.com/unki2aut/go-mpd"
+	"golang.org/x/sync/errgroup"
 )
 
 func sanitizeFilename(s string) string {
@@ -150,79 +152,135 @@ func Episode(ctx context.Context, client *api.Client, baseContentID string, info
 	var videoFile string
 	var audioTracks []mux.MediaTrack
 
-	for i, version := range versions {
-		episode := firstEpisode
-		if i > 0 {
-			episode, err = client.GetEpisode(ctx, version.contentId)
-			if err != nil {
-				return fmt.Errorf("fetching episode for %s: %w", version.locale, err)
-			}
-			activeStreams[version.contentId] = episode.Token
-		}
+	// ===== Phase A: Video + first audio (sequential, i==0) =====
+	version := versions[0]
 
-		var manifest *mpd.MPD
-		if i > 0 {
-			manifest = media.GetCachedManifest(version.contentId)
-		}
-		if manifest == nil {
-			manifestData, err := client.FetchManifest(ctx, episode.ManifestURL)
-			if err != nil {
-				return fmt.Errorf("fetching manifest for %s: %w", version.locale, err)
-			}
-
-			manifest, err = media.ParseManifest(manifestData)
-			if err != nil {
-				return fmt.Errorf("parsing manifest for %s: %w", version.locale, err)
-			}
-
-			media.SetCachedManifest(version.contentId, manifest)
-		}
-
-		pssh := drm.GetPssh(manifest)
-		if pssh == nil {
-			return fmt.Errorf("PSSH not found for %s", version.locale)
-		}
-
-		keys, err := drm.GetLicense(ctx, client, *pssh, version.contentId, episode.Token)
-		if err != nil {
-			return fmt.Errorf("getting license for %s: %w", version.locale, err)
-		}
-
-		audioSet := manifest.Period[0].AdaptationSets[1]
-		fmt.Printf("Downloading %s audio...\n", mux.TrackTitle(version.locale))
-		audioBaseUrl, audioRepresentationId := media.GetAudioBaseUrl(audioSet, *audioQuality)
-		if audioBaseUrl == nil {
-			return fmt.Errorf("failed to get audio base URL for %s", version.locale)
-		}
-
-		audioFile, err := media.DownloadParts(ctx, client, audioBaseUrl, audioRepresentationId, audioSet, keys, workers)
-		if err != nil {
-			return fmt.Errorf("downloading audio for %s: %w", version.locale, err)
-		}
-		tempFiles = append(tempFiles, audioFile)
-		audioTracks = append(audioTracks, mux.MediaTrack{File: audioFile, Locale: version.locale})
-
-		if i == 0 {
-			videoSet := manifest.Period[0].AdaptationSets[0]
-			fmt.Println("Downloading video...")
-			baseUrl, representationId := media.GetVideoBaseUrl(videoSet, *videoQuality)
-			if baseUrl == nil {
-				return fmt.Errorf("failed to get video base URL")
-			}
-			videoFile, err = media.DownloadParts(ctx, client, baseUrl, representationId, videoSet, keys, workers)
-			if err != nil {
-				return fmt.Errorf("downloading video: %w", err)
-			}
-			tempFiles = append(tempFiles, videoFile)
-		}
-
-		if success, err := client.DeleteStream(ctx, version.contentId, episode.Token); err != nil {
-			fmt.Printf("Failed to remove stream %s: %v\n", version.contentId, err)
-		} else if !success {
-			fmt.Print("Failed to remove the player stream, you will probably have issues downloading other episodes.\n")
-		}
-		delete(activeStreams, version.contentId)
+	var manifest *mpd.MPD
+	manifestData, err := client.FetchManifest(ctx, firstEpisode.ManifestURL)
+	if err != nil {
+		return fmt.Errorf("fetching manifest for %s: %w", version.locale, err)
 	}
+
+	manifest, err = media.ParseManifest(manifestData)
+	if err != nil {
+		return fmt.Errorf("parsing manifest for %s: %w", version.locale, err)
+	}
+	media.SetCachedManifest(version.contentId, manifest)
+
+	pssh := drm.GetPssh(manifest)
+	if pssh == nil {
+		return fmt.Errorf("PSSH not found for %s", version.locale)
+	}
+
+	keys, err := drm.GetLicense(ctx, client, *pssh, version.contentId, firstEpisode.Token)
+	if err != nil {
+		return fmt.Errorf("getting license for %s: %w", version.locale, err)
+	}
+
+	audioSet := manifest.Period[0].AdaptationSets[1]
+	fmt.Printf("Downloading %s audio...\n", mux.TrackTitle(version.locale))
+	audioBaseUrl, audioRepresentationId := media.GetAudioBaseUrl(audioSet, *audioQuality)
+	if audioBaseUrl == nil {
+		return fmt.Errorf("failed to get audio base URL for %s", version.locale)
+	}
+
+	audioFile, err := media.DownloadParts(ctx, client, audioBaseUrl, audioRepresentationId, audioSet, keys, workers)
+	if err != nil {
+		return fmt.Errorf("downloading audio for %s: %w", version.locale, err)
+	}
+	tempFiles = append(tempFiles, audioFile)
+	audioTracks = append(audioTracks, mux.MediaTrack{File: audioFile, Locale: version.locale})
+
+	// Download video (always first version)
+	videoSet := manifest.Period[0].AdaptationSets[0]
+	fmt.Println("Downloading video...")
+	baseUrl, representationId := media.GetVideoBaseUrl(videoSet, *videoQuality)
+	if baseUrl == nil {
+		return fmt.Errorf("failed to get video base URL")
+	}
+	videoFile, err = media.DownloadParts(ctx, client, baseUrl, representationId, videoSet, keys, workers)
+	if err != nil {
+		return fmt.Errorf("downloading video: %w", err)
+	}
+	tempFiles = append(tempFiles, videoFile)
+
+	// ===== Phase B: Parallel audio (versions [1..N]) =====
+	if len(versions) > 1 {
+		g, gctx := errgroup.WithContext(ctx)
+		var mu sync.Mutex
+
+		for idx := 1; idx < len(versions); idx++ {
+			idx := idx
+			version := versions[idx]
+			g.Go(func() error {
+				manifest := media.GetCachedManifest(version.contentId)
+				var episodeToken string
+				if manifest == nil {
+					episode, err := client.GetEpisode(gctx, version.contentId)
+					if err != nil {
+						return fmt.Errorf("fetching episode for %s: %w", version.locale, err)
+					}
+					episodeToken = episode.Token
+
+					mu.Lock()
+					activeStreams[version.contentId] = episode.Token
+					mu.Unlock()
+
+					manifestData, err := client.FetchManifest(gctx, episode.ManifestURL)
+					if err != nil {
+						return fmt.Errorf("fetching manifest for %s: %w", version.locale, err)
+					}
+
+					manifest, err = media.ParseManifest(manifestData)
+					if err != nil {
+						return fmt.Errorf("parsing manifest for %s: %w", version.locale, err)
+					}
+					media.SetCachedManifest(version.contentId, manifest)
+				}
+
+				pssh := drm.GetPssh(manifest)
+				if pssh == nil {
+					return fmt.Errorf("PSSH not found for %s", version.locale)
+				}
+
+				if episodeToken == "" {
+					mu.Lock()
+					episodeToken = activeStreams[version.contentId]
+					mu.Unlock()
+				}
+
+				keys, err := drm.GetLicense(gctx, client, *pssh, version.contentId, episodeToken)
+				if err != nil {
+					return fmt.Errorf("getting license for %s: %w", version.locale, err)
+				}
+
+				audioSet := manifest.Period[0].AdaptationSets[1]
+				fmt.Printf("Downloading %s audio...\n", mux.TrackTitle(version.locale))
+				audioBaseUrl, audioRepresentationId := media.GetAudioBaseUrl(audioSet, *audioQuality)
+				if audioBaseUrl == nil {
+					return fmt.Errorf("failed to get audio base URL for %s", version.locale)
+				}
+
+				audioFile, err := media.DownloadParts(gctx, client, audioBaseUrl, audioRepresentationId, audioSet, keys, workers)
+				if err != nil {
+					return fmt.Errorf("downloading audio for %s: %w", version.locale, err)
+				}
+
+				mu.Lock()
+				tempFiles = append(tempFiles, audioFile)
+				audioTracks = append(audioTracks, mux.MediaTrack{File: audioFile, Locale: version.locale})
+				mu.Unlock()
+				return nil
+			})
+		}
+
+		if err := g.Wait(); err != nil {
+			return fmt.Errorf("audio versions: %w", err)
+		}
+	}
+
+	// Phase C: Stream cleanup is handled by the deferred function above.
+	// All activeStreams entries are released in the deferred DeleteStream loop.
 
 	if err := mux.MergeEverything(ctx, videoFile, audioTracks, subTracks, outputFile, info); err != nil {
 		return fmt.Errorf("muxing episode: %w", err)
