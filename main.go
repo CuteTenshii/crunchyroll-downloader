@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"os/exec"
 	"os/signal"
 	"strings"
 	"syscall"
@@ -14,6 +15,7 @@ import (
 	"crunchyroll-downloader/internal/api"
 	"crunchyroll-downloader/internal/config"
 	"crunchyroll-downloader/internal/download"
+	"crunchyroll-downloader/internal/drm"
 )
 
 var (
@@ -188,6 +190,22 @@ func processURL(ctx context.Context, client *api.Client, rawURL string, outputDi
 	}
 }
 
+// checkFFmpeg validates that FFmpeg is available on the system PATH
+// and can be executed. Returns an actionable error if not.
+func checkFFmpeg() error {
+	path, err := exec.LookPath("ffmpeg")
+	if err != nil {
+		return fmt.Errorf("FFmpeg not found: install FFmpeg and ensure it is on $PATH. See https://ffmpeg.org/download.html")
+	}
+
+	cmd := exec.Command("ffmpeg", "-version")
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("FFmpeg found at %s but failed to run: %w", path, err)
+	}
+
+	return nil
+}
+
 // isAllNilConfig returns true if all pointer fields in cfg are nil,
 // indicating the config file did not exist or was empty.
 func isAllNilConfig(cfg *config.Config) bool {
@@ -278,6 +296,19 @@ func main() {
 	// Resolve precedence: CLI flag > env var > config file > default
 	resolvedEtpRt := resolveEtpRt(explicitFlags, *etpRt, cfg.EtpRt)
 	resolvedOutputDir := resolveString(explicitFlags, "output-dir", *outputDir, "", cfg.OutputDir, "")
+
+	// Validate FFmpeg availability before any download (D-18, D-19)
+	if err := checkFFmpeg(); err != nil {
+		fmt.Printf("Error: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Resolve Widevine device path through precedence and set it before
+	// any API client call, ensuring sync.Once uses the correct path.
+	resolvedWidevineDev := resolveString(explicitFlags, "widevine-device", *widevineDev, "WIDEVINE_DEVICE_PATH", cfg.WidevineDevice, "")
+	if resolvedWidevineDev != "" {
+		drm.SetWidevinePath(resolvedWidevineDev)
+	}
 
 	client, err := api.NewWithContext(ctx, resolvedEtpRt)
 	if err != nil {
