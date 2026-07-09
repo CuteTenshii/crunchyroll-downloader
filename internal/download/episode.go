@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -18,6 +19,8 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
+var multiUnderscore = regexp.MustCompile(`_{2,}`)
+
 func sanitizeFilename(s string) string {
 	if s == "" {
 		return "Unknown"
@@ -27,9 +30,7 @@ func sanitizeFilename(s string) string {
 	for _, char := range illegal {
 		res = strings.ReplaceAll(res, char, "_")
 	}
-	for strings.Contains(res, "__") {
-		res = strings.ReplaceAll(res, "__", "_")
-	}
+	res = multiUnderscore.ReplaceAllString(res, "_")
 	return strings.TrimRight(res, " .")
 }
 
