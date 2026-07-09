@@ -146,6 +146,16 @@ None - no external service configuration required.
 
 All three QOL-03 subtasks complete: `GetBaseUrl` is removed, the two split functions are in place, and comprehensive tests cover bandwidth matching across all quality tiers. Ready for the next plan in Phase 2.
 
+## Self-Check: PASSED
+
+- All 4 commits exist (3 task commits + 1 docs commit)
+- `GetBaseUrl` completely removed from production code
+- `go build ./...` passes
+- `go vet ./...` passes with no undefined references
+- `go test ./internal/media/... -race -count=1` — all 20 tests pass
+- `go test ./internal/download/... -race -count=1` — all 3 tests pass
+- Test function names `TestGetBaseUrlRejectsEmptyAdaptationSet` and `TestGetBaseUrlSkipsMalformedRepresentation` retained as legacy names — they call `GetVideoBaseUrl`
+
 ---
 
 *Phase: 02-performance-caching-parallelism*
