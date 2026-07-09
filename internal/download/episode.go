@@ -190,7 +190,7 @@ func Episode(ctx context.Context, client *api.Client, baseContentID string, info
 
 		audioSet := manifest.Period[0].AdaptationSets[1]
 		fmt.Printf("Downloading %s audio...\n", mux.TrackTitle(version.locale))
-		audioBaseUrl, audioRepresentationId := media.GetBaseUrl(audioSet, false, *audioQuality)
+		audioBaseUrl, audioRepresentationId := media.GetAudioBaseUrl(audioSet, *audioQuality)
 		if audioBaseUrl == nil {
 			return fmt.Errorf("failed to get audio base URL for %s", version.locale)
 		}
@@ -205,7 +205,7 @@ func Episode(ctx context.Context, client *api.Client, baseContentID string, info
 		if i == 0 {
 			videoSet := manifest.Period[0].AdaptationSets[0]
 			fmt.Println("Downloading video...")
-			baseUrl, representationId := media.GetBaseUrl(videoSet, true, *videoQuality)
+			baseUrl, representationId := media.GetVideoBaseUrl(videoSet, *videoQuality)
 			if baseUrl == nil {
 				return fmt.Errorf("failed to get video base URL")
 			}
