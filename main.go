@@ -5,6 +5,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"net/url"
 	"os"
 	"os/signal"
 	"strings"
@@ -38,20 +39,86 @@ func parseLangs(s string) []string {
 	return out
 }
 
-func processURL(ctx context.Context, client *api.Client, url string, outputDir string) {
-	parts := strings.Split(url, "/")
-	if len(parts) < 5 {
-		fmt.Printf("Invalid URL format: %s\n", url)
+// validateOutputDir checks that the specified output directory exists and is a
+// directory. Returns an error message, or empty string if valid.
+func validateOutputDir(dir string) string {
+	if dir == "" {
+		return "" // empty dir means use CWD default — valid
+	}
+	if fi, err := os.Stat(dir); os.IsNotExist(err) {
+		return fmt.Sprintf("Output directory %s does not exist. Create it first or omit --output-dir to use the current directory.", dir)
+	} else if err != nil {
+		return fmt.Sprintf("Error accessing output directory %s: %v", dir, err)
+	} else if !fi.IsDir() {
+		return fmt.Sprintf("Output directory %s is not a directory.", dir)
+	}
+	return ""
+}
+
+// invalidURL holds a URL that failed validation and the reason.
+type invalidURL struct {
+	URL   string
+	Error string
+}
+
+// validateURL checks that the URL has a /watch/ or /series/ path with a
+// content ID between 9 and 14 characters.
+func validateURL(rawURL string) error {
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return fmt.Errorf("invalid URL: %w", err)
+	}
+
+	parts := strings.Split(strings.Trim(parsed.Path, "/"), "/")
+	if len(parts) < 2 {
+		return fmt.Errorf("URL path must contain content type and ID")
+	}
+
+	contentType := parts[0]
+	contentID := parts[1]
+
+	if contentType != "watch" && contentType != "series" {
+		return fmt.Errorf("URL must be /watch/ or /series/")
+	}
+
+	if len(contentID) < 9 || len(contentID) > 14 {
+		return fmt.Errorf("content ID length must be 9-14 characters (got %d)", len(contentID))
+	}
+
+	return nil
+}
+
+// validateAllURLs validates all URLs upfront and returns any that failed.
+func validateAllURLs(urls []string) []invalidURL {
+	var invalid []invalidURL
+	for _, u := range urls {
+		if err := validateURL(u); err != nil {
+			invalid = append(invalid, invalidURL{URL: u, Error: err.Error()})
+		}
+	}
+	return invalid
+}
+
+func processURL(ctx context.Context, client *api.Client, rawURL string, outputDir string) {
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		fmt.Printf("Invalid URL: %v\n", err)
 		return
 	}
-	contentType := parts[3]
-	contentID := parts[4]
+
+	parts := strings.Split(strings.Trim(parsed.Path, "/"), "/")
+	if len(parts) < 2 {
+		fmt.Printf("Invalid URL format: %s\n", rawURL)
+		return
+	}
+	contentType := parts[0]
+	contentID := parts[1]
 	if len(contentID) < 9 || len(contentID) > 14 {
-		fmt.Printf("Invalid URL format: %s\n", url)
+		fmt.Printf("Invalid URL format: %s\n", rawURL)
 		return
 	}
 	if contentType != "watch" && contentType != "series" {
-		fmt.Printf("Invalid URL (must be /watch/ or /series/): %s\n", url)
+		fmt.Printf("Invalid URL (must be /watch/ or /series/): %s\n", rawURL)
 		return
 	}
 
@@ -219,17 +286,9 @@ func main() {
 	}
 	client.Debug = *debug
 	// Validate output directory exists if specified (D-11)
-	if resolvedOutputDir != "" {
-		if fi, err := os.Stat(resolvedOutputDir); os.IsNotExist(err) {
-			fmt.Printf("Output directory %s does not exist. Create it first or omit --output-dir to use the current directory.\n", resolvedOutputDir)
-			os.Exit(1)
-		} else if err != nil {
-			fmt.Printf("Error accessing output directory %s: %v\n", resolvedOutputDir, err)
-			os.Exit(1)
-		} else if !fi.IsDir() {
-			fmt.Printf("Output directory %s is not a directory.\n", resolvedOutputDir)
-			os.Exit(1)
-		}
+	if errMsg := validateOutputDir(resolvedOutputDir); errMsg != "" {
+		fmt.Println(errMsg)
+		os.Exit(1)
 	}
 
 	if *urlsFile != "" {
@@ -247,6 +306,15 @@ func main() {
 			if line != "" && strings.HasPrefix(line, "http") {
 				urls = append(urls, line)
 			}
+		}
+
+		// Validate all URLs upfront before any downloads (D-17)
+		if invalid := validateAllURLs(urls); len(invalid) > 0 {
+			fmt.Println("Invalid URLs found:")
+			for _, inv := range invalid {
+				fmt.Printf("  %s — %s\n", inv.URL, inv.Error)
+			}
+			os.Exit(1)
 		}
 
 		fmt.Printf("Found %d URLs to download\n\n", len(urls))

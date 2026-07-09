@@ -72,6 +72,117 @@ func TestResolveEtpRtReturnsEmptyWhenUnset(t *testing.T) {
 	}
 }
 
+func TestValidateURLValidWatchPath(t *testing.T) {
+	err := validateURL("https://www.crunchyroll.com/watch/GGGGGGGGG")
+	if err != nil {
+		t.Fatalf("validateURL() error = %v, want nil", err)
+	}
+}
+
+func TestValidateURLValidSeriesPath(t *testing.T) {
+	err := validateURL("https://www.crunchyroll.com/series/GGGGGGGGGGGG")
+	if err != nil {
+		t.Fatalf("validateURL() error = %v, want nil", err)
+	}
+}
+
+func TestValidateURLTooShort(t *testing.T) {
+	err := validateURL("https://www.crunchyroll.com/watch/short")
+	if err == nil {
+		t.Fatal("validateURL() error = nil, want content ID length error")
+	}
+	if !strings.Contains(err.Error(), "content ID length") {
+		t.Fatalf("validateURL() error = %q, want content ID length error", err)
+	}
+}
+
+func TestValidateURLTooLong(t *testing.T) {
+	err := validateURL("https://www.crunchyroll.com/watch/GGGGGGGGGGGGGGG")
+	if err == nil {
+		t.Fatal("validateURL() error = nil, want content ID length error")
+	}
+	if !strings.Contains(err.Error(), "content ID length") {
+		t.Fatalf("validateURL() error = %q, want content ID length error", err)
+	}
+}
+
+func TestValidateURLWrongContentType(t *testing.T) {
+	err := validateURL("https://www.crunchyroll.com/browse/GGGGGGGGG")
+	if err == nil {
+		t.Fatal("validateURL() error = nil, want watch/series error")
+	}
+	if !strings.Contains(err.Error(), "must be /watch/ or /series/") {
+		t.Fatalf("validateURL() error = %q, want watch/series error", err)
+	}
+}
+
+func TestValidateURLTrailingSlash(t *testing.T) {
+	err := validateURL("https://www.crunchyroll.com/watch/GGGGGGGGG/")
+	if err != nil {
+		t.Fatalf("validateURL() with trailing slash error = %v, want nil", err)
+	}
+}
+
+func TestValidateURLWithQueryParams(t *testing.T) {
+	err := validateURL("https://www.crunchyroll.com/watch/GGGGGGGGG?foo=bar")
+	if err != nil {
+		t.Fatalf("validateURL() with query params error = %v, want nil", err)
+	}
+}
+
+func TestOutputDirMissingDirErrors(t *testing.T) {
+	errMsg := validateOutputDir("/nonexistent/path/that/definitely/does/not/exist")
+	if errMsg == "" {
+		t.Fatal("validateOutputDir() returned empty, want error message for nonexistent path")
+	}
+	if !strings.Contains(errMsg, "does not exist") {
+		t.Fatalf("validateOutputDir() = %q, want 'does not exist' message", errMsg)
+	}
+}
+
+func TestOutputDirEmptyIsValid(t *testing.T) {
+	errMsg := validateOutputDir("")
+	if errMsg != "" {
+		t.Fatalf("validateOutputDir('') = %q, want empty string", errMsg)
+	}
+}
+
+func TestOutputDirFileIsNotValid(t *testing.T) {
+	f := t.TempDir() + "/notadir"
+	if err := os.WriteFile(f, []byte("content"), 0644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	errMsg := validateOutputDir(f)
+	if errMsg == "" {
+		t.Fatal("validateOutputDir(file) returned empty, want error for file path")
+	}
+	if !strings.Contains(errMsg, "not a directory") {
+		t.Fatalf("validateOutputDir(file) = %q, want 'not a directory' message", errMsg)
+	}
+}
+
+func TestOutputDirValidDirPasses(t *testing.T) {
+	dir := t.TempDir()
+	errMsg := validateOutputDir(dir)
+	if errMsg != "" {
+		t.Fatalf("validateOutputDir(%q) = %q, want empty", dir, errMsg)
+	}
+}
+
+func TestValidateAllURLsReportsAll(t *testing.T) {
+	urls := []string{
+		"https://www.crunchyroll.com/watch/GGGGGGGGG",      // valid
+		"https://www.crunchyroll.com/series/GGGGGGGGGGGG",   // valid
+		"https://www.crunchyroll.com/watch/short",            // too short
+		"https://www.crunchyroll.com/browse/GGGGGGGGG",       // wrong type
+		"https://www.crunchyroll.com/watch/GGGGGGGGGGGGGGG",  // too long
+	}
+	invalid := validateAllURLs(urls)
+	if len(invalid) != 3 {
+		t.Fatalf("validateAllURLs() returned %d invalid URLs, want 3", len(invalid))
+	}
+}
+
 func captureMainStdout(t *testing.T, fn func()) string {
 	t.Helper()
 
