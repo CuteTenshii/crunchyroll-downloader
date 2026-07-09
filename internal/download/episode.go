@@ -13,6 +13,7 @@ import (
 	"crunchyroll-downloader/internal/drm"
 	"crunchyroll-downloader/internal/media"
 	"crunchyroll-downloader/internal/mux"
+	"github.com/unki2aut/go-mpd"
 )
 
 func sanitizeFilename(s string) string {
@@ -159,14 +160,22 @@ func Episode(ctx context.Context, client *api.Client, baseContentID string, info
 			activeStreams[version.contentId] = episode.Token
 		}
 
-		manifestData, err := client.FetchManifest(ctx, episode.ManifestURL)
-		if err != nil {
-			return fmt.Errorf("fetching manifest for %s: %w", version.locale, err)
+		var manifest *mpd.MPD
+		if i > 0 {
+			manifest = media.GetCachedManifest(version.contentId)
 		}
+		if manifest == nil {
+			manifestData, err := client.FetchManifest(ctx, episode.ManifestURL)
+			if err != nil {
+				return fmt.Errorf("fetching manifest for %s: %w", version.locale, err)
+			}
 
-		manifest, err := media.ParseManifest(manifestData)
-		if err != nil {
-			return fmt.Errorf("parsing manifest for %s: %w", version.locale, err)
+			manifest, err = media.ParseManifest(manifestData)
+			if err != nil {
+				return fmt.Errorf("parsing manifest for %s: %w", version.locale, err)
+			}
+
+			media.SetCachedManifest(version.contentId, manifest)
 		}
 
 		pssh := drm.GetPssh(manifest)
