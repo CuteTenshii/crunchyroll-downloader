@@ -97,6 +97,67 @@ Yes, Crunchyroll uses DRM-only content. This file is used to get a Widevine lice
 
 If you don't have a rooted Android device or are just lazy, search "ready to use cdms" and you'll find plenty of websites providing those files.
 
+## Badges
+
+[![Go Version](https://img.shields.io/badge/Go-1.25.0-00ADD8?logo=go)](https://go.dev/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE.txt)
+
+## Installation
+
+### Install with Go
+
+If you have Go 1.25+ installed, you can install the binary directly:
+
+```bash
+go install github.com/CuteTenshii/crunchyroll-downloader@latest
+```
+
+### Pre-built binaries
+
+Pre-built binaries for Linux, macOS, and Windows are available on the
+[releases page](https://github.com/CuteTenshii/crunchyroll-downloader/releases/latest).
+See the **Download** section above for details.
+
+### Build from source
+
+Clone the repository and run `go build .` in the project root. See the
+**Building** section above for detailed instructions.
+
+## Quick Start
+
+1. **Get your `etp_rt` cookie** &mdash; Follow the instructions in the
+   **Help** section below. This cookie authenticates you with Crunchyroll.
+
+2. **Install the binary** &mdash; Use one of the methods in the
+   **Installation** or **Download** sections above.
+
+3. **Run the downloader** with your cookie and a Crunchyroll URL:
+
+   ```bash
+   ./crunchyroll-downloader \
+     --url https://www.crunchyroll.com/series/GJ0H7Q5ZJ/hells-paradise \
+     --season 1 \
+     --etp-rt your_cookie_here
+   ```
+
+   The episodes will be saved as MKV files in the current directory.
+
+   For a single episode:
+
+   ```bash
+   ./crunchyroll-downloader \
+     --url https://www.crunchyroll.com/watch/GE00198973JAJP/dawn-and-confusion \
+     --etp-rt your_cookie_here
+   ```
+
+Alternatively, set your credentials in a `.env` file (see `.env.example`) to
+avoid passing `--etp-rt` on every invocation:
+
+```bash
+echo "CRUNCHYROLL_ETP_RT=your_cookie_here" > .env
+./crunchyroll-downloader --url <url>
+```
+
 ## License
 
 This project is licensed under the MIT License. See [LICENSE.txt](LICENSE.txt)
