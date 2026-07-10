@@ -1,0 +1,20 @@
+{
+  "data": [
+    {
+      "episode_metadata": {
+        "audio_locale": "ja-JP",
+        "episode_number": 1,
+        "season_number": 1,
+        "series_title": "Test Series",
+        "availability_starts": "2020-01-01T00:00:00.000Z",
+        "versions": [
+          {
+            "audio_locale": "en-US",
+            "guid": "en-us-guid"
+          }
+        ]
+      },
+      "title": "Test Episode"
+    }
+  ]
+}

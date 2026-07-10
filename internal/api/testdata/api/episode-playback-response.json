@@ -1,0 +1,11 @@
+{
+  "url": "https://manifest.example.com/manifest.mpd",
+  "token": "test-playback-token",
+  "subtitles": {
+    "en-US": {
+      "language": "en-US",
+      "url": "https://subs.example.com/en-us.ass"
+    }
+  },
+  "error": null
+}

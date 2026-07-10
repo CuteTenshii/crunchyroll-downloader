@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<MPD xmlns="urn:mpeg:dash:schema:mpd:2011" profiles="urn:mpeg:dash:profile:isoff-live:2011" type="static" minBufferTime="PT2S">
+  <Period duration="PT30S">
+    <AdaptationSet mimeType="video/mp4" contentType="video" width="1920" height="1080">
+      <SegmentTemplate initialization="init-$RepresentationID$.mp4" media="seg-$Number%05d$-$RepresentationID$.m4s">
+        <SegmentTimeline>
+          <S t="0" d="1" r="0"/>
+        </SegmentTimeline>
+      </SegmentTemplate>
+      <Representation id="video/1080p" bandwidth="5000000" height="1080" width="1920">
+        <BaseURL>https://example.com/video/1080p/</BaseURL>
+      </Representation>
+    </AdaptationSet>
+    <AdaptationSet mimeType="audio/mp4" contentType="audio">
+      <SegmentTemplate initialization="init-$RepresentationID$.mp4" media="seg-$Number%05d$-$RepresentationID$.m4s">
+        <SegmentTimeline>
+          <S t="0" d="1" r="0"/>
+        </SegmentTimeline>
+      </SegmentTemplate>
+      <Representation id="audio/192k" bandwidth="192000">
+        <BaseURL>https://example.com/audio/192k/</BaseURL>
+      </Representation>
+      <Representation id="audio/128k" bandwidth="128000">
+        <BaseURL>https://example.com/audio/128k/</BaseURL>
+      </Representation>
+    </AdaptationSet>
+  </Period>
+</MPD>
