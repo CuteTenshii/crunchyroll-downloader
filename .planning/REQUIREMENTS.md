@@ -10,9 +10,9 @@
 - [x] **PERF-01**: Segments streamed to temp file incrementally during download instead of buffering entire video in `[]byte` — reduce per-episode RAM from 400MB to ~64KB
 - [x] **PERF-02**: HTTP transport configured with keep-alive, `MaxIdleConnsPerHost` ≥ 10, and connection reuse for segment downloads — eliminate per-request TCP/TLS handshake
 - [x] **PERF-03**: `http.Client.Timeout` set (30s connect, 60s overall) and `context.Context` propagated through all HTTP calls — prevent indefinite hangs
-- [ ] **PERF-04**: Parsed MPD manifests cached per `contentId` — avoid redundant fetch/re-parse when downloading multiple audio versions of the same episode
+- [x] **PERF-04**: Parsed MPD manifests cached per `contentId` — avoid redundant fetch/re-parse when downloading multiple audio versions of the same episode
 - [x] **PERF-05**: Widevine device loaded once at startup, cached and reused across license requests — eliminate repeated `os.ReadDir(".")` per audio version
-- [ ] **PERF-06**: Audio version manifest fetching and license challenges parallelized via goroutines — reduce multi-dub overhead from sequential to concurrent
+- [x] **PERF-06**: Audio version manifest fetching and license challenges parallelized via goroutines — reduce multi-dub overhead from sequential to concurrent
 - [x] **PERF-07**: `DownloadPart()` and `DownloadSubs()` use configured `http.Client` instead of `http.DefaultClient.Do()` — enable keep-alive, timeouts, and auth for all HTTP paths
 - [x] **PERF-08**: Fix file descriptor leak in `getFilename()` — close `*os.File` handle immediately after creating temp file instead of discarding it
 
@@ -29,13 +29,13 @@
 ### User Experience (UX)
 
 - [x] **UX-01**: All `panic()` calls replaced with proper `error` returns — network blips, API errors, and parsing failures handled gracefully instead of crashing
-- [ ] **UX-02**: Season download shows `[Episode 3/24] Title — Downloading... ✓` with per-episode result and cumulative progress
-- [ ] **UX-03**: Download speed (MB/s) and estimated time remaining displayed during segment downloads
-- [ ] **UX-04**: `--quiet` flag suppresses all progress output (only errors); `--json` flag outputs machine-parseable progress events as NDJSON
+- [x] **UX-02**: Season download shows `[Episode 3/24] Title — Downloading... ✓` with per-episode result and cumulative progress
+- [x] **UX-03**: Download speed (MB/s) and estimated time remaining displayed during segment downloads
+- [x] **UX-04**: `--quiet` flag suppresses all progress output (only errors); `--json` flag outputs machine-parseable progress events as NDJSON
 - [x] **UX-05**: No stack traces shown to user on error — user-facing messages are clean, actionable, and suggest next steps
-- [ ] **UX-06**: Season/batch error accumulation — report total failed episodes at end instead of silent `continue` in `Season()`
+- [x] **UX-06**: Season/batch error accumulation — report total failed episodes at end instead of silent `continue` in `Season()`
 - [x] **UX-07**: Graceful SIGINT/SIGTERM handling — cleanup temp files and release Crunchyroll playback streams on interrupt instead of leaving orphaned state
-- [ ] **UX-08**: Structured logging with levels (info, warn, error) and optional JSON output — replace raw `fmt.Printf` scatter
+- [x] **UX-08**: Structured logging with levels (info, warn, error) and optional JSON output — replace raw `fmt.Printf` scatter
 
 ### Quality of Life (QOL)
 
@@ -44,12 +44,12 @@
   - Integration tests for `processURL` (mock HTTP server for Crunchyroll API)
   - Test coverage target ≥ 60% for `internal/media/`, `internal/download/`, `internal/locale/`
 - [x] **QOL-02**: `--workers` flag (default 10) to configure segment download concurrency
-- [ ] **QOL-03**: `GetBaseUrl` split into `GetVideoBaseUrl` and `GetAudioBaseUrl` — eliminate fragile `isVideoSet` boolean parameter
-- [ ] **QOL-04**: Fix URL content ID validation bug: `len(id) < 9 && len(id) > 14` → `len(id) < 9 || len(id) > 14` (`main.go`)
-- [ ] **QOL-05**: Replace string-splitting URL parser with `url.Parse()` from stdlib — handle trailing slashes and query params correctly
+- [x] **QOL-03**: `GetBaseUrl` split into `GetVideoBaseUrl` and `GetAudioBaseUrl` — eliminate fragile `isVideoSet` boolean parameter
+- [x] **QOL-04**: Fix URL content ID validation bug: `len(id) < 9 && len(id) > 14` → `len(id) < 9 || len(id) > 14` (`main.go`)
+- [x] **QOL-05**: Replace string-splitting URL parser with `url.Parse()` from stdlib — handle trailing slashes and query params correctly
 - [x] **QOL-06**: `DoRequest()` token refresh protected by recursion-depth guard (max 1 re-auth attempt) — prevent stack overflow on expired cookies
-- [ ] **QOL-07**: `sanitizeFilename` uses regex (`_{2,}` → `_`) instead of O(n²) `for strings.Contains` loop
-- [ ] **QOL-08**: `parseLangs` called once at flag parse time instead of per-URL in batch mode
+- [x] **QOL-07**: `sanitizeFilename` uses regex (`_{2,}` → `_`) instead of O(n²) `for strings.Contains` loop
+- [x] **QOL-08**: `parseLangs` called once at flag parse time instead of per-URL in batch mode
 - [x] **QOL-09**: `os.CreateTemp` errors checked and propagated — no silent discards
 - [x] **QOL-10**: FFmpeg merge failures return `error` instead of `panic` — graceful cleanup of partial output
 - [x] **QOL-11**: Log warnings instead of silent `_ = os.Remove()` discards in mux cleanup — propagate cleanup failures via log instead of swallowing
@@ -96,9 +96,9 @@
 | PERF-01 | Phase 1 | Complete |
 | PERF-02 | Phase 1 | Complete |
 | PERF-03 | Phase 1 | Complete |
-| PERF-04 | Phase 2 | Pending |
+| PERF-04 | Phase 2 | Complete |
 | PERF-05 | Phase 1 | Complete |
-| PERF-06 | Phase 2 | Pending |
+| PERF-06 | Phase 2 | Complete |
 | PERF-07 | Phase 1 | Complete |
 | PERF-08 | Phase 1 | Complete |
 | USAB-01 | Phase 3 | Complete |
@@ -109,21 +109,21 @@
 | USAB-06 | Phase 3 | Complete |
 | USAB-07 | Phase 3 | Complete |
 | UX-01 | Phase 1 | Complete |
-| UX-02 | Phase 4 | Pending |
-| UX-03 | Phase 4 | Pending |
-| UX-04 | Phase 4 | Pending |
+| UX-02 | Phase 4 | Complete |
+| UX-03 | Phase 4 | Complete |
+| UX-04 | Phase 4 | Complete |
 | UX-05 | Phase 1 | Complete |
-| UX-06 | Phase 4 | Pending |
+| UX-06 | Phase 4 | Complete |
 | UX-07 | Phase 1 | Complete |
-| UX-08 | Phase 4 | Pending |
+| UX-08 | Phase 4 | Complete |
 | QOL-01 | Phase 1 | Complete |
 | QOL-02 | Phase 1 | Complete |
-| QOL-03 | Phase 2 | Pending |
-| QOL-04 | Phase 3 | Pending |
-| QOL-05 | Phase 3 | Pending |
+| QOL-03 | Phase 2 | Complete |
+| QOL-04 | Phase 3 | Complete |
+| QOL-05 | Phase 3 | Complete |
 | QOL-06 | Phase 1 | Complete |
-| QOL-07 | Phase 3 | Pending |
-| QOL-08 | Phase 3 | Pending |
+| QOL-07 | Phase 3 | Complete |
+| QOL-08 | Phase 3 | Complete |
 | QOL-09 | Phase 1 | Complete |
 | QOL-10 | Phase 1 | Complete |
 | QOL-11 | Phase 1 | Complete |
