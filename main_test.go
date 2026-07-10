@@ -4,11 +4,14 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"reflect"
 	"strings"
 	"testing"
 
+	"crunchyroll-downloader/internal/api"
 	"crunchyroll-downloader/internal/config"
 )
 
@@ -183,6 +186,44 @@ func TestValidateAllURLsReportsAll(t *testing.T) {
 	invalid := validateAllURLs(urls)
 	if len(invalid) != 3 {
 		t.Fatalf("validateAllURLs() returned %d invalid URLs, want 3", len(invalid))
+	}
+}
+
+func TestProcessURLWatchPath(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/auth/v1/token", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"access_token":"test-token"}`)
+	})
+	mux.HandleFunc("/content/v2/cms/objects/G123456789", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		data, _ := os.ReadFile("internal/api/testdata/api/episode-info-response.json")
+		_, _ = w.Write(data)
+	})
+	mux.HandleFunc("/playback/v3/", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		data, _ := os.ReadFile("internal/api/testdata/api/episode-playback-response.json")
+		_, _ = w.Write(data)
+	})
+	mux.HandleFunc("/license/v1/license/widevine", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		data, _ := os.ReadFile("internal/api/testdata/api/license-response.json")
+		_, _ = w.Write(data)
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	client := api.NewTestClient(nil, server.URL, "test-token")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	output := captureMainStderr(t, func() {
+		processURL(ctx, client, "https://www.crunchyroll.com/watch/G123456789", "", nil, nil)
+	})
+
+	if !strings.Contains(output, "context canceled") {
+		t.Fatalf("processURL() stderr = %q, want context canceled error", output)
 	}
 }
 

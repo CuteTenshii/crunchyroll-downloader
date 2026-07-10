@@ -9,7 +9,41 @@ import (
 	"testing"
 
 	"github.com/iyear/gowidevine"
+	"github.com/unki2aut/go-mpd"
 )
+
+func TestGetPsshWithProtection(t *testing.T) {
+	data, err := os.ReadFile("../media/testdata/mpd/with-content-protection.mpd")
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	m := new(mpd.MPD)
+	if err := m.Decode(data); err != nil {
+		t.Fatalf("Decode: %v", err)
+	}
+	pssh := GetPssh(m)
+	if pssh == nil {
+		t.Fatal("GetPssh(with-content-protection) = nil, want non-nil PSSH")
+	}
+	if *pssh == "" {
+		t.Fatal("GetPssh() returned empty PSSH string")
+	}
+}
+
+func TestGetPsshWithoutProtection(t *testing.T) {
+	data, err := os.ReadFile("../media/testdata/mpd/no-content-protection.mpd")
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	m := new(mpd.MPD)
+	if err := m.Decode(data); err != nil {
+		t.Fatalf("Decode: %v", err)
+	}
+	pssh := GetPssh(m)
+	if pssh != nil {
+		t.Fatal("GetPssh(no-content-protection) = non-nil, want nil")
+	}
+}
 
 func TestGetWidevineDeviceCachesLoader(t *testing.T) {
 	resetWidevineDeviceCache(t)

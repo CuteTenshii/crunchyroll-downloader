@@ -3,10 +3,49 @@ package download
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"crunchyroll-downloader/internal/api"
 )
+
+func TestRunSeasonEmptyEpisodes(t *testing.T) {
+	err := runSeason(context.Background(), nil, nil, nil, nil, nil, nil, 0, "", nil)
+	if err != nil {
+		t.Fatalf("runSeason(empty) error = %v, want nil", err)
+	}
+}
+
+func TestSeasonErrorFormatting(t *testing.T) {
+	err := &SeasonError{Failed: 2, Total: 5}
+	want := "2 of 5 episode(s) failed"
+	if got := err.Error(); got != want {
+		t.Fatalf("SeasonError.Error() = %q, want %q", got, want)
+	}
+}
+
+func TestFormatFailedList(t *testing.T) {
+	failures := []episodeError{
+		{Number: 1, Title: "First", Err: errors.New("network error")},
+		{Number: 3, Title: "Third", Err: errors.New("timeout")},
+	}
+	result := formatFailedList(failures)
+	if !strings.Contains(result, "episode 1") {
+		t.Fatalf("formatFailedList() = %q, want episode 1", result)
+	}
+	if !strings.Contains(result, "network error") {
+		t.Fatalf("formatFailedList() = %q, want network error", result)
+	}
+	if !strings.Contains(result, "episode 3") {
+		t.Fatalf("formatFailedList() = %q, want episode 3", result)
+	}
+	if !strings.Contains(result, "timeout") {
+		t.Fatalf("formatFailedList() = %q, want timeout", result)
+	}
+	if !strings.Contains(result, ";") {
+		t.Fatalf("formatFailedList() = %q, want semicolon separator", result)
+	}
+}
 
 func TestRunSeasonContinuesAfterEpisodeFailure(t *testing.T) {
 	videoQuality := "1080p"

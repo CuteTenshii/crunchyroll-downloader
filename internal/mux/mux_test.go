@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"crunchyroll-downloader/internal/api"
+	"crunchyroll-downloader/internal/locale"
 )
 
 func TestMergeEverythingReturnsErrorAndRemovesPartialOutputOnFFmpegFailure(t *testing.T) {
@@ -91,6 +92,34 @@ func restoreFFmpegCommand(t *testing.T, exitCode, stderr string) {
 	t.Cleanup(func() {
 		ffmpegCommand = original
 	})
+}
+
+func TestTrackTitle(t *testing.T) {
+	tests := []struct {
+		locale string
+		want   string
+	}{
+		{locale: "ja-JP", want: "日本語"},
+		{locale: "en-US", want: "English"},
+		{locale: "xx-XX", want: "xx-XX"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.locale, func(t *testing.T) {
+			got := TrackTitle(tt.locale)
+			if got != tt.want {
+				t.Fatalf("TrackTitle(%q) = %q, want %q", tt.locale, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestTrackTitleAllLocales(t *testing.T) {
+	for code := range locale.LanguageNames {
+		title := TrackTitle(code)
+		if title == "" {
+			t.Fatalf("TrackTitle(%q) returned empty string", code)
+		}
+	}
 }
 
 func TestHelperProcess(t *testing.T) {

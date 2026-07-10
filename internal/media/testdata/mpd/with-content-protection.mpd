@@ -2,7 +2,9 @@
 <MPD xmlns="urn:mpeg:dash:schema:mpd:2011" profiles="urn:mpeg:dash:profile:isoff-live:2011" type="static" minBufferTime="PT2S">
   <Period duration="PT30S">
     <AdaptationSet mimeType="video/mp4" contentType="video" width="1920" height="1080">
-      <ContentProtection value="cenc" schemeIdUri="urn:mpeg:dash:mp4protection:2011" cenc:pssh="AAAANHBzc2gAAAAA7e+LqXnWSs6jyCfc1R0h7QAAABIIABJIRU1TIRR0ZXN0LWtleS1pZBgB"/>
+      <ContentProtection value="cenc" schemeIdUri="urn:mpeg:dash:mp4protection:2011">
+        <pssh>AAAANHBzc2gAAAAA7e+LqXnWSs6jyCfc1R0h7QAAABIIABJIRU1TIRR0ZXN0LWtleS1pZBgB</pssh>
+      </ContentProtection>
       <SegmentTemplate initialization="init-$RepresentationID$.mp4" media="seg-$Number%05d$-$RepresentationID$.m4s">
         <SegmentTimeline>
           <S t="0" d="1" r="0"/>

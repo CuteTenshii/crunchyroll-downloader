@@ -2,6 +2,8 @@ package media
 
 import (
 	"fmt"
+	"os"
+	"reflect"
 	"sync"
 	"testing"
 
@@ -84,6 +86,151 @@ func TestGetVideoBaseUrlMatchesHeight(t *testing.T) {
 			t.Fatalf("GetVideoBaseUrl(480p) baseURL = %s; want fallback to first rep", *baseURL)
 		}
 	})
+}
+
+func TestBuildUrl(t *testing.T) {
+	tests := []struct {
+		name             string
+		base             string
+		representationID string
+		file             string
+		partNum          *int64
+		want             string
+	}{
+		{
+			name:             "replace $Number$",
+			base:             "https://example.com/",
+			representationID: "video/1080p",
+			file:             "seg-$Number$-$RepresentationID$.m4s",
+			partNum:          int64Ptr(1),
+			want:             "https://example.com/seg-00001-video/1080p.m4s",
+		},
+		{
+			name:             "replace $Number%05d$",
+			base:             "https://example.com/",
+			representationID: "video/1080p",
+			file:             "seg-$Number%05d$-$RepresentationID$.m4s",
+			partNum:          int64Ptr(42),
+			want:             "https://example.com/seg-00042-video/1080p.m4s",
+		},
+		{
+			name:             "replace $RepresentationID$ only",
+			base:             "https://example.com/",
+			representationID: "audio/192k",
+			file:             "init-$RepresentationID$.mp4",
+			partNum:          nil,
+			want:             "https://example.com/init-audio/192k.mp4",
+		},
+		{
+			name:             "nil partNum leaves $Number$ unchanged",
+			base:             "https://example.com/",
+			representationID: "rep1",
+			file:             "seg-$Number$-$RepresentationID$.m4s",
+			partNum:          nil,
+			want:             "https://example.com/seg-$Number$-rep1.m4s",
+		},
+		{
+			name:             "empty base URL",
+			base:             "",
+			representationID: "rep1",
+			file:             "file.mp4",
+			partNum:          nil,
+			want:             "file.mp4",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := BuildUrl(tt.base, tt.representationID, tt.file, tt.partNum)
+			if got != tt.want {
+				t.Fatalf("BuildUrl() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func int64Ptr(v int64) *int64 { return &v }
+
+func TestExpandTimeline(t *testing.T) {
+	t.Run("single S element R=0", func(t *testing.T) {
+		timeline := []*mpd.SegmentTimelineS{{D: 1}}
+		result := ExpandTimeline(timeline, 1)
+		want := []int64{1}
+		if !reflect.DeepEqual(result, want) {
+			t.Fatalf("ExpandTimeline() = %v, want %v", result, want)
+		}
+	})
+
+	t.Run("S element with R=2", func(t *testing.T) {
+		r := int64(2)
+		timeline := []*mpd.SegmentTimelineS{{D: 1, R: &r}}
+		result := ExpandTimeline(timeline, 1)
+		want := []int64{1, 2, 3}
+		if !reflect.DeepEqual(result, want) {
+			t.Fatalf("ExpandTimeline() = %v, want %v", result, want)
+		}
+	})
+
+	t.Run("nil R treated as zero repeat", func(t *testing.T) {
+		timeline := []*mpd.SegmentTimelineS{{D: 1, R: nil}}
+		result := ExpandTimeline(timeline, 1)
+		want := []int64{1}
+		if !reflect.DeepEqual(result, want) {
+			t.Fatalf("ExpandTimeline(R=nil) = %v, want %v", result, want)
+		}
+	})
+
+	t.Run("empty timeline", func(t *testing.T) {
+		result := ExpandTimeline(nil, 1)
+		if len(result) != 0 {
+			t.Fatalf("ExpandTimeline(empty) = %v, want empty slice", result)
+		}
+	})
+
+	t.Run("multiple S elements", func(t *testing.T) {
+		timeline := []*mpd.SegmentTimelineS{
+			{D: 1},
+			{D: 2},
+		}
+		result := ExpandTimeline(timeline, 5)
+		want := []int64{5, 6}
+		if !reflect.DeepEqual(result, want) {
+			t.Fatalf("ExpandTimeline() = %v, want %v", result, want)
+		}
+	})
+
+	t.Run("zero D value", func(t *testing.T) {
+		timeline := []*mpd.SegmentTimelineS{{D: 0}}
+		result := ExpandTimeline(timeline, 10)
+		want := []int64{10}
+		if !reflect.DeepEqual(result, want) {
+			t.Fatalf("ExpandTimeline(D=0) = %v, want %v", result, want)
+		}
+	})
+}
+
+func TestParseManifest(t *testing.T) {
+	data, err := os.ReadFile("../media/testdata/mpd/simple-video-audio.mpd")
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	m, err := ParseManifest(data)
+	if err != nil {
+		t.Fatalf("ParseManifest() error = %v", err)
+	}
+	if len(m.Period) == 0 {
+		t.Fatal("ParseManifest() produced MPD with no periods")
+	}
+	sets := m.Period[0].AdaptationSets
+	if len(sets) != 2 {
+		t.Fatalf("ParseManifest() has %d adaptation sets, want 2", len(sets))
+	}
+}
+
+func TestParseManifestInvalidXML(t *testing.T) {
+	_, err := ParseManifest([]byte("invalid"))
+	if err == nil {
+		t.Fatal("ParseManifest(invalid) error = nil, want decode error")
+	}
 }
 
 func TestGetAudioBaseUrlBandwidth192k(t *testing.T) {
