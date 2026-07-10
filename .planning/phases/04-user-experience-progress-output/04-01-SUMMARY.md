@@ -197,6 +197,16 @@ None - no external service configuration required.
 - `episode.go` and `season.go` now use only `output.Global` for output — no raw `fmt.Printf` remains
 - 13 of 43 total `fmt.Printf` calls replaced (cumulative: 28 from Plan 4.3 + 13 from Plan 4.1 = 41 of 43)
 
+## Self-Check: PASSED
+
+- [x] SUMMARY.md created at `.planning/phases/04-user-experience-progress-output/04-01-SUMMARY.md`
+- [x] Task 1 committed: `072d075`
+- [x] Task 2 committed: `751965d`
+- [x] Summary metadata committed: `d5eb414`
+- [x] `go build ./...` passes
+- [x] `go vet ./...` passes
+- [x] `go test ./internal/download/...` passes (8/8)
+
 ---
 *Phase: 04-user-experience-progress-output*
 *Completed: 2026-07-10*
