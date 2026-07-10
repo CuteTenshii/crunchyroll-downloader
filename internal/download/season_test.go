@@ -33,7 +33,7 @@ func TestRunSeasonContinuesAfterEpisodeFailure(t *testing.T) {
 	firstErr := errors.New("first episode failed")
 	var calls []int
 	err := runSeason(context.Background(), nil, &videoQuality, &audioQuality, []string{"ja-JP"}, nil, episodes, 2, "",
-		func(_ context.Context, _ *api.Client, _ string, info *api.EpisodeInfo, _ []string, _ []string, _ *string, _ *string, workers int, outputDir string) error {
+		func(_ context.Context, _ *api.Client, _ string, info *api.EpisodeInfo, _ []string, _ []string, _ *string, _ *string, workers int, outputDir string, totalEpisodes int) error {
 			if workers != 2 {
 				t.Fatalf("workers = %d, want 2", workers)
 			}
