@@ -13,5 +13,7 @@ require (
 	github.com/Eyevinn/mp4ff v0.48.0 // indirect
 	github.com/chmike/cmac-go v1.1.0 // indirect
 	github.com/unki2aut/go-xsd-types v0.0.0-20200220223938-30e5405398f8 // indirect
+	golang.org/x/sys v0.47.0 // indirect
+	golang.org/x/term v0.45.0 // indirect
 	google.golang.org/protobuf v1.36.2 // indirect
 )
