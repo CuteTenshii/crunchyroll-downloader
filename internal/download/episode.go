@@ -193,7 +193,7 @@ func Episode(ctx context.Context, client *api.Client, baseContentID string, info
 		return fmt.Errorf("failed to get audio base URL for %s", version.locale)
 	}
 
-	audioFile, err := media.DownloadParts(ctx, client, audioBaseUrl, audioRepresentationId, audioSet, keys, workers)
+	audioFile, err := media.DownloadParts(ctx, client, audioBaseUrl, audioRepresentationId, audioSet, keys, workers, mux.TrackTitle(version.locale)+" audio")
 	if err != nil {
 		return fmt.Errorf("downloading audio for %s: %w", version.locale, err)
 	}
@@ -207,7 +207,7 @@ func Episode(ctx context.Context, client *api.Client, baseContentID string, info
 	if baseUrl == nil {
 		return fmt.Errorf("failed to get video base URL")
 	}
-	videoFile, err = media.DownloadParts(ctx, client, baseUrl, representationId, videoSet, keys, workers)
+	videoFile, err = media.DownloadParts(ctx, client, baseUrl, representationId, videoSet, keys, workers, "video")
 	if err != nil {
 		return fmt.Errorf("downloading video: %w", err)
 	}
@@ -272,7 +272,7 @@ func Episode(ctx context.Context, client *api.Client, baseContentID string, info
 					return fmt.Errorf("failed to get audio base URL for %s", version.locale)
 				}
 
-				audioFile, err := media.DownloadParts(gctx, client, audioBaseUrl, audioRepresentationId, audioSet, keys, workers)
+				audioFile, err := media.DownloadParts(gctx, client, audioBaseUrl, audioRepresentationId, audioSet, keys, workers, mux.TrackTitle(version.locale)+" audio")
 				if err != nil {
 					return fmt.Errorf("downloading audio for %s: %w", version.locale, err)
 				}

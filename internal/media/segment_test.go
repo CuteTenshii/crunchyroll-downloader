@@ -149,7 +149,7 @@ func TestDownloadPartsRemovesEncryptedTempOnSegmentFailure(t *testing.T) {
 		return nil, errors.New("segment failed")
 	})
 
-	if filename, err := DownloadParts(ctx, client, &baseURL, &representationID, set, nil, 1); err == nil {
+	if filename, err := DownloadParts(ctx, client, &baseURL, &representationID, set, nil, 1, "test"); err == nil {
 		t.Fatalf("DownloadParts() = %q, nil error; want segment failure", filename)
 	}
 

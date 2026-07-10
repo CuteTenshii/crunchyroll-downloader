@@ -11,9 +11,16 @@ import (
 	"sync/atomic"
 	"time"
 
+	"crunchyroll-downloader/internal/output"
 	"github.com/iyear/gowidevine"
 	"github.com/unki2aut/go-mpd"
 )
+
+// throttle for progress display: at most once per second
+var lastProgressNanos atomic.Int64
+
+// total bytes downloaded across all segments (for ETA estimation)
+var totalBytesDownloaded atomic.Int64
 
 const defaultWorkers = 10
 
@@ -117,7 +124,7 @@ func createTempFilename(pattern string) (string, error) {
 	return name, nil
 }
 
-func DownloadParts(ctx context.Context, client httpDoer, baseUrl, representationId *string, set *mpd.AdaptationSet, keys []*widevine.Key, workers int) (string, error) {
+func DownloadParts(ctx context.Context, client httpDoer, baseUrl, representationId *string, set *mpd.AdaptationSet, keys []*widevine.Key, workers int, streamLabel string) (string, error) {
 	if workers <= 0 {
 		workers = defaultWorkers
 	}
@@ -170,7 +177,27 @@ func DownloadParts(ctx context.Context, client httpDoer, baseUrl, representation
 				}
 				results <- segmentResult{index: job.index, data: data}
 				count := done.Add(1)
-				fmt.Printf("\rDownloaded %v of %v segments (%v%%)", count, total, (100*count)/int64(total))
+				totalBytesDownloaded.Add(int64(len(data)))
+				output.RecordBytes(int64(len(data)))
+
+				// Throttle progress display to ~1/sec (D-09)
+				now := time.Now().UnixNano()
+				last := lastProgressNanos.Load()
+				if now-last >= 1e9 {
+					lastProgressNanos.Store(now)
+					bps := output.SpeedBps()
+					avgSize := int64(0)
+					currentCount := done.Load()
+					if currentCount > 0 {
+						avgSize = totalBytesDownloaded.Load() / currentCount
+					}
+					remainingBytes := int64(total-int(currentCount)) * avgSize
+					eta := output.ETASeconds(remainingBytes)
+					speedStr := formatSpeed(bps)
+					etaStr := formatETAShort(eta)
+					output.Global.Progress("Downloaded %d/%d segments (%d%%) ... %s, ETA %s ... %s",
+						count, total, (100*count)/int64(total), speedStr, etaStr, streamLabel)
+				}
 			}
 		}()
 	}
@@ -213,7 +240,7 @@ func DownloadParts(ctx context.Context, client httpDoer, baseUrl, representation
 		return "", err
 	}
 
-	fmt.Println("\nFinished downloading!")
+	output.Global.Debug("Stream download complete: %s", streamLabel)
 
 	filename, err := getFilename(set)
 	if err != nil {
@@ -248,6 +275,29 @@ func DownloadParts(ctx context.Context, client httpDoer, baseUrl, representation
 	}
 
 	return filename, nil
+}
+
+func formatSpeed(bps float64) string {
+	switch {
+	case bps >= 1<<30:
+		return fmt.Sprintf("%.1f GB/s", bps/float64(1<<30))
+	case bps >= 1<<20:
+		return fmt.Sprintf("%.1f MB/s", bps/float64(1<<20))
+	case bps >= 1<<10:
+		return fmt.Sprintf("%.0f KB/s", bps/float64(1<<10))
+	default:
+		return fmt.Sprintf("%.0f B/s", bps)
+	}
+}
+
+func formatETAShort(secs int) string {
+	if secs <= 0 {
+		return "0s"
+	}
+	if secs < 60 {
+		return fmt.Sprintf("%ds", secs)
+	}
+	return fmt.Sprintf("%dm %ds", secs/60, secs%60)
 }
 
 func DownloadSubs(ctx context.Context, client httpDoer, url string) (string, error) {
