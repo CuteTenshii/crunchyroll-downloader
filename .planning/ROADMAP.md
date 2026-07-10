@@ -88,11 +88,26 @@ Plans:
 ## Phase 5: Testing & Quality
 
 **Goal:** Comprehensive test coverage and CI integration.
+**Progress:** 2/2 plan files created (2026-07-10).
 
 | Plan | Req | Description |
 |------|-----|-------------|
 | 5.1 | QOL-01 | Full test suite: unit tests for all internal packages, integration tests with mock HTTP |
 | 5.2 | QOL-01 | CI pipeline with `go vet`, lint, and coverage reporting |
+
+**Details:**
+
+- 5.1 is Wave 1 — no dependencies on other Phase 5 plans
+- 5.2 is also Wave 1 — CI pipeline is independent of test content (runs `go test ./...` which works with any number of tests)
+- D-05 (os.Exit refactor) and D-06 (FFmpegRunner interface) are **already complete** per research verification — no source changes needed
+- D-07/D-08/D-09: testdata per-package (MPD XML + JSON fixtures), testutil factory functions
+- D-03: table-driven stdlib tests only — no testify dependency
+- D-04: httptest for HTTP mocking, exec.Command helper for FFmpeg
+
+Plans:
+
+- [ ] 05-01-PLAN.md — Test infrastructure (testutil + testdata + MPD/API fixtures), pure function unit tests (locale, main.go, config, download, media), integration tests (httptest for processURL, DRM, API client)
+- [ ] 05-02-PLAN.md — GitHub Actions CI workflow (go vet, golangci-lint, test, coverage), Makefile targets, golangci-lint config
 
 ---
 
@@ -100,12 +115,13 @@ Plans:
 
 | Phase | Focus | Plans | Req Count | Est. Effort |
 |-------|-------|-------|-----------|-------------|
-| 1 | Foundation (errors, HTTP, memory) | 8 | 18 | High |
-| 2 | Performance (caching, parallelism) | 3/3 | Complete    | 2026-07-09 |
-| 3 | Usability (CLI, config, validation) | 5/5 | Complete    | 2026-07-09 |
-| 4 | UX (progress, output) | 3 | 5 | Low |
+| 1 | Foundation (errors, HTTP, memory) | 8/8 | Complete | 2026-07-08 |
+| 2 | Performance (caching, parallelism) | 3/3 | Complete | 2026-07-09 |
+| 3 | Usability (CLI, config, validation) | 5/5 | Complete | 2026-07-09 |
+| 4 | UX (progress, output) | 3/3 | Complete | 2026-07-10 |
 | 5 | Testing & CI | 2 | 1 | Medium |
+
 ---
 
 *Roadmap created: 2026-07-08*
-*Last updated: 2026-07-09 after completing Phase 3*
+*Last updated: 2026-07-10 after creating Phase 5 plan files*
