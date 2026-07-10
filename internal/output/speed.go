@@ -54,11 +54,11 @@ func (st *SpeedTracker) Bps() float64 {
 
 	for i := 0; i < windowSize; i++ {
 		idx := (st.pos - 1 - i + windowSize*2) % windowSize
-		if i == 0 {
-			oldestTime = st.buf[idx].at
-		}
 		if st.buf[idx].at.After(cutoff) {
 			totalBytes += st.buf[idx].bytes
+			if oldestTime.IsZero() || st.buf[idx].at.Before(oldestTime) {
+				oldestTime = st.buf[idx].at
+			}
 			validSamples++
 		}
 	}
