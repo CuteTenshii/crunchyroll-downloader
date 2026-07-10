@@ -16,6 +16,7 @@ import (
 	"crunchyroll-downloader/internal/config"
 	"crunchyroll-downloader/internal/download"
 	"crunchyroll-downloader/internal/drm"
+	"crunchyroll-downloader/internal/output"
 )
 
 var (
@@ -29,6 +30,8 @@ var (
 	workers       = flag.Int("workers", 10, "Number of concurrent segment download workers")
 	outputDir     = flag.String("output-dir", "", "Custom output directory for downloads")
 	widevineDev   = flag.String("widevine-device", "", "Path to .wvd file or directory with client_id.bin + private_key.pem")
+	jsonMode      = flag.Bool("json", false, "Output progress as NDJSON")
+	quietMode     = flag.Bool("quiet", false, "Suppress progress output (errors still print)")
 )
 
 func parseLangs(s string) []string {
@@ -104,23 +107,23 @@ func validateAllURLs(urls []string) []invalidURL {
 func processURL(ctx context.Context, client *api.Client, rawURL string, outputDir string, audioLangs, subsLangs []string) {
 	parsed, err := url.Parse(rawURL)
 	if err != nil {
-		fmt.Printf("Invalid URL: %v\n", err)
+		output.Global.Error("Invalid URL: %v", err)
 		return
 	}
 
 	parts := strings.Split(strings.Trim(parsed.Path, "/"), "/")
 	if len(parts) < 2 {
-		fmt.Printf("Invalid URL format: %s\n", rawURL)
+		output.Global.Error("Invalid URL format: %s", rawURL)
 		return
 	}
 	contentType := parts[0]
 	contentID := parts[1]
 	if len(contentID) < 9 || len(contentID) > 14 {
-		fmt.Printf("Invalid URL format: %s\n", rawURL)
+		output.Global.Error("Invalid URL format: %s", rawURL)
 		return
 	}
 	if contentType != "watch" && contentType != "series" {
-		fmt.Printf("Invalid URL (must be /watch/ or /series/): %s\n", rawURL)
+		output.Global.Error("Invalid URL (must be /watch/ or /series/): %s", rawURL)
 		return
 	}
 
@@ -137,16 +140,16 @@ func processURL(ctx context.Context, client *api.Client, rawURL string, outputDi
 	if contentType == "watch" {
 		info, err := client.GetEpisodeInfo(ctx, contentID)
 		if err != nil {
-			fmt.Printf("Error fetching episode info: %v\n", err)
+			output.Global.Error("Error fetching episode info: %v", err)
 			return
 		}
 		if err := download.Episode(ctx, client, contentID, info, audioLangs, subsLangs, videoQuality, audioQuality, *workers, outputDir); err != nil {
-			fmt.Printf("Error downloading episode: %v\n", err)
+			output.Global.Error("Error downloading episode: %v", err)
 		}
 	} else {
 		seasons, err := client.GetSeasons(ctx, contentID, primaryAudio, primarySubs)
 		if err != nil {
-			fmt.Printf("Error fetching seasons: %v\n", err)
+			output.Global.Error("Error fetching seasons: %v", err)
 			return
 		}
 
@@ -159,29 +162,29 @@ func processURL(ctx context.Context, client *api.Client, rawURL string, outputDi
 				}
 			}
 			if seasonID == "" {
-				fmt.Printf("This anime has no season %v!\n", *seasonNumber)
+				output.Global.Warn("This anime has no season %v!", *seasonNumber)
 				return
 			}
 
 			episodes, err := client.GetSeasonEpisodes(ctx, seasonID, primaryAudio, primarySubs)
 			if err != nil {
-				fmt.Printf("Error fetching episodes: %v\n", err)
+				output.Global.Error("Error fetching episodes: %v", err)
 				return
 			}
 			if err := download.Season(ctx, client, videoQuality, audioQuality, audioLangs, subsLangs, episodes, *workers, outputDir); err != nil {
-				fmt.Printf("Season completed with errors: %v\n", err)
+				output.Global.Warn("Season completed with errors: %v", err)
 			}
 		} else {
-			fmt.Print("No season number specified, downloading all seasons...\n")
+			output.Global.Info("No season number specified, downloading all seasons...")
 
 			for _, season := range seasons {
 				episodes, err := client.GetSeasonEpisodes(ctx, season.ID, primaryAudio, primarySubs)
 				if err != nil {
-					fmt.Printf("Error fetching episodes for season %v: %v\n", season.SeasonNumber, err)
+					output.Global.Error("Error fetching episodes for season %v: %v", season.SeasonNumber, err)
 					continue
 				}
 				if err := download.Season(ctx, client, videoQuality, audioQuality, audioLangs, subsLangs, episodes, *workers, outputDir); err != nil {
-					fmt.Printf("Season %v completed with errors: %v\n", season.SeasonNumber, err)
+					output.Global.Warn("Season %v completed with errors: %v", season.SeasonNumber, err)
 				}
 			}
 		}
@@ -267,10 +270,20 @@ func main() {
 		explicitFlags[f.Name] = true
 	})
 
+	// Resolve output mode (after flag.Parse)
+	switch {
+	case *jsonMode:
+		output.Init(output.ModeJSON)
+	case *quietMode:
+		output.Init(output.ModeQuiet)
+	default:
+		output.Init(output.ModeHuman)
+	}
+
 	// Resolve config path
 	cfgPath, err := config.ConfigPath()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: cannot determine config path: %v — skipping config file\n", err)
+		output.Global.Warn("Warning: cannot determine config path: %v — skipping config file", err)
 	}
 
 	// Load config (if config path was resolved)
@@ -279,14 +292,14 @@ func main() {
 		cfg, err = config.Load(cfgPath)
 		if err != nil {
 			// Invalid JSON: warn and continue with defaults
-			fmt.Fprintf(os.Stderr, "Warning: %v — using defaults\n", err)
+			output.Global.Warn("%v — using defaults", err)
 			cfg = &config.Config{}
 		} else if isAllNilConfig(cfg) {
 			// Config file does not exist: create skeleton
 			if err := config.WriteSkeleton(cfgPath); err != nil {
-				fmt.Fprintf(os.Stderr, "Warning: could not create default config: %v\n", err)
+				output.Global.Warn("Could not create default config: %v", err)
 			} else {
-				fmt.Printf("Created default config at %s\n", cfgPath)
+				output.Global.Info("Created default config at %s", cfgPath)
 			}
 		}
 	}
@@ -297,7 +310,7 @@ func main() {
 
 	// Validate FFmpeg availability before any download (D-18, D-19)
 	if err := checkFFmpeg(); err != nil {
-		fmt.Printf("Error: %v\n", err)
+		output.Global.Error("%v", err)
 		os.Exit(1)
 	}
 
@@ -314,20 +327,20 @@ func main() {
 
 	client, err := api.NewWithContext(ctx, resolvedEtpRt)
 	if err != nil {
-		fmt.Printf("Failed to initialize API client: %v\n", err)
+		output.Global.Error("Failed to initialize API client: %v", err)
 		os.Exit(1)
 	}
 	client.Debug = *debug
 	// Validate output directory exists if specified (D-11)
 	if errMsg := validateOutputDir(resolvedOutputDir); errMsg != "" {
-		fmt.Println(errMsg)
+		output.Global.Error("%s", errMsg)
 		os.Exit(1)
 	}
 
 	if *urlsFile != "" {
 		file, err := os.Open(*urlsFile)
 		if err != nil {
-			fmt.Printf("Failed to open URLs file: %s\n", err)
+			output.Global.Error("Failed to open URLs file: %s", err)
 			os.Exit(1)
 		}
 		defer file.Close()
@@ -343,18 +356,18 @@ func main() {
 
 		// Validate all URLs upfront before any downloads (D-17)
 		if invalid := validateAllURLs(urls); len(invalid) > 0 {
-			fmt.Println("Invalid URLs found:")
+			output.Global.Info("Invalid URLs found:")
 			for _, inv := range invalid {
-				fmt.Printf("  %s — %s\n", inv.URL, inv.Error)
+				output.Global.Info("  %s — %s", inv.URL, inv.Error)
 			}
 			os.Exit(1)
 		}
 
-		fmt.Printf("Found %d URLs to download\n\n", len(urls))
+		output.Global.Info("Found %d URLs to download\n", len(urls))
 		for i, u := range urls {
-			fmt.Printf("=== [%d/%d] %s ===\n", i+1, len(urls), u)
+			output.Global.Info("=== [%d/%d] %s ===", i+1, len(urls), u)
 			processURL(ctx, client, u, resolvedOutputDir, audioLangs, subsLangs)
-			fmt.Println()
+			output.Global.Info("")
 		}
 	} else {
 		processURL(ctx, client, *url, resolvedOutputDir, audioLangs, subsLangs)
