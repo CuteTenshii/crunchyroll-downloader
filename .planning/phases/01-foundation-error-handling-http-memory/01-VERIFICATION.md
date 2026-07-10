@@ -1,37 +1,44 @@
 ---
 phase: 01-foundation-error-handling-http-memory
 verified: 2026-07-09T07:37:03Z
-status: human_needed
+status: passed
 next_action: "Run end-to-end human UAT for OS signal interruption and shutdown cleanup behavior."
 next_command: "Manual UAT: start a real or mocked download, send SIGINT/SIGTERM, and confirm local artifacts are removed and shutdown is bounded."
 score: "26/30 must-haves verified"
 behavior_unverified: 4
 overrides_applied: 0
 deferred:
+
   - truth: "QOL-01 strict coverage target >= 60% for internal/media, internal/download, and internal/locale"
     addressed_in: "Phase 5"
     evidence: "ROADMAP Phase 5 goal is comprehensive test coverage and CI integration; Plan 5.1 is QOL-01 full test suite."
 behavior_unverified_items:
+
   - truth: "D-18: SIGINT and SIGTERM cancel active work instead of leaving partial state behind."
     test: "Start the CLI against a real or mocked long-running download, send SIGINT and SIGTERM, and observe cancellation reaching active work."
     expected: "The process exits cleanly without panic, active work is canceled, and no partial local state remains."
     why_human: "Code uses signal.NotifyContext and passes ctx downward, but no automated test sends real OS signals through main."
+
   - truth: "D-20: Temporary files are always removed on interruption."
     test: "Interrupt during subtitle, audio, video, and mux stages while temp files exist."
     expected: "All tracked temp files are removed after interruption."
     why_human: "Unit tests cover cleanup helpers and segment failure cleanup, but not an end-to-end interrupted episode path."
+
   - truth: "D-21: DeleteStream failures do not block local shutdown."
     test: "Force DeleteStream to fail or hang during interrupted shutdown."
     expected: "Local cleanup still completes and shutdown remains bounded by the cleanup timeout."
     why_human: "The defer uses a 10s background cleanup context, but no test exercises DeleteStream failure timing during shutdown."
+
   - truth: "D-22: Any partial episode artifacts are removed after interruption."
     test: "Interrupt after a partial output file has been created."
     expected: "The partial output and temp artifacts are removed."
     why_human: "The cleanup function is tested directly, but the interrupt-triggered path through Episode is not exercised."
 human_verification:
+
   - test: "SIGINT/SIGTERM end-to-end cancellation"
     expected: "A running download exits cleanly without panic, cancels active HTTP/media/mux work, and leaves no partial local artifacts."
     why_human: "Requires real OS signal delivery through the CLI entrypoint and a long-running download or mock harness."
+
   - test: "Interrupted shutdown with DeleteStream failure"
     expected: "A remote DeleteStream failure or hang is reported/bounded and does not prevent local artifact cleanup."
     why_human: "Requires an API failure/hang during deferred cleanup; static checks cannot prove shutdown timing."

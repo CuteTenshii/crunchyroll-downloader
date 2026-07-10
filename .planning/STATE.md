@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: Ready to plan
-stopped_at: Phase 04 UI-SPEC approved
-last_updated: "2026-07-10T00:34:46.746Z"
+status: Complete
+stopped_at: Phase 5 complete
+last_updated: "2026-07-10T02:12:00.000Z"
 last_activity: 2026-07-10
 progress:
   total_phases: 5
-  completed_phases: 3
-  total_plans: 16
-  completed_plans: 16
-  percent: 75
+  completed_phases: 5
+  total_plans: 18
+  completed_plans: 18
+  percent: 100
 ---
 
 # Project State
@@ -32,7 +32,9 @@ Improvement & Optimization Pass — 5 phases targeting performance, usability, U
 
 ## Active Phase
 
-Phase 4: User Experience — Progress & Output (complete, 3/3 plans complete)
+Phase 5: Testing & Quality — (complete, 2/2 plans complete)
+
+All 5 phases complete. Milestone v1.0 fully delivered.
 
 ## Completed Plans
 
@@ -54,6 +56,8 @@ Phase 4: User Experience — Progress & Output (complete, 3/3 plans complete)
 | 04-03 | [04-03-SUMMARY.md](./phases/04-user-experience-progress-output/04-03-SUMMARY.md) | 2026-07-10 | 07ee40c, e09321b, a09d866 |
 | 04-01 | [04-01-SUMMARY.md](./phases/04-user-experience-progress-output/04-01-SUMMARY.md) | 2026-07-10 | 072d075, 751965d |
 | 04-02 | [04-02-SUMMARY.md](./phases/04-user-experience-progress-output/04-02-SUMMARY.md) | 2026-07-10 | 3ed61e9, 993bd37, da8fb26 |
+| 05-01 | [05-01-SUMMARY.md](./phases/05-testing-quality/05-01-SUMMARY.md) | 2026-07-09 | 4647915, 2b47065, 5982bd3, cf34a31 |
+| 05-02 | [05-02-SUMMARY.md](./phases/05-testing-quality/05-02-SUMMARY.md) | 2026-07-09 | d4147ba, 12832c6, cc8d3e8 |
 
 ## Quick Tasks Completed
 
@@ -64,17 +68,16 @@ Phase 4: User Experience — Progress & Output (complete, 3/3 plans complete)
 | 260709-uw6 | Move config JSON from XDG directory to project root (./config.json) | 2026-07-10 | 7bc96eb | [260709-uw6-move-config-json-from-xdg-directory-to-p](./quick/260709-uw6-move-config-json-from-xdg-directory-to-p/) |
 | 260709-v3w | Fix speed display unit — Bps() used newest instead of oldest sample timestamp | 2026-07-10 | 0167928 | [260709-v3w-fix-speed-display-unit-bps-uses-wrong-ol](./quick/260709-v3w-fix-speed-display-unit-bps-uses-wrong-ol/) |
 
-Last activity: 2026-07-10 - Completed quick task 260709-v3w: Fix speed display unit — Bps() used newest instead of oldest sample timestamp
+Last activity: 2026-07-10 - Phase 5 complete: test infrastructure, CI pipeline, and quality tooling
 
 ## Next Action
 
-Phase 4 complete. Begin Phase 5: Final Polish & Documentation.
+All 5 phases complete. Milestone v1.0 fully delivered. Ready for project completion/shipping.
 
 ## Session
 
-**Last session:** 2026-07-10T00:34:46.746Z
-**Stopped at:** Phase 04 complete (3/3 plans)
-**Resume file:** .planning/phases/04-user-experience-progress-output/04-03-SUMMARY.md
+**Last session:** 2026-07-10T02:12:00.000Z
+**Stopped at:** Phase 5 complete — milestone v1.0 fully delivered
 
 ## Performance Metrics
 
@@ -85,6 +88,8 @@ Phase 4 complete. Begin Phase 5: Final Polish & Documentation.
 | Phase 03-usability-configuration-validation P02 | 5 min | 3 tasks | 6 files |
 | Phase 03-usability-configuration-validation P03 | 4 min | 3 tasks | 3 files |
 | Phase 03-usability-configuration-validation P04 | 6 min | 3 tasks | 4 files |
+| Phase 05-testing-quality P01 | 8 min | 3 tasks | 25 files |
+| Phase 05-testing-quality P02 | 8 min | 2 tasks | 3 files |
 
 ## Decisions
 
@@ -103,3 +108,7 @@ Phase 4 complete. Begin Phase 5: Final Polish & Documentation.
 - [Phase 03-usability-configuration-validation]: .env file reading removed from drm.go — legacy env var names kept as direct os.LookupEnv fallbacks (D-15, D-16)
 - [Phase 03-usability-configuration-validation]: multiUnderscore var compiled once at package level using regexp.MustCompile — safe per threat model T-03.4-01 (bounded pattern, no ReDoS risk)
 - [Phase 03-usability-configuration-validation]: parseLangs called once in main() after config resolution per D-22 — not per-URL in batch mode | Empty lang slices default to ja-JP (audio) inside processURL
+- [Phase 05-testing-quality]: Table-driven tests using Go stdlib `testing` package — no testify dependency (D-03)
+- [Phase 05-testing-quality]: httptest.NewServer for HTTP mocking in integration tests (D-04)
+- [Phase 05-testing-quality]: testutil package at project root with factory functions for EpisodeInfo, SeasonEpisode, DummyMPD (D-09)
+- [Phase 05-testing-quality]: CI uses continue-on-error: true for golangci-lint step to avoid blocking merges on lint issues
