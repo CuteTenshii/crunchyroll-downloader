@@ -1,10 +1,10 @@
 ---
 gsd_state_version: 1.0
 milestone: v1.0
-milestone_name: milestone
-status: Complete
-stopped_at: Phase 5 complete
-last_updated: "2026-07-10T02:12:00.000Z"
+milestone_name: Improvement & Optimization Pass
+status: Archived
+stopped_at: Milestone v1.0 complete
+last_updated: "2026-07-10T14:00:00.000Z"
 last_activity: 2026-07-10
 progress:
   total_phases: 5
@@ -18,23 +18,19 @@ progress:
 
 ## Current Milestone
 
-Improvement & Optimization Pass — 5 phases targeting performance, usability, UX, and code quality.
+v1.0 Improvement & Optimization Pass — shipped 2026-07-10. All 5 phases complete. See `.planning/milestones/` for archives.
 
 ## Planning Artifacts
 
 | Document | Status | Description |
 |----------|--------|-------------|
-| PROJECT.md | ✓ Created | Project context, validated/active requirements, key decisions |
-| REQUIREMENTS.md | ✓ Created | 28 v1 requirements with REQ-IDs across 4 domains |
-| ROADMAP.md | ✓ Created | 5 phases with task breakdown and dependency ordering |
-| config.json | ✓ Created | Interactive mode, parallel execution, standard granularity |
+| PROJECT.md | ✓ Updated | v1.0 shipped, requirements validated, next goals listed |
+| ROADMAP.md | ✓ Archived | v1.0 collapsed to milestone grouping |
+| REQUIREMENTS.md | ✓ Archived | All 37 v1 requirements complete, archived to milestones/ |
+| milestones/v1.0-ROADMAP.md | ✓ Created | Full milestone archive |
+| milestones/v1.0-REQUIREMENTS.md | ✓ Created | Requirements archive with outcomes |
+| v1.0-MILESTONE-AUDIT.md | ✓ Created | Milestone audit — passed |
 | STATE.md | ✓ Updated | This file |
-
-## Active Phase
-
-Phase 5: Testing & Quality — (complete, 2/2 plans complete)
-
-All 5 phases complete. Milestone v1.0 fully delivered.
 
 ## Completed Plans
 
@@ -68,47 +64,15 @@ All 5 phases complete. Milestone v1.0 fully delivered.
 | 260709-uw6 | Move config JSON from XDG directory to project root (./config.json) | 2026-07-10 | 7bc96eb | [260709-uw6-move-config-json-from-xdg-directory-to-p](./quick/260709-uw6-move-config-json-from-xdg-directory-to-p/) |
 | 260709-v3w | Fix speed display unit — Bps() used newest instead of oldest sample timestamp | 2026-07-10 | 0167928 | [260709-v3w-fix-speed-display-unit-bps-uses-wrong-ol](./quick/260709-v3w-fix-speed-display-unit-bps-uses-wrong-ol/) |
 
-Last activity: 2026-07-10 - Phase 5 complete: test infrastructure, CI pipeline, and quality tooling
+Last activity: 2026-07-10 - Milestone v1.0 shipped and archived
 
 ## Next Action
 
-All 5 phases complete. Milestone v1.0 fully delivered. Ready for project completion/shipping.
+Milestone v1.0 shipped. Ready for next milestone planning: `/gsd-new-milestone`
 
-## Session
+## Project Reference
 
-**Last session:** 2026-07-10T02:12:00.000Z
-**Stopped at:** Phase 5 complete — milestone v1.0 fully delivered
+See: .planning/PROJECT.md (updated 2026-07-10)
 
-## Performance Metrics
-
-| Phase | Plan | Duration | Notes |
-|-------|------|----------|-------|
-| Phase 03-usability-configuration-validation P01 | 8 min | 3 tasks | 4 files |
-| Phase 03-usability-configuration-validation P05 | 1 min | 1 tasks | 2 files |
-| Phase 03-usability-configuration-validation P02 | 5 min | 3 tasks | 6 files |
-| Phase 03-usability-configuration-validation P03 | 4 min | 3 tasks | 3 files |
-| Phase 03-usability-configuration-validation P04 | 6 min | 3 tasks | 4 files |
-| Phase 05-testing-quality P01 | 8 min | 3 tasks | 25 files |
-| Phase 05-testing-quality P02 | 8 min | 2 tasks | 3 files |
-
-## Decisions
-
-- [Phase 03-usability-configuration-validation]: CRUNCHYROLL_CLIENT_AUTH env var checked on every fetchAccessToken call (not cached at startup) — Per D-08: enables credential rotation without restart
-- [Phase 04-user-experience-progress-output]: output package uses global singleton (output.Global) set once in main() after flag parsing — same pattern as internal/config (D-03)
-- [Phase 04-user-experience-progress-output]: --json outputs NDLINE JSON with structured events (episode_start, episode_complete, error, segment_progress, season_summary) — not slog (D-13)
-- [Phase 04-user-experience-progress-output]: --quiet mode suppresses Info/Debug/Progress but always shows Warn/Error on stderr (D-16)
-- [Phase 04-user-experience-progress-output]: Per-episode result line uses green ✓ on success, red ✗ on error — printed by Season() caller (D-06, D-07)
-- [Phase 04-user-experience-progress-output]: SpeedTracker uses 10-sample ring buffer for rolling average (D-10), ETA clamped to never increase (Pitfall 5)
-- [Phase 03-usability-configuration-validation]: Episode() and Season() use outputDir string param — empty string means CWD default behavior (D-12)
-- [Phase 03-usability-configuration-validation]: validateAllURLs collects ALL invalid URLs upfront using url.Parse() — does not stop at first error (D-17)
-- [Phase 03-usability-configuration-validation]: QOL-04 (&&→||) and QOL-05 (url.Parse()) implemented as bundled refactor of processURL
-- [Phase 03-usability-configuration-validation]: FFmpeg check runs after config resolution, before API client creation — config errors surface first (D-18)
-- [Phase 03-usability-configuration-validation]: SetWidevinePath called before api.NewWithContext to ensure sync.Once uses correct explicit path (Pitfall 3)
-- [Phase 03-usability-configuration-validation]: Widevine path auto-detection via os.Stat — .wvd extension vs directory with client_id.bin+private_key.pem
-- [Phase 03-usability-configuration-validation]: .env file reading removed from drm.go — legacy env var names kept as direct os.LookupEnv fallbacks (D-15, D-16)
-- [Phase 03-usability-configuration-validation]: multiUnderscore var compiled once at package level using regexp.MustCompile — safe per threat model T-03.4-01 (bounded pattern, no ReDoS risk)
-- [Phase 03-usability-configuration-validation]: parseLangs called once in main() after config resolution per D-22 — not per-URL in batch mode | Empty lang slices default to ja-JP (audio) inside processURL
-- [Phase 05-testing-quality]: Table-driven tests using Go stdlib `testing` package — no testify dependency (D-03)
-- [Phase 05-testing-quality]: httptest.NewServer for HTTP mocking in integration tests (D-04)
-- [Phase 05-testing-quality]: testutil package at project root with factory functions for EpisodeInfo, SeasonEpisode, DummyMPD (D-09)
-- [Phase 05-testing-quality]: CI uses continue-on-error: true for golangci-lint step to avoid blocking merges on lint issues
+**Core value:** Download any anime episode or full season from Crunchyroll into a single playable MKV file
+**Current focus:** Planning next milestone

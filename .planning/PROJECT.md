@@ -2,7 +2,7 @@
 
 ## What This Is
 
-A CLI tool written in Go that downloads anime episodes from Crunchyroll, decrypts Widevine DRM, and remuxes video + multi-audio + multi-subtitle tracks into MKV files. Built for users who want offline local copies of content they have legitimate access to via a Crunchyroll Premium account.
+A CLI tool written in Go that downloads anime episodes from Crunchyroll, decrypts Widevine DRM, and remuxes video + multi-audio + multi-subtitle tracks into MKV files. Now with proper error handling, configurable output, disk-efficient streaming, and CI-backed testing.
 
 ## Core Value
 
@@ -12,78 +12,81 @@ Download any anime episode or full season from Crunchyroll into a single playabl
 
 ### Validated
 
-- ✓ User can download single episode from `/watch/` URL — existing
-- ✓ User can download full season/series from `/series/` URL — existing
-- ✓ User can download batch of URLs from text file — existing
-- ✓ User can select video quality (1080p, 720p, etc.) — existing
-- ✓ User can select audio quality — existing
-- ✓ User can select multiple audio languages (multi-dub) — existing
-- ✓ User can select multiple subtitle languages — existing
-- ✓ User can use "all" shorthand for all available audio/subtitle tracks — existing
-- ✓ Widevine DRM decryption via `.wvd` or `client_id.bin` + `private_key.pem` — existing
-- ✓ Segments downloaded concurrently with 10-worker pool and retry-with-backoff — existing
-- ✓ Bearer token auto-refresh on 401 — existing
-- ✓ Stream cleanup via `DELETE /playback/v1/token/` — existing
-- ✓ MKV metadata injection (title, show, track, language tags) — existing
-- ✓ `ja-JP`, `en-US`, `pt-BR` and 24 other locale mappings — existing
-- ✓ Cross-compilation for Linux/macOS/Windows — existing
+- ✓ User can download single episode from `/watch/` URL — v1.0
+- ✓ User can download full season/series from `/series/` URL — v1.0
+- ✓ User can download batch of URLs from text file — v1.0
+- ✓ User can select video quality (1080p, 720p, etc.) — v1.0
+- ✓ User can select audio quality — v1.0
+- ✓ User can select multiple audio languages (multi-dub) — v1.0
+- ✓ User can select multiple subtitle languages — v1.0
+- ✓ User can use "all" shorthand for all available audio/subtitle tracks — v1.0
+- ✓ Widevine DRM decryption via `.wvd` or `client_id.bin` + `private_key.pem` — v1.0
+- ✓ Segments downloaded concurrently with configurable worker pool and retry-with-backoff — v1.0
+- ✓ Bearer token auto-refresh on 401 (bounded to one retry) — v1.0
+- ✓ Stream cleanup via `DELETE /playback/v1/token/` — v1.0
+- ✓ MKV metadata injection (title, show, track, language tags) — v1.0
+- ✓ `ja-JP`, `en-US`, `pt-BR` and 24 other locale mappings — v1.0
+- ✓ Cross-compilation for Linux/macOS/Windows — v1.0
+- ✓ Streaming segment assembly (400MB → ~64KB per-episode RAM) — v1.0
+- ✓ HTTP connection reuse with configured transport and timeouts — v1.0
+- ✓ All panic() calls replaced with error returns — v1.0
+- ✓ Cached Widevine device (sync.Once, no os.ReadDir(".") per request) — v1.0
+- ✓ No stack traces shown to user on error — v1.0
+- ✓ Graceful SIGINT/SIGTERM — cleanup temp files, release streams — v1.0
+- ✓ `CRUNCHYROLL_ETP_RT` environment variable support — v1.0
+- ✓ Config file support (`~/.config/animeheaven/config.json`) — v1.0
+- ✓ `--output-dir` flag for custom output directory — v1.0
+- ✓ Batch URL validation upfront — v1.0
+- ✓ FFmpeg availability check at startup — v1.0
+- ✓ Explicit Widevine device paths via CLI flags — v1.0
+- ✓ `CRUNCHYROLL_CLIENT_AUTH` env var for Basic Auth override — v1.0
+- ✓ Season download per-episode progress [Episode N/M] — v1.0
+- ✓ Download speed (MB/s) and ETA during segments — v1.0
+- ✓ `--quiet` / `--json` output modes — v1.0
+- ✓ Season error accumulation with summary — v1.0
+- ✓ Structured logging with levels (Info/Warn/Error/Debug/Progress) — v1.0
+- ✓ Configurable `--workers` flag for segment concurrency — v1.0
+- ✓ GetBaseUrl split into GetVideoBaseUrl/GetAudioBaseUrl — v1.0
+- ✓ URL validation fix (`&&` → `||`) — v1.0
+- ✓ `url.Parse()` replacing string-splitting — v1.0
+- ✓ Bounded token refresh (one retry, no recursion) — v1.0
+- ✓ Regex sanitizeFilename (O(n) replaces O(n²)) — v1.0
+- ✓ `parseLangs` called once at startup — v1.0
+- ✓ `os.CreateTemp` errors checked and propagated — v1.0
+- ✓ FFmpeg failures return error (no panic) — v1.0
+- ✓ Mux cleanup warnings instead of silent discards — v1.0
+- ✓ Empty adaptation set guard — v1.0
+- ✓ Widevine discovery errors surfaced — v1.0
+- ✓ Comprehensive test suite (unit + integration, 9 packages) — v1.0
+- ✓ GitHub Actions CI with lint, vet, test, coverage — v1.0
 
 ### Active
 
-- [ ] **PERF-01**: Streaming segment assembly — write segments incrementally instead of buffering entire video in RAM
-- [ ] **PERF-02**: HTTP connection reuse via configured transport — reduce TCP/TLS overhead per segment
-- [ ] **PERF-03**: HTTP timeouts and context propagation — prevent hangs on stalled connections
-- ✓ **PERF-04**: Cache parsed MPD manifests per contentId — avoid redundant re-fetch/re-parse for multi-dub (Phase 2)
-- [ ] **PERF-05**: Cache Widevine device at startup — avoid `os.ReadDir(".")` per license request
-- ✓ **PERF-06**: Concurrent manifest fetching for audio versions — parallelize independent license flows (Phase 2)
-- [ ] **PERF-07**: Fix `http.DefaultClient` bypass in segment/subtitle downloads
-- [ ] **PERF-08**: Fix file descriptor leak in `getFilename()`
-- [ ] **USAB-01**: Support `CRUNCHYROLL_ETP_RT` environment variable for `etp_rt` cookie
-- [ ] **USAB-02**: Config file support (`~/.config/animeheaven/config.json`) for persistent settings
-- [ ] **USAB-03**: `--output-dir` flag for custom output directory
-- [ ] **USAB-04**: Validate batch file URLs upfront before starting downloads
-- [ ] **USAB-05**: Validate FFmpeg availability at startup
-- [ ] **USAB-06**: Explicit Widevine device paths via CLI flags instead of scanning CWD
-- [ ] **USAB-07**: Document hardcoded Basic Auth credential, add env var fallback
-- [ ] **UX-01**: Graceful error handling — replace `panic()` with error returns throughout
-- [ ] **UX-02**: Season download progress — show "Episode X of Y" with per-episode status
-- [ ] **UX-03**: Download speed / ETA estimation during segment downloads
-- [ ] **UX-04**: `--quiet` / `--json` output mode for non-interactive use
-- [ ] **UX-05**: No stack traces shown to user on error
-- [ ] **UX-06**: Season/batch error accumulation — report total failures at end
-- [ ] **UX-07**: Graceful SIGINT/SIGTERM handling — cleanup streams on interrupt
-- [ ] **UX-08**: Structured logging with levels replacing raw `fmt.Printf`
-- [ ] **QOL-01**: Add comprehensive test suite (unit + integration)
-- [ ] **QOL-02**: Configurable `--workers` flag for segment concurrency
-- ✓ **QOL-03**: Separate `GetBaseUrl` by media type instead of `isVideoSet` boolean (Phase 2)
-- [ ] **QOL-04**: Fix URL validation bug — `&&` should be `||` in content ID length check
-- [ ] **QOL-05**: Proper URL parsing via `url.Parse()` instead of string splitting
-- [ ] **QOL-06**: Remove recursive retry in `DoRequest()` — add recursion-depth guard
-- [ ] **QOL-07**: Sanitize filename with regex instead of O(n²) loop
-- [ ] **QOL-08**: `parseLangs` called once at flag parse time instead of per-URL
-- [ ] **QOL-09**: `os.CreateTemp` errors checked and propagated
-- [ ] **QOL-10**: FFmpeg merge failures return `error` instead of `panic`
-- [ ] **QOL-11**: Log warnings instead of silent `_ = os.Remove()` discards in mux
-- [ ] **QOL-12**: Guard against empty adaptation set in `getFilename()`
-- [ ] **QOL-13**: Check `os.ReadDir(".")` error in `GetWidevineDevice()`
+- [ ] Resumable downloads — track completed segments in a `.part` state file
+- [ ] Concurrent episode downloads within a season
+- [ ] Interactive config wizard (`animeheaven setup`)
+- [ ] Automatic device ID persistence
+- [ ] Download queue with estimated total time
+- [ ] Colored terminal output (green ✓ / red ✗ / yellow ⚠)
+- [ ] Rate-limit handling (429 responses) with exponential backoff + jitter
+- [ ] Disk space check before starting downloads
+- [ ] Coverity scan / stricter coverage targets
 
 ### Out of Scope
 
-- Support for other streaming services (Funimation, Netflix) — scope too broad for this tool
+- Support for other streaming services (Funimation, Netflix) — scope too broad
 - GUI or web interface — CLI-only by design
 - Mobile app — desktop CLI focused
 - Real-time streaming / playback — download-only tool
+- Cloud storage integration — local filesystem only
 
 ## Context
 
-AnimeHeaven is a mature Go CLI tool (v1.2.0) with a Crunchyroll-focused architecture. It was recently refactored from a flat `package main` into 6 internal packages (`internal/api/`, `internal/download/`, `internal/drm/`, `internal/media/`, `internal/mux/`, `internal/locale/`). The codebase has comprehensive codebase mapping artifacts but no test suite, no formal error handling strategy (uses `panic()` pervasively), and several performance bottlenecks in its segment assembly and HTTP client usage.
+Shipped v1.0 with 5,525 LOC Go across 6 internal packages + testutil.
+Tech stack: Go 1.25, golang.org/x/sync (errgroup), golang.org/x/term, gowidevine v0.1.3, go-mpd.
+CI: GitHub Actions with go vet, golangci-lint (6 linters), test with -race, coverage reporting.
 
-The main pain points users experience today:
-- High memory usage for large episodes (`DownloadParts` buffers everything in RAM)
-- `panic()` crashes on any network blip during batch/season downloads
-- No resume support — interrupted downloads restart entirely
-- `etp_rt` cookie exposed via CLI args (process list, shell history)
-- No progress feedback for season downloads
+Current state: 9 test packages, all passing with -race. Zero panic() calls. RAM reduced from 400MB to ~64KB per episode for large downloads.
 
 ## Constraints
 
@@ -98,27 +101,17 @@ The main pain points users experience today:
 
 | Decision | Rationale | Outcome |
 |----------|-----------|---------|
-| Keep Go stdlib for CLI | No framework dependency, simple flag parsing sufficient | — Pending |
+| Keep Go stdlib for CLI | No framework dependency, simple flag parsing sufficient | ✓ Good |
 | Use `internal/` packages | Already refactored from flat main — good modularity baseline | ✓ Good |
-| Keep FFmpeg for muxing | Battle-tested, no Go-native muxer matches MKV support | — Pending |
-
-## Evolution
-
-This document evolves at phase transitions and milestone boundaries.
-
-**After each phase transition** (via `/gsd-transition`):
-1. Requirements invalidated? → Move to Out of Scope with reason
-2. Requirements validated? → Move to Validated with phase reference
-3. New requirements emerged? → Add to Active
-4. Decisions to log? → Add to Key Decisions
-5. "What This Is" still accurate? → Update if drifted
-
-**After each milestone** (via `/gsd-complete-milestone`):
-1. Full review of all sections
-2. Core Value check — still the right priority?
-3. Audit Out of Scope — reasons still valid?
-4. Update Context with current state
+| Keep FFmpeg for muxing | Battle-tested, no Go-native muxer matches MKV support | ✓ Good |
+| Return errors instead of panic | Replace all panic() with error returns throughout codebase | ✓ Good |
+| Disk-backed segment assembly | Eliminate 400MB RAM buffering per episode | ✓ Good |
+| errgroup for parallel audio | Structured concurrency with fail-fast cancellation | ✓ Good |
+| Pointer-field Config struct | Explicit-only JSON overrides with clear precedence | ✓ Good |
+| output.Global singleton | Mirrors config pattern, no plumbing through signatures | ✓ Good |
+| Table-driven stdlib tests only | No testify dependency (D-03 from Phase 5) | ✓ Good |
+| CI continue-on-error for lint | Lint issues don't block PR merging | ✓ Good |
 
 ---
 
-*Last updated: 2026-07-08 after adding Evolution section and 9 missing improvement requirements*
+*Last updated: 2026-07-10 after v1.0 milestone completion*
