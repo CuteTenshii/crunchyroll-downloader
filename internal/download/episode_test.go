@@ -25,7 +25,7 @@ func TestEpisodeReturnsErrorForUnavailableAudioLocale(t *testing.T) {
 		Title: "Test Episode",
 	}
 
-	err := Episode(context.Background(), nil, "base-content-id", info, []string{"en-US"}, nil, &videoQuality, &audioQuality, 2, "")
+	err := Episode(context.Background(), nil, "base-content-id", info, []string{"en-US"}, nil, &videoQuality, &audioQuality, 2, "", 1)
 	if err == nil {
 		t.Fatal("Episode() error = nil, want unavailable audio locale error")
 	}
@@ -72,7 +72,7 @@ func TestEpisodeSingleVersion(t *testing.T) {
 
 	client := api.NewTestClient(nil, "https://example.com", "test-token")
 
-	err := Episode(ctx, client, "content-id", info, []string{"ja-JP"}, nil, &videoQuality, &audioQuality, 2, "")
+	err := Episode(ctx, client, "content-id", info, []string{"ja-JP"}, nil, &videoQuality, &audioQuality, 2, "", 1)
 	if err == nil {
 		t.Fatal("Episode() error = nil, want error from single-version sequential path")
 	}
@@ -106,7 +106,7 @@ func TestEpisodeParallelAudio(t *testing.T) {
 
 	client := api.NewTestClient(nil, "https://example.com", "test-token")
 
-	err := Episode(ctx, client, "content-id", info, []string{"ja-JP", "en-US"}, nil, &videoQuality, &audioQuality, 2, "")
+	err := Episode(ctx, client, "content-id", info, []string{"ja-JP", "en-US"}, nil, &videoQuality, &audioQuality, 2, "", 1)
 	if err == nil {
 		t.Fatal("Episode() error = nil, want error from parallel or sequential path")
 	}
@@ -129,7 +129,7 @@ func TestEpisodeParallelAudioZeroVersions(t *testing.T) {
 		Title: "Test Episode",
 	}
 
-	err := Episode(context.Background(), nil, "content-id", info, []string{"fr-FR"}, nil, &videoQuality, &audioQuality, 2, "")
+	err := Episode(context.Background(), nil, "content-id", info, []string{"fr-FR"}, nil, &videoQuality, &audioQuality, 2, "", 1)
 	if err == nil {
 		t.Fatal("Episode() error = nil, want audio locale unavailable error")
 	}
@@ -184,7 +184,7 @@ func TestOutputDirCreatesSeriesSubfolderInOutputDir(t *testing.T) {
 
 	client := api.NewTestClient(nil, "https://example.com", "test-token")
 
-	err := Episode(ctx, client, "content-id", info, []string{"ja-JP"}, nil, &videoQuality, &audioQuality, 2, outputDir)
+	err := Episode(ctx, client, "content-id", info, []string{"ja-JP"}, nil, &videoQuality, &audioQuality, 2, outputDir, 1)
 	if err == nil {
 		t.Fatal("Episode() error = nil, want error from cancelled context (GetEpisode)")
 	}

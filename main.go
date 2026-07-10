@@ -143,7 +143,7 @@ func processURL(ctx context.Context, client *api.Client, rawURL string, outputDi
 			output.Global.Error("Error fetching episode info: %v", err)
 			return
 		}
-		if err := download.Episode(ctx, client, contentID, info, audioLangs, subsLangs, videoQuality, audioQuality, *workers, outputDir); err != nil {
+		if err := download.Episode(ctx, client, contentID, info, audioLangs, subsLangs, videoQuality, audioQuality, *workers, outputDir, 1); err != nil {
 			output.Global.Error("Error downloading episode: %v", err)
 		}
 	} else {

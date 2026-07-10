@@ -14,6 +14,7 @@ import (
 	"crunchyroll-downloader/internal/api"
 	"crunchyroll-downloader/internal/drm"
 	"crunchyroll-downloader/internal/media"
+	"crunchyroll-downloader/internal/output"
 	"crunchyroll-downloader/internal/mux"
 	"github.com/unki2aut/go-mpd"
 	"golang.org/x/sync/errgroup"
@@ -34,7 +35,7 @@ func sanitizeFilename(s string) string {
 	return strings.TrimRight(res, " .")
 }
 
-func Episode(ctx context.Context, client *api.Client, baseContentID string, info *api.EpisodeInfo, audioLangs, subsLangs []string, videoQuality, audioQuality *string, workers int, outputDir string) error {
+func Episode(ctx context.Context, client *api.Client, baseContentID string, info *api.EpisodeInfo, audioLangs, subsLangs []string, videoQuality, audioQuality *string, workers int, outputDir string, totalEpisodes int) error {
 	cleanSeriesTitle := sanitizeFilename(info.EpisodeMetadata.SeriesTitle)
 	cleanEpisodeTitle := sanitizeFilename(info.Title)
 
@@ -56,7 +57,7 @@ func Episode(ctx context.Context, client *api.Client, baseContentID string, info
 	))
 
 	if _, err := os.Stat(outputFile); err == nil {
-		fmt.Printf("Episode %v is already downloaded, skipping...\n", info.EpisodeMetadata.EpisodeNumber)
+		output.Global.Info("[Episode %d/%d] %s ... skipped (already downloaded)", info.EpisodeMetadata.EpisodeNumber, totalEpisodes, info.Title)
 		return nil
 	}
 
@@ -98,24 +99,26 @@ func Episode(ctx context.Context, client *api.Client, baseContentID string, info
 		versions = append(versions, audioVersion{locale: locale, contentId: guid})
 	}
 
-	fmt.Printf("Downloading: %s (S%02vE%02v) from %s\n", info.Title, info.EpisodeMetadata.SeasonNumber, info.EpisodeMetadata.EpisodeNumber, info.EpisodeMetadata.SeriesTitle)
+	output.Global.Info("[Episode %d/%d] %s (S%02dE%02d) ...", info.EpisodeMetadata.EpisodeNumber, totalEpisodes, info.Title, info.EpisodeMetadata.SeasonNumber, info.EpisodeMetadata.EpisodeNumber)
 
 	activeStreams := map[string]string{}
 	var tempFiles []string
 	completed := false
 	defer func() {
-		fmt.Print("Cleaning up...")
+		output.Global.Debug("Cleaning up episode resources...")
 		cleanupCtx, cancelCleanup := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancelCleanup()
 		for id, sToken := range activeStreams {
 			if _, err := client.DeleteStream(cleanupCtx, id, sToken); err != nil {
-				fmt.Printf("\nFailed to remove stream %s: %v\n", id, err)
+				output.Global.Warn("Failed to remove stream %s: %v", id, err)
 			}
 		}
 		if !completed {
 			cleanupEpisodeArtifacts(outputFile, tempFiles)
 		}
 	}()
+
+	episodeStart := time.Now()
 
 	firstEpisode, err := client.GetEpisode(ctx, versions[0].contentId)
 	if err != nil {
@@ -133,7 +136,7 @@ func Episode(ctx context.Context, client *api.Client, baseContentID string, info
 		sort.Strings(subsLangs)
 	}
 
-	fmt.Printf("Audio locales: %s | Subtitle locales: %s\n", strings.Join(audioLangs, ", "), strings.Join(subsLangs, ", "))
+	output.Global.Info("Audio locales: %s | Subtitle locales: %s", strings.Join(audioLangs, ", "), strings.Join(subsLangs, ", "))
 
 	for _, locale := range subsLangs {
 		if firstEpisode.Subtitles[locale] == nil {
@@ -143,7 +146,7 @@ func Episode(ctx context.Context, client *api.Client, baseContentID string, info
 
 	var subTracks []mux.MediaTrack
 	for _, locale := range subsLangs {
-		fmt.Printf("Downloading subtitles for %s...\n", mux.TrackTitle(locale))
+		output.Global.Info("Downloading subtitles for %s...", mux.TrackTitle(locale))
 		file, err := media.DownloadSubs(ctx, client, firstEpisode.Subtitles[locale].URL)
 		if err != nil {
 			return fmt.Errorf("downloading subtitles for %s: %w", locale, err)
@@ -152,7 +155,7 @@ func Episode(ctx context.Context, client *api.Client, baseContentID string, info
 		subTracks = append(subTracks, mux.MediaTrack{File: file, Locale: locale})
 	}
 	if len(subTracks) > 0 {
-		fmt.Println("Downloaded subtitles!")
+		output.Global.Info("Downloaded subtitles!")
 	}
 
 	var videoFile string
@@ -184,7 +187,7 @@ func Episode(ctx context.Context, client *api.Client, baseContentID string, info
 	}
 
 	audioSet := manifest.Period[0].AdaptationSets[1]
-	fmt.Printf("Downloading %s audio...\n", mux.TrackTitle(version.locale))
+	output.Global.Info("Downloading %s audio...", mux.TrackTitle(version.locale))
 	audioBaseUrl, audioRepresentationId := media.GetAudioBaseUrl(audioSet, *audioQuality)
 	if audioBaseUrl == nil {
 		return fmt.Errorf("failed to get audio base URL for %s", version.locale)
@@ -199,7 +202,7 @@ func Episode(ctx context.Context, client *api.Client, baseContentID string, info
 
 	// Download video (always first version)
 	videoSet := manifest.Period[0].AdaptationSets[0]
-	fmt.Println("Downloading video...")
+	output.Global.Info("Downloading video...")
 	baseUrl, representationId := media.GetVideoBaseUrl(videoSet, *videoQuality)
 	if baseUrl == nil {
 		return fmt.Errorf("failed to get video base URL")
@@ -261,7 +264,9 @@ func Episode(ctx context.Context, client *api.Client, baseContentID string, info
 				}
 
 				audioSet := manifest.Period[0].AdaptationSets[1]
-				fmt.Printf("Downloading %s audio...\n", mux.TrackTitle(version.locale))
+				mu.Lock()
+				output.Global.Info("Downloading %s audio...", mux.TrackTitle(version.locale))
+				mu.Unlock()
 				audioBaseUrl, audioRepresentationId := media.GetAudioBaseUrl(audioSet, *audioQuality)
 				if audioBaseUrl == nil {
 					return fmt.Errorf("failed to get audio base URL for %s", version.locale)
@@ -292,6 +297,18 @@ func Episode(ctx context.Context, client *api.Client, baseContentID string, info
 		return fmt.Errorf("muxing episode: %w", err)
 	}
 	completed = true
+
+	// Per-episode success result line
+	duration := time.Since(episodeStart).Round(time.Second)
+	var fileSizeStr string
+	if fi, err := os.Stat(outputFile); err == nil {
+		fileSizeStr = formatFileSize(fi.Size())
+	}
+	output.Global.Info("%s[Episode %d/%d] %s ... %s%s %s%s %s",
+		output.ANSIGreen,
+		info.EpisodeMetadata.EpisodeNumber, totalEpisodes, info.Title,
+		output.ANSIGreen, "✓", output.ANSIReset,
+		fileSizeStr, formatDuration(duration))
 	return nil
 }
 
@@ -301,7 +318,30 @@ func cleanupEpisodeArtifacts(outputFile string, tempFiles []string) {
 			continue
 		}
 		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-			fmt.Printf("\nWarning: failed to remove partial file %s: %v", path, err)
+			output.Global.Warn("Failed to remove partial file %s: %v", path, err)
 		}
 	}
+}
+
+func formatFileSize(bytes int64) string {
+	switch {
+	case bytes >= 1<<30:
+		return fmt.Sprintf("%.1f GB", float64(bytes)/(1<<30))
+	case bytes >= 1<<20:
+		return fmt.Sprintf("%.1f MB", float64(bytes)/(1<<20))
+	case bytes >= 1<<10:
+		return fmt.Sprintf("%.1f KB", float64(bytes)/(1<<10))
+	default:
+		return fmt.Sprintf("%d B", bytes)
+	}
+}
+
+func formatDuration(d time.Duration) string {
+	d = d.Round(time.Second)
+	m := int(d.Minutes())
+	s := int(d.Seconds()) % 60
+	if m > 0 {
+		return fmt.Sprintf("%dm %ds", m, s)
+	}
+	return fmt.Sprintf("%ds", s)
 }
