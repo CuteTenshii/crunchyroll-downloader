@@ -7,6 +7,7 @@ require (
 	github.com/iyear/gowidevine v0.1.3
 	github.com/unki2aut/go-mpd v0.0.0-20250515065241-e261b43d6523
 	golang.org/x/sync v0.22.0
+	golang.org/x/term v0.45.0
 )
 
 require (
@@ -14,6 +15,5 @@ require (
 	github.com/chmike/cmac-go v1.1.0 // indirect
 	github.com/unki2aut/go-xsd-types v0.0.0-20200220223938-30e5405398f8 // indirect
 	golang.org/x/sys v0.47.0 // indirect
-	golang.org/x/term v0.45.0 // indirect
 	google.golang.org/protobuf v1.36.2 // indirect
 )

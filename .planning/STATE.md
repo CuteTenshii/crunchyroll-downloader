@@ -4,14 +4,14 @@ milestone: v1.0
 milestone_name: milestone
 status: Ready to plan
 stopped_at: Phase 04 UI-SPEC approved
-last_updated: "2026-07-09T18:45:44.410Z"
-last_activity: 2026-07-09
+last_updated: "2026-07-10T00:34:46.746Z"
+last_activity: 2026-07-10
 progress:
   total_phases: 5
   completed_phases: 3
   total_plans: 16
-  completed_plans: 13
-  percent: 60
+  completed_plans: 16
+  percent: 75
 ---
 
 # Project State
@@ -32,7 +32,7 @@ Improvement & Optimization Pass — 5 phases targeting performance, usability, U
 
 ## Active Phase
 
-Phase 3: Usability — Configuration & Validation (complete, 5/5 plans complete)
+Phase 4: User Experience — Progress & Output (complete, 3/3 plans complete)
 
 ## Completed Plans
 
@@ -51,6 +51,9 @@ Phase 3: Usability — Configuration & Validation (complete, 5/5 plans complete)
 | 03-03 | [03-03-SUMMARY.md](./phases/03-usability-configuration-validation/03-03-SUMMARY.md) | 2026-07-09 | 25eabd1, 5c63824, 6a3f0b8 |
 | 03-04 | [03-04-SUMMARY.md](./phases/03-usability-configuration-validation/03-04-SUMMARY.md) | 2026-07-09 | a0ee350, a4e757b, 27c0cd0 |
 | 03-05 | [03-05-SUMMARY.md](./phases/03-usability-configuration-validation/03-05-SUMMARY.md) | 2026-07-09 | 78a5197 |
+| 04-03 | [04-03-SUMMARY.md](./phases/04-user-experience-progress-output/04-03-SUMMARY.md) | 2026-07-10 | 07ee40c, e09321b, a09d866 |
+| 04-01 | [04-01-SUMMARY.md](./phases/04-user-experience-progress-output/04-01-SUMMARY.md) | 2026-07-10 | 072d075, 751965d |
+| 04-02 | [04-02-SUMMARY.md](./phases/04-user-experience-progress-output/04-02-SUMMARY.md) | 2026-07-10 | 3ed61e9, 993bd37, da8fb26 |
 
 ## Quick Tasks Completed
 
@@ -58,17 +61,17 @@ Phase 3: Usability — Configuration & Validation (complete, 5/5 plans complete)
 |---|-------------|------|--------|-----------|
 | 260708-001 | Atomic commits for all modifications | 2026-07-08 | 402a4e3 | [260708-001-atomic-commits-refactor](./quick/260708-001-atomic-commits-refactor/) |
 
-Last activity: 2026-07-09
+Last activity: 2026-07-10
 
 ## Next Action
 
-Begin Phase 4: User Experience — Progress & Output.
+Phase 4 complete. Begin Phase 5: Final Polish & Documentation.
 
 ## Session
 
-**Last session:** 2026-07-09T18:24:24.519Z
-**Stopped at:** Phase 04 UI-SPEC approved
-**Resume file:** .planning/phases/04-user-experience-progress-output/04-UI-SPEC.md
+**Last session:** 2026-07-10T00:34:46.746Z
+**Stopped at:** Phase 04 complete (3/3 plans)
+**Resume file:** .planning/phases/04-user-experience-progress-output/04-03-SUMMARY.md
 
 ## Performance Metrics
 
@@ -83,6 +86,11 @@ Begin Phase 4: User Experience — Progress & Output.
 ## Decisions
 
 - [Phase 03-usability-configuration-validation]: CRUNCHYROLL_CLIENT_AUTH env var checked on every fetchAccessToken call (not cached at startup) — Per D-08: enables credential rotation without restart
+- [Phase 04-user-experience-progress-output]: output package uses global singleton (output.Global) set once in main() after flag parsing — same pattern as internal/config (D-03)
+- [Phase 04-user-experience-progress-output]: --json outputs NDLINE JSON with structured events (episode_start, episode_complete, error, segment_progress, season_summary) — not slog (D-13)
+- [Phase 04-user-experience-progress-output]: --quiet mode suppresses Info/Debug/Progress but always shows Warn/Error on stderr (D-16)
+- [Phase 04-user-experience-progress-output]: Per-episode result line uses green ✓ on success, red ✗ on error — printed by Season() caller (D-06, D-07)
+- [Phase 04-user-experience-progress-output]: SpeedTracker uses 10-sample ring buffer for rolling average (D-10), ETA clamped to never increase (Pitfall 5)
 - [Phase 03-usability-configuration-validation]: Episode() and Season() use outputDir string param — empty string means CWD default behavior (D-12)
 - [Phase 03-usability-configuration-validation]: validateAllURLs collects ALL invalid URLs upfront using url.Parse() — does not stop at first error (D-17)
 - [Phase 03-usability-configuration-validation]: QOL-04 (&&→||) and QOL-05 (url.Parse()) implemented as bundled refactor of processURL
