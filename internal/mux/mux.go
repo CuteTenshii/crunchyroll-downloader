@@ -9,6 +9,7 @@ import (
 
 	"crunchyroll-downloader/internal/api"
 	loc "crunchyroll-downloader/internal/locale"
+	"crunchyroll-downloader/internal/output"
 )
 
 type MediaTrack struct {
@@ -106,12 +107,12 @@ func MergeEverything(ctx context.Context, videoFile string, audioTracks, subTrac
 		warnRemove(sub.File)
 	}
 
-	fmt.Printf("\nDownload finished! Output file: %s\n\n", outputFile)
+	output.Global.Info("\nDownload finished! Output file: %s\n", outputFile)
 	return nil
 }
 
 func warnRemove(path string) {
 	if err := os.Remove(path); err != nil {
-		fmt.Printf("Warning: failed to remove temporary file %s: %v\n", path, err)
+		output.Global.Warn("Failed to remove temporary file %s: %v", path, err)
 	}
 }

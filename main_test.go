@@ -10,7 +10,7 @@ import (
 )
 
 func TestProcessURLRejectsInvalidContentIDLength(t *testing.T) {
-	output := captureMainStdout(t, func() {
+	output := captureMainStderr(t, func() {
 		processURL(context.Background(), nil, "https://www.crunchyroll.com/watch/short/title", "", nil, nil)
 	})
 
@@ -20,7 +20,7 @@ func TestProcessURLRejectsInvalidContentIDLength(t *testing.T) {
 }
 
 func TestProcessURLRejectsUnsupportedContentType(t *testing.T) {
-	output := captureMainStdout(t, func() {
+	output := captureMainStderr(t, func() {
 		processURL(context.Background(), nil, "https://www.crunchyroll.com/browse/G123456789/title", "", nil, nil)
 	})
 
@@ -203,6 +203,30 @@ func captureMainStdout(t *testing.T, fn func()) string {
 	var buf bytes.Buffer
 	if _, err := io.Copy(&buf, readPipe); err != nil {
 		t.Fatalf("read stdout pipe: %v", err)
+	}
+	return buf.String()
+}
+
+func captureMainStderr(t *testing.T, fn func()) string {
+	t.Helper()
+
+	original := os.Stderr
+	readPipe, writePipe, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("Pipe(): %v", err)
+	}
+	os.Stderr = writePipe
+
+	fn()
+
+	if err := writePipe.Close(); err != nil {
+		t.Fatalf("close stderr pipe: %v", err)
+	}
+	os.Stderr = original
+
+	var buf bytes.Buffer
+	if _, err := io.Copy(&buf, readPipe); err != nil {
+		t.Fatalf("read stderr pipe: %v", err)
 	}
 	return buf.String()
 }

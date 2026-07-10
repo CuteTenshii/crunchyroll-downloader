@@ -49,7 +49,7 @@ func TestMergeEverythingWarnsButSucceedsWhenCleanupFails(t *testing.T) {
 		}
 	})
 
-	if !strings.Contains(stdout, "Warning: failed to remove temporary file") {
+	if !strings.Contains(stdout, "Failed to remove temporary file") {
 		t.Fatalf("MergeEverything() stdout = %q, want cleanup warning", stdout)
 	}
 }

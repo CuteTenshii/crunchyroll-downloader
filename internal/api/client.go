@@ -7,6 +7,8 @@ import (
 	"net"
 	"net/http"
 	"time"
+
+	"crunchyroll-downloader/internal/output"
 )
 
 type Client struct {
@@ -98,7 +100,7 @@ func (c *Client) Do(req *http.Request) (*http.Response, error) {
 	}
 	if resp.StatusCode == http.StatusUnauthorized {
 		resp.Body.Close()
-		fmt.Println("Access token expired. Refetching one...")
+		output.Global.Debug("Access token expired. Refetching one...")
 		token, err := c.fetchAccessToken(req.Context())
 		if err != nil {
 			return nil, fmt.Errorf("refreshing token: %w", err)

@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+
+	"crunchyroll-downloader/internal/output"
 )
 
 func (c *Client) GetEpisode(ctx context.Context, id string) (*Episode, error) {
@@ -36,7 +38,7 @@ func (c *Client) GetEpisode(ctx context.Context, id string) (*Episode, error) {
 	}
 
 	if c.Debug {
-		fmt.Printf("\n%s\n", string(body))
+		output.Global.Debug("\n%s", string(body))
 	}
 
 	return &episode, nil

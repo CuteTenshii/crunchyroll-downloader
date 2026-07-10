@@ -2,9 +2,10 @@ package api
 
 import (
 	"context"
-	"fmt"
 	"io"
 	"net/http"
+
+	"crunchyroll-downloader/internal/output"
 )
 
 func (c *Client) FetchManifest(ctx context.Context, url string) ([]byte, error) {
@@ -25,7 +26,7 @@ func (c *Client) FetchManifest(ctx context.Context, url string) ([]byte, error) 
 	}
 
 	if c.Debug {
-		fmt.Printf("\n%s\n", string(body))
+		output.Global.Debug("\n%s", string(body))
 	}
 
 	return body, nil
