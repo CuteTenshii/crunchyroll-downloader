@@ -255,6 +255,10 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	if _, err := config.LoadDotenv(); err != nil {
+		output.Global.Warn("Warning: error loading .env file: %v", err)
+	}
+
 	url := flag.String("url", "", "URL of the episode/season to download")
 	urlsFile := flag.String("file", "", "Path to a text file with one URL per line")
 	flag.Parse()
@@ -306,7 +310,7 @@ func main() {
 
 	// Resolve precedence: CLI flag > env var > config file > default
 	resolvedEtpRt := resolveEtpRt(explicitFlags, *etpRt, cfg.EtpRt)
-	resolvedOutputDir := resolveString(explicitFlags, "output-dir", *outputDir, "", cfg.OutputDir, "")
+	resolvedOutputDir := resolveString(explicitFlags, "output-dir", *outputDir, "OUTPUT_DIR", cfg.OutputDir, "")
 
 	// Validate FFmpeg availability before any download (D-18, D-19)
 	if err := checkFFmpeg(); err != nil {
