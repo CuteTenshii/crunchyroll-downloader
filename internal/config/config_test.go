@@ -8,6 +8,157 @@ import (
 	"testing"
 )
 
+func TestParseDotenvEmptyFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".env")
+	if err := os.WriteFile(path, []byte(""), 0644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	if err := parseDotenv(path); err != nil {
+		t.Fatalf("parseDotenv(empty) error = %v", err)
+	}
+}
+
+func TestParseDotenvCommentsAndBlanks(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".env")
+	content := "# this is a comment\n\n# another comment\n  \n"
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	if err := parseDotenv(path); err != nil {
+		t.Fatalf("parseDotenv(comments) error = %v", err)
+	}
+}
+
+func TestParseDotenvKeyValue(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".env")
+	content := "MY_KEY=my_value\nANOTHER_KEY=another_value\n"
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	origMyKey, hadMyKey := os.LookupEnv("MY_KEY")
+	origAnotherKey, hadAnotherKey := os.LookupEnv("ANOTHER_KEY")
+	t.Cleanup(func() {
+		if hadMyKey {
+			os.Setenv("MY_KEY", origMyKey)
+		} else {
+			os.Unsetenv("MY_KEY")
+		}
+		if hadAnotherKey {
+			os.Setenv("ANOTHER_KEY", origAnotherKey)
+		} else {
+			os.Unsetenv("ANOTHER_KEY")
+		}
+	})
+	os.Unsetenv("MY_KEY")
+	os.Unsetenv("ANOTHER_KEY")
+
+	if err := parseDotenv(path); err != nil {
+		t.Fatalf("parseDotenv() error = %v", err)
+	}
+	if got := os.Getenv("MY_KEY"); got != "my_value" {
+		t.Fatalf("MY_KEY = %q, want my_value", got)
+	}
+	if got := os.Getenv("ANOTHER_KEY"); got != "another_value" {
+		t.Fatalf("ANOTHER_KEY = %q, want another_value", got)
+	}
+}
+
+func TestParseDotenvQuotedValues(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".env")
+	content := "DOUBLE=\"quoted value\"\nSINGLE='single quoted'\n"
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	origDouble, hadDouble := os.LookupEnv("DOUBLE")
+	origSingle, hadSingle := os.LookupEnv("SINGLE")
+	t.Cleanup(func() {
+		if hadDouble {
+			os.Setenv("DOUBLE", origDouble)
+		} else {
+			os.Unsetenv("DOUBLE")
+		}
+		if hadSingle {
+			os.Setenv("SINGLE", origSingle)
+		} else {
+			os.Unsetenv("SINGLE")
+		}
+	})
+	os.Unsetenv("DOUBLE")
+	os.Unsetenv("SINGLE")
+
+	if err := parseDotenv(path); err != nil {
+		t.Fatalf("parseDotenv(quoted) error = %v", err)
+	}
+	if got := os.Getenv("DOUBLE"); got != "quoted value" {
+		t.Fatalf("DOUBLE = %q, want 'quoted value'", got)
+	}
+	if got := os.Getenv("SINGLE"); got != "single quoted" {
+		t.Fatalf("SINGLE = %q, want 'single quoted'", got)
+	}
+}
+
+func TestParseDotenvNoEquals(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".env")
+	content := "KEY_WITHOUT_EQUALS\nHAS_EQUALS=value\n"
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	origHas, hadHas := os.LookupEnv("HAS_EQUALS")
+	t.Cleanup(func() {
+		if hadHas {
+			os.Setenv("HAS_EQUALS", origHas)
+		} else {
+			os.Unsetenv("HAS_EQUALS")
+		}
+	})
+	os.Unsetenv("HAS_EQUALS")
+
+	if err := parseDotenv(path); err != nil {
+		t.Fatalf("parseDotenv(noequals) error = %v", err)
+	}
+	if _, ok := os.LookupEnv("KEY_WITHOUT_EQUALS"); ok {
+		t.Fatal("KEY_WITHOUT_EQUALS should not be set")
+	}
+	if got := os.Getenv("HAS_EQUALS"); got != "value" {
+		t.Fatalf("HAS_EQUALS = %q, want 'value'", got)
+	}
+}
+
+func TestLoadDotenvFound(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".env")
+	if err := os.WriteFile(path, []byte("FOUND_KEY=found_value"), 0644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	t.Chdir(dir)
+
+	foundPath, err := LoadDotenv()
+	if err != nil {
+		t.Fatalf("LoadDotenv() error = %v", err)
+	}
+	if foundPath != path {
+		t.Fatalf("LoadDotenv() path = %q, want %q", foundPath, path)
+	}
+}
+
+func TestLoadDotenvNotFound(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+
+	foundPath, err := LoadDotenv()
+	if err != nil {
+		t.Fatalf("LoadDotenv() error = %v", err)
+	}
+	if foundPath != "" {
+		t.Fatalf("LoadDotenv() path = %q, want empty", foundPath)
+	}
+}
+
 func TestConfigDirReturnsCwd(t *testing.T) {
 	dir, err := ConfigDir()
 	if err != nil {

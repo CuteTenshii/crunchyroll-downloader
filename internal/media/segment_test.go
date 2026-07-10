@@ -118,6 +118,108 @@ func TestGetFilenameRejectsEmptyAdaptationSet(t *testing.T) {
 	}
 }
 
+func TestFormatSpeed(t *testing.T) {
+	tests := []struct {
+		name string
+		bps  float64
+		want string
+	}{
+		{name: "zero bps", bps: 0, want: "0 B/s"},
+		{name: "bytes per second", bps: 500, want: "500 B/s"},
+		{name: "KB/s boundary", bps: 1024, want: "1 KB/s"},
+		{name: "KB/s", bps: 2048, want: "2 KB/s"},
+		{name: "MB/s boundary", bps: 1048576, want: "1.0 MB/s"},
+		{name: "MB/s", bps: 5242880, want: "5.0 MB/s"},
+		{name: "GB/s boundary", bps: 1073741824, want: "1.0 GB/s"},
+		{name: "GB/s", bps: 2147483648, want: "2.0 GB/s"},
+		{name: "negative bps", bps: -100, want: "-100 B/s"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := formatSpeed(tt.bps)
+			if got != tt.want {
+				t.Fatalf("formatSpeed(%f) = %q, want %q", tt.bps, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestFormatETAShort(t *testing.T) {
+	tests := []struct {
+		name string
+		secs int
+		want string
+	}{
+		{name: "zero seconds", secs: 0, want: "0s"},
+		{name: "thirty seconds", secs: 30, want: "30s"},
+		{name: "one minute", secs: 60, want: "1m 0s"},
+		{name: "two minutes thirty", secs: 150, want: "2m 30s"},
+		{name: "negative seconds", secs: -1, want: "0s"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := formatETAShort(tt.secs)
+			if got != tt.want {
+				t.Fatalf("formatETAShort(%d) = %q, want %q", tt.secs, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestGetFilename(t *testing.T) {
+	height := uint64(1080)
+	bandwidth := uint64(192000)
+	videoRepID := "video/1080p"
+	audioRepID := "audio/192k"
+
+	t.Run("nil set uses subs pattern", func(t *testing.T) {
+		filename, err := getFilename(nil)
+		if err != nil {
+			t.Fatalf("getFilename(nil) error = %v", err)
+		}
+		if !strings.Contains(filename, "crdl-subs-") {
+			t.Fatalf("getFilename(nil) = %q, want crdl-subs- prefix", filename)
+		}
+	})
+
+	t.Run("video representation uses video pattern", func(t *testing.T) {
+		set := &mpd.AdaptationSet{
+			Representations: []mpd.Representation{
+				{ID: &videoRepID, Height: &height},
+			},
+		}
+		filename, err := getFilename(set)
+		if err != nil {
+			t.Fatalf("getFilename(video) error = %v", err)
+		}
+		if !strings.Contains(filename, "crdl-video-") {
+			t.Fatalf("getFilename(video) = %q, want crdl-video- prefix", filename)
+		}
+	})
+
+	t.Run("audio representation uses audio pattern", func(t *testing.T) {
+		set := &mpd.AdaptationSet{
+			Representations: []mpd.Representation{
+				{ID: &audioRepID, Bandwidth: &bandwidth},
+			},
+		}
+		filename, err := getFilename(set)
+		if err != nil {
+			t.Fatalf("getFilename(audio) error = %v", err)
+		}
+		if !strings.Contains(filename, "crdl-audio-") {
+			t.Fatalf("getFilename(audio) = %q, want crdl-audio- prefix", filename)
+		}
+	})
+
+	t.Run("empty set returns error", func(t *testing.T) {
+		_, err := getFilename(&mpd.AdaptationSet{})
+		if err == nil {
+			t.Fatal("getFilename(empty) error = nil, want error")
+		}
+	})
+}
+
 func TestDownloadPartsRemovesEncryptedTempOnSegmentFailure(t *testing.T) {
 	tempDir := t.TempDir()
 	t.Setenv("TMPDIR", tempDir)

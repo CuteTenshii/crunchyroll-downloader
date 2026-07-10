@@ -5,8 +5,11 @@ import (
 	"context"
 	"io"
 	"os"
+	"reflect"
 	"strings"
 	"testing"
+
+	"crunchyroll-downloader/internal/config"
 )
 
 func TestProcessURLRejectsInvalidContentIDLength(t *testing.T) {
@@ -205,6 +208,125 @@ func captureMainStdout(t *testing.T, fn func()) string {
 		t.Fatalf("read stdout pipe: %v", err)
 	}
 	return buf.String()
+}
+
+func TestParseLangs(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  []string
+	}{
+		{name: "single locale", input: "ja-JP", want: []string{"ja-JP"}},
+		{name: "multiple locales", input: "ja-JP,en-US", want: []string{"ja-JP", "en-US"}},
+		{name: "whitespace around locales", input: " ja-JP , en-US ", want: []string{"ja-JP", "en-US"}},
+		{name: "empty string", input: "", want: nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := parseLangs(tt.input)
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("parseLangs(%q) = %v, want %v", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestResolveString(t *testing.T) {
+	configVal := "config-value"
+	defaultVal := "default"
+	flagVal := "flag-value"
+
+	tests := []struct {
+		name          string
+		explicitFlags map[string]bool
+		flagName      string
+		flagVal       string
+		envVal        string
+		configVal     *string
+		defaultVal    string
+		want          string
+	}{
+		{
+			name:          "explicit flag wins",
+			explicitFlags: map[string]bool{"output-dir": true},
+			flagName:      "output-dir",
+			flagVal:       flagVal,
+			envVal:        "",
+			configVal:     &configVal,
+			defaultVal:    defaultVal,
+			want:          flagVal,
+		},
+		{
+			name:          "env var when no flag",
+			explicitFlags: map[string]bool{},
+			flagName:      "output-dir",
+			flagVal:       "",
+			envVal:        "env-value",
+			configVal:     &configVal,
+			defaultVal:    defaultVal,
+			want:          "env-value",
+		},
+		{
+			name:          "config when no flag or env",
+			explicitFlags: map[string]bool{},
+			flagName:      "output-dir",
+			flagVal:       "",
+			envVal:        "",
+			configVal:     &configVal,
+			defaultVal:    defaultVal,
+			want:          configVal,
+		},
+		{
+			name:          "default when nothing is set",
+			explicitFlags: map[string]bool{},
+			flagName:      "output-dir",
+			flagVal:       "",
+			envVal:        "",
+			configVal:     nil,
+			defaultVal:    defaultVal,
+			want:          defaultVal,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.envVal != "" {
+				t.Setenv("TEST_ENV_"+tt.flagName, tt.envVal)
+			}
+			envName := "TEST_ENV_" + tt.flagName
+			got := resolveString(tt.explicitFlags, tt.flagName, tt.flagVal, envName, tt.configVal, tt.defaultVal)
+			if got != tt.want {
+				t.Fatalf("resolveString() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestIsAllNilConfig(t *testing.T) {
+	t.Run("all nil returns true", func(t *testing.T) {
+		if !isAllNilConfig(&config.Config{}) {
+			t.Fatal("isAllNilConfig(&config.Config{}) = false, want true")
+		}
+	})
+
+	fields := map[string]func(*config.Config){
+		"AudioLang":      func(c *config.Config) { s := "x"; c.AudioLang = &s },
+		"SubsLang":       func(c *config.Config) { s := "x"; c.SubsLang = &s },
+		"VideoQuality":   func(c *config.Config) { s := "x"; c.VideoQuality = &s },
+		"AudioQuality":   func(c *config.Config) { s := "x"; c.AudioQuality = &s },
+		"Workers":        func(c *config.Config) { i := 1; c.Workers = &i },
+		"OutputDir":      func(c *config.Config) { s := "x"; c.OutputDir = &s },
+		"EtpRt":          func(c *config.Config) { s := "x"; c.EtpRt = &s },
+		"WidevineDevice": func(c *config.Config) { s := "x"; c.WidevineDevice = &s },
+	}
+	for name, setter := range fields {
+		t.Run(name+" non-nil returns false", func(t *testing.T) {
+			cfg := &config.Config{}
+			setter(cfg)
+			if isAllNilConfig(cfg) {
+				t.Fatalf("isAllNilConfig with %s set = true, want false", name)
+			}
+		})
+	}
 }
 
 func captureMainStderr(t *testing.T, fn func()) string {

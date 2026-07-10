@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"crunchyroll-downloader/internal/api"
 )
@@ -193,6 +194,54 @@ func TestOutputDirCreatesSeriesSubfolderInOutputDir(t *testing.T) {
 	expectedDir := filepath.Join(outputDir, sanitizeFilename("Test Series"))
 	if _, err := os.Stat(expectedDir); os.IsNotExist(err) {
 		t.Fatalf("Episode() did not create series subfolder at %s", expectedDir)
+	}
+}
+
+func TestFormatFileSize(t *testing.T) {
+	tests := []struct {
+		name  string
+		bytes int64
+		want  string
+	}{
+		{name: "zero bytes", bytes: 0, want: "0 B"},
+		{name: "bytes", bytes: 500, want: "500 B"},
+		{name: "kilobytes boundary", bytes: 1024, want: "1.0 KB"},
+		{name: "kilobytes", bytes: 2048, want: "2.0 KB"},
+		{name: "megabytes boundary", bytes: 1048576, want: "1.0 MB"},
+		{name: "megabytes", bytes: 5242880, want: "5.0 MB"},
+		{name: "gigabytes boundary", bytes: 1073741824, want: "1.0 GB"},
+		{name: "gigabytes", bytes: 2147483648, want: "2.0 GB"},
+		{name: "negative bytes", bytes: -100, want: "-100 B"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := formatFileSize(tt.bytes)
+			if got != tt.want {
+				t.Fatalf("formatFileSize(%d) = %q, want %q", tt.bytes, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestFormatDuration(t *testing.T) {
+	tests := []struct {
+		name string
+		d    time.Duration
+		want string
+	}{
+		{name: "zero seconds", d: 0, want: "0s"},
+		{name: "five seconds", d: 5 * time.Second, want: "5s"},
+		{name: "one minute", d: 60 * time.Second, want: "1m 0s"},
+		{name: "two minutes thirty seconds", d: 150 * time.Second, want: "2m 30s"},
+		{name: "one hour", d: 3600 * time.Second, want: "60m 0s"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := formatDuration(tt.d)
+			if got != tt.want {
+				t.Fatalf("formatDuration(%v) = %q, want %q", tt.d, got, tt.want)
+			}
+		})
 	}
 }
 
