@@ -61,8 +61,9 @@ Phase 4: User Experience — Progress & Output (complete, 3/3 plans complete)
 |---|-------------|------|--------|-----------|
 | 260708-001 | Atomic commits for all modifications | 2026-07-08 | 402a4e3 | [260708-001-atomic-commits-refactor](./quick/260708-001-atomic-commits-refactor/) |
 | 260709-uq1 | Add .env file support with CRUNCHYROLL_ETP_RT, WIDEVINE_CLIENT_ID_PATH, WIDEVINE_DEVICE_PATH, WIDEVINE_PRIVATE_KEY_PATH, XDG_CONFIG_HOME, OUTPUT_DIR | 2026-07-10 | 46167ce | [260709-uq1-add-env-file-support-with-crunchyroll-et](./quick/260709-uq1-add-env-file-support-with-crunchyroll-et/) |
+| 260709-uw6 | Move config JSON from XDG directory to project root (./config.json) | 2026-07-10 | 7bc96eb | [260709-uw6-move-config-json-from-xdg-directory-to-p](./quick/260709-uw6-move-config-json-from-xdg-directory-to-p/) |
 
-Last activity: 2026-07-10 - Completed quick task 260709-uq1: Add .env file support with CRUNCHYROLL_ETP_RT, WIDEVINE_CLIENT_ID_PATH, WIDEVINE_DEVICE_PATH, WIDEVINE_PRIVATE_KEY_PATH, XDG_CONFIG_HOME, OUTPUT_DIR
+Last activity: 2026-07-10 - Completed quick task 260709-uw6: Move config JSON from XDG directory to project root
 
 ## Next Action
 
