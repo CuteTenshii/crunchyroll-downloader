@@ -1,0 +1,25 @@
+run:
+  timeout: 5m
+  go: '1.25'
+
+linters:
+  enable:
+    - govet
+    - staticcheck
+    - ineffassign
+    - unused
+    - errorlint
+    - gosimple
+
+linters-settings:
+  staticcheck:
+    checks: ["all", "-ST1000"]
+  errorlint:
+    errorf: true
+    asserts: true
+    comparison: true
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  exclude-use-default: false
