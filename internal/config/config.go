@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 )
 
-// Config represents the JSON config file at ~/.config/animeheaven/config.json.
+// Config represents the JSON config file at ./config.json (project root).
 // Pointer fields enable explicit-only overrides: nil = absent from file.
 type Config struct {
 	AudioLang      *string `json:"audio_lang,omitempty"`
@@ -20,20 +20,10 @@ type Config struct {
 	WidevineDevice *string `json:"widevine_device,omitempty"`
 }
 
-// ConfigDir returns "$XDG_CONFIG_HOME/animeheaven" if XDG_CONFIG_HOME is set,
-// otherwise it falls back to os.UserConfigDir()/animeheaven.
-// On macOS, os.UserConfigDir() returns ~/Library/Application Support, so
-// the config path will be ~/Library/Application Support/animeheaven if
-// XDG_CONFIG_HOME is not set.
+// ConfigDir returns the current working directory as the config directory.
+// The config file lives at ./config.json alongside the project root.
 func ConfigDir() (string, error) {
-	if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {
-		return filepath.Join(xdg, "animeheaven"), nil
-	}
-	cfgDir, err := os.UserConfigDir()
-	if err != nil {
-		return "", fmt.Errorf("cannot determine config directory: %w", err)
-	}
-	return filepath.Join(cfgDir, "animeheaven"), nil
+	return os.Getwd()
 }
 
 // ConfigPath returns the full path to the config file.

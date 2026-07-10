@@ -8,65 +8,30 @@ import (
 	"testing"
 )
 
-func TestConfigDirUsesXdgConfigHome(t *testing.T) {
-	// Save original and restore via t.Cleanup
-	orig, hadOrig := os.LookupEnv("XDG_CONFIG_HOME")
-	t.Cleanup(func() {
-		if hadOrig {
-			os.Setenv("XDG_CONFIG_HOME", orig)
-		} else {
-			os.Unsetenv("XDG_CONFIG_HOME")
-		}
-	})
-	os.Setenv("XDG_CONFIG_HOME", "/custom/xdg")
-
+func TestConfigDirReturnsCwd(t *testing.T) {
 	dir, err := ConfigDir()
 	if err != nil {
 		t.Fatalf("ConfigDir() error = %v", err)
 	}
-	want := "/custom/xdg/animeheaven"
-	if dir != want {
-		t.Fatalf("ConfigDir() = %q, want %q", dir, want)
-	}
-}
-
-func TestConfigDirFallsBackToUserConfigDir(t *testing.T) {
-	// Unset XDG_CONFIG_HOME
-	orig, hadOrig := os.LookupEnv("XDG_CONFIG_HOME")
-	t.Cleanup(func() {
-		if hadOrig {
-			os.Setenv("XDG_CONFIG_HOME", orig)
-		} else {
-			os.Unsetenv("XDG_CONFIG_HOME")
-		}
-	})
-	os.Unsetenv("XDG_CONFIG_HOME")
-
-	dir, err := ConfigDir()
+	cwd, err := os.Getwd()
 	if err != nil {
-		t.Fatalf("ConfigDir() error = %v", err)
+		t.Fatalf("os.Getwd() error = %v", err)
 	}
-	if !strings.HasSuffix(dir, "/animeheaven") {
-		t.Fatalf("ConfigDir() = %q, want suffix /animeheaven", dir)
+	if dir != cwd {
+		t.Fatalf("ConfigDir() = %q, want cwd %q", dir, cwd)
 	}
 }
 
 func TestConfigPath(t *testing.T) {
-	orig, hadOrig := os.LookupEnv("XDG_CONFIG_HOME")
-	t.Cleanup(func() {
-		if hadOrig {
-			os.Setenv("XDG_CONFIG_HOME", orig)
-		} else {
-			os.Unsetenv("XDG_CONFIG_HOME")
-		}
-	})
-	os.Setenv("XDG_CONFIG_HOME", "/xdg")
-
 	path, err := ConfigPath()
 	if err != nil {
 		t.Fatalf("ConfigPath() error = %v", err)
 	}
-	want := "/xdg/animeheaven/config.json"
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("os.Getwd() error = %v", err)
+	}
+	want := filepath.Join(cwd, "config.json")
 	if path != want {
 		t.Fatalf("ConfigPath() = %q, want %q", path, want)
 	}
