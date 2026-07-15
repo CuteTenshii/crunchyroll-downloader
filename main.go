@@ -2,22 +2,133 @@ package main
 
 import (
 	"bufio"
+	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
+	"path/filepath"
 	"strings"
+	"time"
+)
+
+const (
+	defaultPlayback4294Retries = 2
+	defaultPlayback4294Backoff = 8 * time.Second
+	maxPlayback4294Retries     = 5
+	maxPlayback4294Backoff     = time.Minute
 )
 
 var (
-	token         = ""
-	audioLang     = flag.String("audio-lang", "ja-JP", "Audio language(s), comma-separated for multiple (e.g. \"ja-JP,en-US\"). First is the default track")
-	subtitlesLang = flag.String("subs-lang", "en-US", "Subtitle language(s), comma-separated for multiple (e.g. \"en-US,es-419\"). First is the default track")
-	videoQuality  = flag.String("video-quality", "1080p", "Video quality")
-	audioQuality  = flag.String("audio-quality", "192k", "Audio quality")
-	seasonNumber  = flag.Int("season", 0, "Season number. Not used if an episode link is entered")
-	etpRt         = flag.String("etp-rt", "", "The \"etp_rt\" cookie value of your account")
-	debug         = flag.Bool("debug-manifest", false, "Log raw episode playback JSON and manifest XML")
+	token                 = ""
+	audioLang             = flag.String("audio-lang", "ja-JP", "Audio language(s), comma-separated for multiple (e.g. \"ja-JP,en-US\"). First is the default track")
+	subtitlesLang         = flag.String("subs-lang", "en-US", "Subtitle language(s), comma-separated for multiple (e.g. \"en-US,es-419\"). First is the default track")
+	videoQuality          = flag.String("video-quality", "1080p", "Video quality")
+	audioQuality          = flag.String("audio-quality", "192k", "Audio quality")
+	seasonNumber          = flag.Int("season", 0, "Season number. Not used if an episode link is entered")
+	etpRtFile             = flag.String("etp-rt-file", "", "Path to a 0600 regular file containing the etp_rt cookie (or set CRUNCHYROLL_ETP_RT)")
+	debug                 = flag.Bool("debug-manifest", false, "Log raw episode playback JSON and manifest XML")
+	index                 = flag.Bool("index", false, "Build a metadata catalog of all episodes in a series (no download). Requires a /series/ URL")
+	indexSubs             = flag.Bool("index-subs", false, "Like --index, but also download subtitle transcripts for every episode. Resumable")
+	indexDelay            = flag.Int("index-delay", 3, "Seconds to wait between subtitle fetches (avoids Crunchyroll rate limiting)")
+	indexPriority         = flag.String("index-priority-ids", "", "Episode provider IDs to process first in --index-subs mode, comma-separated")
+	playback4294Retries   = flag.Int("playback-4294-retries", defaultPlayback4294Retries, "Additional retries for playback provider error 4294")
+	playback4294Backoff   = flag.Duration("playback-4294-backoff", defaultPlayback4294Backoff, "Initial backoff for playback provider error 4294")
+	getProcessEpisodeInfo = getEpisodeInfo
 )
+
+const maxETPRTBytes int64 = 16 << 10
+
+// CredentialFileError makes unsafe credential-file rejections actionable
+// without exposing the cookie itself.
+type CredentialFileError struct {
+	Path    string
+	Problem string
+}
+
+func (e *CredentialFileError) Error() string {
+	return fmt.Sprintf("unsafe etp_rt credential file %s: %s", e.Path, e.Problem)
+}
+
+func readETPRTFile(path string) (string, error) {
+	entryInfo, err := os.Lstat(path)
+	if err != nil {
+		return "", fmt.Errorf("stat etp_rt credential file: %w", err)
+	}
+	if err := validateCredentialFileInfo(path, entryInfo); err != nil {
+		return "", err
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return "", fmt.Errorf("open etp_rt credential file: %w", err)
+	}
+	defer file.Close()
+	openedInfo, err := file.Stat()
+	if err != nil {
+		return "", fmt.Errorf("stat opened etp_rt credential file: %w", err)
+	}
+	if err := validateOpenedCredentialFile(path, entryInfo, openedInfo); err != nil {
+		return "", err
+	}
+	data, err := io.ReadAll(io.LimitReader(file, maxETPRTBytes+1))
+	if err != nil {
+		return "", fmt.Errorf("read etp_rt credential file: %w", err)
+	}
+	if int64(len(data)) > maxETPRTBytes {
+		return "", &CredentialFileError{Path: path, Problem: "size is outside the permitted range"}
+	}
+	secret := strings.TrimSpace(string(data))
+	if secret == "" {
+		return "", &CredentialFileError{Path: path, Problem: "is empty"}
+	}
+	return secret, nil
+}
+
+func validateCredentialFileInfo(path string, info os.FileInfo) error {
+	if info.Mode()&os.ModeSymlink != 0 {
+		return &CredentialFileError{Path: path, Problem: "must not be a symlink"}
+	}
+	if !info.Mode().IsRegular() {
+		return &CredentialFileError{Path: path, Problem: "must be a regular file"}
+	}
+	if info.Mode().Perm() != 0600 {
+		return &CredentialFileError{Path: path, Problem: "permissions must be 0600"}
+	}
+	if info.Size() <= 0 || info.Size() > maxETPRTBytes {
+		return &CredentialFileError{Path: path, Problem: "size is outside the permitted range"}
+	}
+	return nil
+}
+
+func validateOpenedCredentialFile(path string, entryInfo, openedInfo os.FileInfo) error {
+	if err := validateCredentialFileInfo(path, openedInfo); err != nil {
+		return err
+	}
+	if !os.SameFile(entryInfo, openedInfo) {
+		return &CredentialFileError{Path: path, Problem: "changed after validation"}
+	}
+	return nil
+}
+
+func loadETPRT(filePath string) (string, error) {
+	if filePath != "" {
+		return readETPRTFile(filepath.Clean(filePath))
+	}
+	if secret := strings.TrimSpace(os.Getenv("CRUNCHYROLL_ETP_RT")); secret != "" {
+		return secret, nil
+	}
+	return "", fmt.Errorf("provide --etp-rt-file with a 0600 regular file or set CRUNCHYROLL_ETP_RT")
+}
+
+func validatePlaybackRetryConfig(retries int, backoff time.Duration) error {
+	if retries < 0 || retries > maxPlayback4294Retries {
+		return fmt.Errorf("--playback-4294-retries must be between 0 and %d", maxPlayback4294Retries)
+	}
+	if backoff <= 0 || backoff > maxPlayback4294Backoff {
+		return fmt.Errorf("--playback-4294-backoff must be greater than 0 and at most %s", maxPlayback4294Backoff)
+	}
+	return nil
+}
 
 // parseLangs splits a comma-separated locale list, trimming spaces and dropping
 // empties.
@@ -31,16 +142,29 @@ func parseLangs(s string) []string {
 	return out
 }
 
-func processUrl(url string) {
-	contentType := strings.Split(url, "/")[3]
-	contentId := strings.Split(url, "/")[4]
-	if len(contentId) < 9 && len(contentId) > 14 {
-		fmt.Printf("Invalid URL format: %s\n", url)
-		return
+func processUrl(url string) (err error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			switch value := recovered.(type) {
+			case error:
+				err = fmt.Errorf("process %s: %w", url, value)
+			default:
+				err = fmt.Errorf("process %s: %v", url, value)
+			}
+		}
+	}()
+
+	parts := strings.Split(url, "/")
+	if len(parts) < 5 {
+		return fmt.Errorf("Invalid URL format: %s", url)
+	}
+	contentType := parts[3]
+	contentId := parts[4]
+	if len(contentId) < 9 || len(contentId) > 14 {
+		return fmt.Errorf("Invalid URL format: %s", url)
 	}
 	if contentType != "watch" && contentType != "series" {
-		fmt.Printf("Invalid URL (must be /watch/ or /series/): %s\n", url)
-		return
+		return fmt.Errorf("Invalid URL (must be /watch/ or /series/): %s", url)
 	}
 
 	audioLangs := parseLangs(*audioLang)
@@ -58,11 +182,25 @@ func processUrl(url string) {
 		primarySubs = subsLangs[0]
 	}
 
+	// Index mode: build a metadata catalog (optionally with subtitles) and exit
+	// without downloading any video. Only meaningful for /series/ URLs.
+	if *index || *indexSubs {
+		if contentType != "series" {
+			return errors.New("--index/--index-subs requires a /series/ URL")
+		}
+		return writeIndex(url, contentId, primaryAudio, primarySubs, *indexSubs)
+	}
+
 	if contentType == "watch" {
-		info := getEpisodeInfo(contentId)
-		downloadEpisode(contentId, info, audioLangs, subsLangs, videoQuality, audioQuality)
+		info := getProcessEpisodeInfo(contentId)
+		if err := downloadEpisode(contentId, info, audioLangs, subsLangs, videoQuality, audioQuality); err != nil {
+			return err
+		}
 	} else {
 		seasons := getSeasons(contentId, primaryAudio, primarySubs)
+		if len(seasons) == 0 {
+			return errors.New("no seasons found")
+		}
 
 		if *seasonNumber != 0 {
 			var seasonId string
@@ -73,45 +211,48 @@ func processUrl(url string) {
 				}
 			}
 			if seasonId == "" {
-				fmt.Printf("This anime has no season %v!\n", *seasonNumber)
-				return
+				return fmt.Errorf("This anime has no season %v!", *seasonNumber)
 			}
 
 			episodes := getSeasonEpisodes(seasonId, primaryAudio, primarySubs)
-			downloadSeason(videoQuality, audioQuality, audioLangs, subsLangs, episodes)
+			if err := downloadSeason(videoQuality, audioQuality, audioLangs, subsLangs, episodes); err != nil {
+				return err
+			}
 		} else {
-			print("No season number specified, downloading all seasons...\n")
+			fmt.Println("No season number specified, downloading all seasons...")
 
 			for _, season := range seasons {
 				episodes := getSeasonEpisodes(season.ID, primaryAudio, primarySubs)
-				downloadSeason(videoQuality, audioQuality, audioLangs, subsLangs, episodes)
+				if err := downloadSeason(videoQuality, audioQuality, audioLangs, subsLangs, episodes); err != nil {
+					return err
+				}
 			}
 		}
 	}
+	return nil
 }
 
-func main() {
-	url := flag.String("url", "", "URL of the episode/season to download")
-	urlsFile := flag.String("file", "", "Path to a text file with one URL per line")
-	flag.Parse()
-
-	if *url == "" && *urlsFile == "" {
-		flag.Usage()
-		os.Exit(1)
+func run(url, urlsFile string) error {
+	if url == "" && urlsFile == "" {
+		return errors.New("provide --url or --file")
+	}
+	if err := validatePlaybackRetryConfig(*playback4294Retries, *playback4294Backoff); err != nil {
+		return err
 	}
 
-	if *etpRt == "" {
-		fmt.Println("You must specify the \"-etp-rt\" option!\n- Open Crunchyroll on your browser and log in.\n- Open developer tools (Ctrl+Shift+I), go to \"Application\", and then \"Cookies\".\n- The value of the \"ept_rt\" cookie is what you need to input into this option.")
-		os.Exit(1)
+	etpRT, err := loadETPRT(*etpRtFile)
+	if err != nil {
+		return fmt.Errorf("Authentication setup failed: %w", err)
+	}
+	setETPRT(etpRT)
+	if err := refreshAccessToken(); err != nil {
+		return fmt.Errorf("Authentication failed: %w", err)
 	}
 
-	token = GetAccessToken(*etpRt)
-
-	if *urlsFile != "" {
-		file, err := os.Open(*urlsFile)
+	if urlsFile != "" {
+		file, err := os.Open(urlsFile)
 		if err != nil {
-			fmt.Printf("Failed to open URLs file: %s\n", err)
-			os.Exit(1)
+			return fmt.Errorf("Failed to open URLs file: %w", err)
 		}
 		defer file.Close()
 
@@ -123,14 +264,41 @@ func main() {
 				urls = append(urls, line)
 			}
 		}
+		if err := scanner.Err(); err != nil {
+			return fmt.Errorf("read URLs file: %w", err)
+		}
 
 		fmt.Printf("Found %d URLs to download\n\n", len(urls))
+		failed := false
 		for i, u := range urls {
 			fmt.Printf("=== [%d/%d] %s ===\n", i+1, len(urls), u)
-			processUrl(u)
+			if err := processUrl(u); err != nil {
+				fmt.Printf("! %s\n", err)
+				failed = true
+			}
 			fmt.Println()
 		}
-	} else {
-		processUrl(*url)
+		if failed {
+			return errors.New("one or more URLs failed")
+		}
+		return nil
+	}
+
+	return processUrl(url)
+}
+
+func main() {
+	url := flag.String("url", "", "URL of the episode/season to download")
+	urlsFile := flag.String("file", "", "Path to a text file with one URL per line")
+	flag.Parse()
+
+	if *url == "" && *urlsFile == "" {
+		flag.Usage()
+		fmt.Println("provide --url or --file")
+		os.Exit(1)
+	}
+	if err := run(*url, *urlsFile); err != nil {
+		fmt.Println(err)
+		os.Exit(1)
 	}
 }

@@ -7,3 +7,15 @@ client_id.bin
 private_key.pem
 
 *.mkv
+
+# Credentials — never commit
+etp_rt.txt
+.env
+crunchyroll-downloader
+*_index.json
+
+crunchyroll-downloader.m*
+crunchyroll-downloader.media*
+*_index*.json
+*_indexer_*.log
+One Piece_subs/

@@ -19,6 +19,7 @@ type SeasonEpisode struct {
 	SeriesTitle        string        `json:"series_title"`
 	AudioLocale        string        `json:"audio_locale"`
 	Title              string        `json:"title"`
+	Description        string        `json:"description"`
 	AvailabilityStarts string        `json:"availability_starts"`
 }
 
