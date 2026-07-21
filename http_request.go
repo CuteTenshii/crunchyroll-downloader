@@ -48,6 +48,7 @@ func DoRequest(req *http.Request) (*http.Response, error) {
 	if err := ensureReplayableBody(req); err != nil {
 		return nil, err
 	}
+	recordProviderCall(req)
 	resp, err := authenticatedHTTPClient.Do(req)
 	if err != nil {
 		return nil, err
@@ -70,6 +71,7 @@ func DoRequest(req *http.Request) (*http.Response, error) {
 		retry.Body = body
 	}
 	retry.Header.Set("Authorization", "Bearer "+token)
+	recordProviderCall(retry)
 	resp, err = authenticatedHTTPClient.Do(retry)
 	if err != nil {
 		return nil, err

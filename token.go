@@ -84,6 +84,7 @@ func GetAccessToken(etpRT string) (CrunchyrollTokenResponse, error) {
 	req.AddCookie(&http.Cookie{Name: "device_id", Value: deviceID})
 	req.AddCookie(&http.Cookie{Name: "etp_rt", Value: etpRT})
 
+	recordProviderCall(req)
 	resp, err := tokenHTTPClient.Do(req)
 	if err != nil {
 		return CrunchyrollTokenResponse{}, fmt.Errorf("send token request: %w", err)

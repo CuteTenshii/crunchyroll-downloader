@@ -17,9 +17,12 @@ const playback4294Code = "4294"
 // failures. It deliberately retains only the episode ID and parsed scalar
 // code/message; the raw provider body is never stored or formatted.
 type PlaybackAPIError struct {
-	EpisodeID string
-	Code      string
-	Message   string
+	EpisodeID  string
+	Code       string
+	Message    string
+	HTTPStatus int
+	RetryAfter string
+	RateLimit  ProviderRateLimitHeaders
 }
 
 func (e *PlaybackAPIError) Error() string {
@@ -37,6 +40,20 @@ func safeProviderMessage(message string) string {
 		message = message[:maxProviderMessageBytes] + "..."
 	}
 	return message
+}
+
+func safeHeaderScalar(value string) string {
+	value = strings.Join(strings.Fields(value), " ")
+	if len(value) > 80 {
+		return value[:80]
+	}
+	return value
+}
+
+type ProviderRateLimitHeaders struct {
+	Limit     string `json:"limit,omitempty"`
+	Remaining string `json:"remaining,omitempty"`
+	Reset     string `json:"reset,omitempty"`
 }
 
 func providerCode(value any) string {
@@ -166,7 +183,11 @@ func getEpisode(id string) Episode {
 	if len(episode.Error) > 0 && string(episode.Error) != "null" {
 		// Panic rather than os.Exit so callers (download loop, index loop) can
 		// recover and continue past a single bad episode instead of dying.
-		panic(parsePlaybackAPIError(id, episode.Error))
+		providerErr := parsePlaybackAPIError(id, episode.Error)
+		providerErr.HTTPStatus = resp.StatusCode
+		providerErr.RetryAfter = safeHeaderScalar(resp.Header.Get("Retry-After"))
+		providerErr.RateLimit = providerRateLimitHeaders(resp.Header)
+		panic(providerErr)
 	}
 
 	if *debug {

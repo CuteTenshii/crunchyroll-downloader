@@ -2,7 +2,7 @@
 
 Downloads anime from Crunchyroll and outputs them in a MKV file.
 
-You won't be banned or anything, I downloaded all Kaguya-Sama seasons to test during 30 mins and everything went fine
+Use the downloader only with an authorized account and content you are entitled to access. Provider restrictions and account enforcement are outside this tool's control.
 
 ## Features
 
@@ -18,7 +18,7 @@ You won't be banned or anything, I downloaded all Kaguya-Sama seasons to test du
 
 - [FFmpeg](https://www.ffmpeg.org/download.html#get-packages)
 - To download Premium-only content, a Crunchyroll Premium account. No, this can't be bypassed and a free trial should be enough
-- Either a `.wvd` file, or a `client_id.bin` and `private_key.pem`
+- For full-media downloads only, an operator-owned and lawfully provisioned `.wvd` file or matching raw device files, stored outside the repository as mode `0600` and selected with `CRUNCHYROLL_WIDEVINE_DEVICE_FILE` (or the paired raw-file environment variables). Subtitle-only indexing does not require a Widevine device.
 
 ## Download
 
@@ -95,9 +95,7 @@ To download multiple audio tracks and subtitles into a single file (the first of
 
 ### What is a `.wvd` file and do I really need one?
 
-Yes, Crunchyroll uses DRM-only content. This file is used to get a Widevine license, which gives the keys to decrypt the media.
-
-If you don't have a rooted Android device or are just lazy, search "ready to use cdms" and you'll find plenty of websites providing those files.
+Full-media downloads require an operator-owned, lawfully provisioned device credential. Subtitle-only indexing does not require one. Keep device credentials outside the repository in private `0600` storage; never use leaked, extracted, shared, or third-party credentials.
 
 ## License
 

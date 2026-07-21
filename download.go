@@ -43,10 +43,20 @@ var parseDownloadManifest = parseManifest
 type HTTPStatusError struct {
 	URL        string
 	StatusCode int
+	RetryAfter string
+	RateLimit  ProviderRateLimitHeaders
 }
 
 func (e *HTTPStatusError) Error() string {
 	return fmt.Sprintf("unexpected HTTP status %d for %s", e.StatusCode, redactURL(e.URL))
+}
+
+func providerRateLimitHeaders(header http.Header) ProviderRateLimitHeaders {
+	return ProviderRateLimitHeaders{
+		Limit:     safeHeaderScalar(header.Get("RateLimit-Limit")),
+		Remaining: safeHeaderScalar(header.Get("RateLimit-Remaining")),
+		Reset:     safeHeaderScalar(header.Get("RateLimit-Reset")),
+	}
 }
 
 // SubtitleBodyError means a subtitle response was structurally unsafe to
@@ -232,13 +242,18 @@ func fetchSubtitleASS(url string) ([]byte, error) {
 	req.Header.Set("Origin", "https://static.crunchyroll.com")
 	req.Header.Set("Referer", "https://static.crunchyroll.com/")
 	req.Header.Set("User-Agent", "Mozilla/5.0 (X11; Linux x86_64; rv:147.0) Gecko/20100101 Firefox/147.0")
+	recordProviderCall(req)
 	resp, err := subtitleHTTPClient.Do(req)
 	if err != nil {
 		return nil, &SubtitleTransportError{Operation: "transport"}
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil, &HTTPStatusError{URL: redactURL(url), StatusCode: resp.StatusCode}
+		return nil, &HTTPStatusError{
+			URL: redactURL(url), StatusCode: resp.StatusCode,
+			RetryAfter: safeHeaderScalar(resp.Header.Get("Retry-After")),
+			RateLimit:  providerRateLimitHeaders(resp.Header),
+		}
 	}
 	if resp.ContentLength == 0 {
 		return nil, &SubtitleBodyError{URL: redactURL(url), Problem: "empty body"}

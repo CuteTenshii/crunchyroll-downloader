@@ -17,6 +17,9 @@ const (
 	defaultPlayback4294Backoff = 8 * time.Second
 	maxPlayback4294Retries     = 5
 	maxPlayback4294Backoff     = time.Minute
+	defaultIndexWindow         = 25
+	defaultIndexCircuitLimit   = 3
+	defaultIndexCooldown       = 30 * time.Minute
 )
 
 var (
@@ -30,8 +33,12 @@ var (
 	debug                 = flag.Bool("debug-manifest", false, "Log raw episode playback JSON and manifest XML")
 	index                 = flag.Bool("index", false, "Build a metadata catalog of all episodes in a series (no download). Requires a /series/ URL")
 	indexSubs             = flag.Bool("index-subs", false, "Like --index, but also download subtitle transcripts for every episode. Resumable")
-	indexDelay            = flag.Int("index-delay", 3, "Seconds to wait between subtitle fetches (avoids Crunchyroll rate limiting)")
+	indexDelay            = flag.Int("index-delay", 3, "Seconds to wait between subtitle acquisition attempts")
 	indexPriority         = flag.String("index-priority-ids", "", "Episode provider IDs to process first in --index-subs mode, comma-separated")
+	indexWindow           = flag.Int("index-window", defaultIndexWindow, "Maximum provider identities attempted in one resumable index run (1-100)")
+	indexCircuitLimit     = flag.Int("index-circuit-4294-limit", defaultIndexCircuitLimit, "Consecutive provider 4294 responses before the global playback circuit opens")
+	indexCircuitCooldown  = flag.Duration("index-circuit-cooldown", defaultIndexCooldown, "Global cooldown after the playback circuit opens")
+	indexSummaryPath      = flag.String("index-run-summary", "", "Machine-readable terminal run summary path (default: <index>.run-summary.json)")
 	playback4294Retries   = flag.Int("playback-4294-retries", defaultPlayback4294Retries, "Additional retries for playback provider error 4294")
 	playback4294Backoff   = flag.Duration("playback-4294-backoff", defaultPlayback4294Backoff, "Initial backoff for playback provider error 4294")
 	getProcessEpisodeInfo = getEpisodeInfo
@@ -126,6 +133,19 @@ func validatePlaybackRetryConfig(retries int, backoff time.Duration) error {
 	}
 	if backoff <= 0 || backoff > maxPlayback4294Backoff {
 		return fmt.Errorf("--playback-4294-backoff must be greater than 0 and at most %s", maxPlayback4294Backoff)
+	}
+	return nil
+}
+
+func validateIndexRunConfig(window, circuitLimit int, cooldown time.Duration) error {
+	if window < 1 || window > 100 {
+		return fmt.Errorf("--index-window must be between 1 and 100")
+	}
+	if circuitLimit < 1 || circuitLimit > 10 {
+		return fmt.Errorf("--index-circuit-4294-limit must be between 1 and 10")
+	}
+	if cooldown < time.Minute || cooldown > 24*time.Hour {
+		return fmt.Errorf("--index-circuit-cooldown must be between 1m and 24h")
 	}
 	return nil
 }
@@ -238,6 +258,12 @@ func run(url, urlsFile string) error {
 	}
 	if err := validatePlaybackRetryConfig(*playback4294Retries, *playback4294Backoff); err != nil {
 		return err
+	}
+	if (*index || *indexSubs) && *indexSubs {
+		if err := validateIndexRunConfig(*indexWindow, *indexCircuitLimit, *indexCircuitCooldown); err != nil {
+			return err
+		}
+		resetProviderCallMetrics()
 	}
 
 	etpRT, err := loadETPRT(*etpRtFile)

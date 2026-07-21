@@ -93,7 +93,7 @@ func TestCheckpointSubtitleFetchFailureRequiresDelay(t *testing.T) {
 	}
 }
 
-func TestFetchSubtitlesRetries4294AndReleasesSuccessfulPlayback(t *testing.T) {
+func TestFetchSubtitlesSurfacesFirst4294ToGlobalCircuit(t *testing.T) {
 	originalOpen := openIndexPlayback
 	originalSleep := sleepPlaybackRetry
 	originalRetries := *playback4294Retries
@@ -111,19 +111,16 @@ func TestFetchSubtitlesRetries4294AndReleasesSuccessfulPlayback(t *testing.T) {
 	var delays []time.Duration
 	openIndexPlayback = func(id string) Episode {
 		calls++
-		if calls == 1 {
-			panic(&PlaybackAPIError{EpisodeID: id, Code: playback4294Code})
-		}
-		return Episode{Subtitles: map[string]*Subtitle{}}
+		panic(&PlaybackAPIError{EpisodeID: id, Code: playback4294Code})
 	}
 	sleepPlaybackRetry = func(delay time.Duration) { delays = append(delays, delay) }
 
 	_, err := fetchSubtitles("episode", "en-US")
-	var missing *SubtitleLocaleError
-	if !errors.As(err, &missing) {
-		t.Fatalf("fetchSubtitles() error = %v, want SubtitleLocaleError", err)
+	var playbackErr *PlaybackAPIError
+	if !errors.As(err, &playbackErr) || playbackErr.Code != playback4294Code {
+		t.Fatalf("fetchSubtitles() error = %v, want typed 4294", err)
 	}
-	if calls != 2 || len(delays) != 1 || delays[0] != 4*time.Second {
+	if calls != 1 || len(delays) != 0 {
 		t.Fatalf("calls=%d delays=%v", calls, delays)
 	}
 }
@@ -270,6 +267,15 @@ func TestParseIndexPriorityIDsTrimsAndDeduplicates(t *testing.T) {
 	}
 }
 
+func TestIndexPlayback4294RetriesAreOwnedByGlobalCircuit(t *testing.T) {
+	original := *playback4294Retries
+	t.Cleanup(func() { *playback4294Retries = original })
+	*playback4294Retries = 5
+	if got := indexPlayback4294Retries(); got != 0 {
+		t.Fatalf("index playback retries = %d, want 0", got)
+	}
+}
+
 func TestReorderIndexWorkPrioritizesDeclaredOrderAndRetainsAll(t *testing.T) {
 	work := indexWorkForIDs("first", "second", "third", "fourth")
 	got, err := reorderIndexWork(work, parseIndexPriorityIDs(" third, first "))
@@ -317,6 +323,113 @@ func TestReorderIndexWorkEmptyPriorityPreservesOriginal(t *testing.T) {
 	}
 	if gotIDs := indexWorkIDs(got); len(gotIDs) != 2 || gotIDs[0] != "first" || gotIDs[1] != "second" {
 		t.Fatalf("empty priority reordered work: %#v", gotIDs)
+	}
+}
+
+func TestSortIndexWorkNewestFirstUsesStableCanonicalTies(t *testing.T) {
+	work := []indexEpisodeWork{
+		{Episode: SeasonEpisode{ID: "older", SeasonNumber: 99, EpisodeNumber: 999, AvailabilityStarts: "2025-01-01T00:00:00Z"}},
+		{Episode: SeasonEpisode{ID: "variant-z", SeasonNumber: 2, EpisodeNumber: 10, AvailabilityStarts: "2026-01-01T00:00:00Z"}},
+		{Episode: SeasonEpisode{ID: "variant-a", SeasonNumber: 2, EpisodeNumber: 10, AvailabilityStarts: "2026-01-01T00:00:00Z"}},
+		{Episode: SeasonEpisode{ID: "episode-nine", SeasonNumber: 2, EpisodeNumber: 9, AvailabilityStarts: "2026-01-01T00:00:00Z"}},
+		{Episode: SeasonEpisode{ID: "season-one", SeasonNumber: 1, EpisodeNumber: 100, AvailabilityStarts: "2026-01-01T00:00:00Z"}},
+	}
+	got := indexWorkIDs(sortIndexWorkNewestFirst(work))
+	want := []string{"variant-a", "variant-z", "episode-nine", "season-one", "older"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("newest-first IDs = %#v, want %#v", got, want)
+	}
+	if work[0].Episode.ID != "older" {
+		t.Fatalf("sort mutated provider/catalog work: %#v", indexWorkIDs(work))
+	}
+}
+
+func TestProcessIndexWorkSnapshotsEveryIdentityAndContinuesAfterFailure(t *testing.T) {
+	seasons := []Season{{ID: "season", SeasonNumber: 1}}
+	episodes := map[string][]SeasonEpisode{"season": {
+		{ID: "newest", SeasonNumber: 1, EpisodeNumber: 3, AvailabilityStarts: "2026-01-03T00:00:00Z", Title: "Newest", SeriesTitle: "Series"},
+		{ID: "middle", SeasonNumber: 1, EpisodeNumber: 2, AvailabilityStarts: "2026-01-02T00:00:00Z", Title: "Middle", SeriesTitle: "Series"},
+		{ID: "oldest", SeasonNumber: 1, EpisodeNumber: 1, AvailabilityStarts: "2026-01-01T00:00:00Z", Title: "Oldest", SeriesTitle: "Series"},
+	}}
+	catalog, work := newIndexCatalog("Series", "https://example.test/series", "en-US", seasons, episodes, nil, true)
+	work = sortIndexWorkNewestFirst(work)
+	var fetched []string
+	fetch := func(id, locale string) (subtitleFetchResult, error) {
+		fetched = append(fetched, id)
+		if id == "newest" {
+			return subtitleFetchResult{}, &PlaybackAPIError{EpisodeID: id, Code: playback4294Code}
+		}
+		return subtitleFetchResult{AvailableLangs: []string{locale}, RawASS: []byte("[Events]\n")}, nil
+	}
+	var snapshots [][]string
+	snapshot := func(file *indexFile) error {
+		statuses := make([]string, 0, 3)
+		for _, episode := range file.Seasons[0].Episodes {
+			statuses = append(statuses, episode.Status)
+		}
+		snapshots = append(snapshots, statuses)
+		return nil
+	}
+	var sleeps []time.Duration
+	err := processIndexWork(&catalog, work, nil, "en-US", t.TempDir(), fetch, snapshot, 7*time.Second, func(delay time.Duration) {
+		sleeps = append(sleeps, delay)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(fetched, ",") != "newest,middle,oldest" {
+		t.Fatalf("failure blocked older work: fetched=%#v", fetched)
+	}
+	if len(snapshots) != 3 || snapshots[0][0] != indexStatusThrottled || snapshots[0][1] != indexStatusPending || snapshots[2][2] != indexStatusSubtitleCached {
+		t.Fatalf("per-record snapshots = %#v", snapshots)
+	}
+	if len(sleeps) != 3 || sleeps[0] != 7*time.Second {
+		t.Fatalf("attempt pacing = %#v", sleeps)
+	}
+	if got := catalog.Seasons[0].Episodes[0].SubtitleAttemptCount; got != 1 {
+		t.Fatalf("failed attempt count = %d, want 1", got)
+	}
+	if catalog.Seasons[0].Episodes[0].SubtitleLastAttemptAt == "" {
+		t.Fatal("failed identity did not persist last-attempt time")
+	}
+}
+
+func TestProcessIndexWorkRestartSkipsVerifiedCacheAndRetriesFailedIdentity(t *testing.T) {
+	dir := t.TempDir()
+	raw := []byte("[Events]\n")
+	cachedPath := rawASSPath(dir, 1, 2, "cached")
+	if err := atomicWriteFile(cachedPath, raw, 0644); err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(raw)
+	prior := map[string]indexEpisode{
+		"cached": {Status: indexStatusSubtitleCached, SubtitleFile: cachedPath, SubtitleLocale: "en-US", SubtitleSHA256: hex.EncodeToString(sum[:]), SubtitleParserVersion: rawASSParserVersion},
+		"failed": {Status: indexStatusSubtitleFailed, SubtitleLocale: "en-US", SubtitleAttemptCount: 3, Error: "playback API error: code 4294"},
+	}
+	seasons := []Season{{ID: "season", SeasonNumber: 1}}
+	episodes := map[string][]SeasonEpisode{"season": {
+		{ID: "cached", SeasonNumber: 1, EpisodeNumber: 2, AvailabilityStarts: "2026-01-02T00:00:00Z", SeriesTitle: "Series"},
+		{ID: "failed", SeasonNumber: 1, EpisodeNumber: 1, AvailabilityStarts: "2026-01-01T00:00:00Z", SeriesTitle: "Series"},
+	}}
+	catalog, work := newIndexCatalog("Series", "https://example.test/series", "en-US", seasons, episodes, prior, true)
+	var fetched []string
+	err := processIndexWork(&catalog, sortIndexWorkNewestFirst(work), prior, "en-US", dir, func(id, locale string) (subtitleFetchResult, error) {
+		fetched = append(fetched, id)
+		return subtitleFetchResult{AvailableLangs: []string{locale}, RawASS: raw, PlaybackAttempts: 2}, nil
+	}, func(*indexFile) error { return nil }, time.Second, func(time.Duration) {})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(fetched, ",") != "failed" {
+		t.Fatalf("restart fetched verified cache or skipped failure: %#v", fetched)
+	}
+	for _, episode := range catalog.Seasons[0].Episodes {
+		if episode.Status != indexStatusSubtitleCached {
+			t.Fatalf("restart did not converge to cached: %#v", catalog.Seasons[0].Episodes)
+		}
+		if episode.ID == "failed" && episode.SubtitleAttemptCount != 5 {
+			t.Fatalf("restart attempt count = %d, want 5", episode.SubtitleAttemptCount)
+		}
 	}
 }
 

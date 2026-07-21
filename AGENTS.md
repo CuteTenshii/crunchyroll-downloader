@@ -1,6 +1,6 @@
 # Agent Guide — Crunchyroll Downloader
 
-This document describes how to reproduce the full download workflow: clone, install dependencies, obtain a Widevine CDM, authenticate, download + decrypt an episode, and clip the result. Written for macOS (Apple Silicon) but the steps generalize to Linux/Windows.
+This document describes the subtitle-indexing and full-media workflows. Subtitle-only indexing does not require a Widevine device. Full-media downloads require an operator-owned, lawfully provisioned Widevine credential. Written for macOS (Apple Silicon), but the steps generalize to Linux/Windows.
 
 ---
 
@@ -25,7 +25,7 @@ Downloads DRM-protected anime from Crunchyroll and outputs a decrypted `.mkv` fi
 | [Go](https://go.dev/dl/) 1.25+ | `brew install go` |
 | [FFmpeg](https://ffmpeg.org) | `brew install ffmpeg` |
 | Crunchyroll Premium account | — (needed for premium-only content) |
-| Widevine CDM (`.wvd` file) | See §4 below |
+| Widevine CDM (`.wvd` file) | Full-media workflow only; see §4 below |
 
 Verify:
 ```bash
@@ -47,29 +47,30 @@ go build .
 
 ## 4. Widevine CDM (`.wvd` file)
 
-Crunchyroll streams are DRM-protected. You need a Widevine L3 CDM to obtain decryption keys. The downloader looks for **one** of these in the current directory (`drm.go:76`–`getWidevineDevice`):
+Crunchyroll streams are DRM-protected. Full-media operation needs a Widevine L3 credential to obtain decryption keys. The downloader reads credentials only from explicit private-file environment variables (`drm.go`–`getWidevineDevice`):
 
-- A `.wvd` file (Widevine Device v2 format) — **preferred, single file**
-- Or both `client_id.bin` and `private_key.pem`
+- `CRUNCHYROLL_WIDEVINE_DEVICE_FILE=/private/path/device.wvd` — **preferred, single file**
+- Or both `CRUNCHYROLL_WIDEVINE_CLIENT_ID_FILE` and `CRUNCHYROLL_WIDEVINE_PRIVATE_KEY_FILE`
 
-### Where to get a CDM
+Each path must resolve directly to a regular mode-`0600` file outside the repository; symlinks and broader modes fail closed. The downloader no longer scans the working tree for device credentials.
 
-These are leaked/extracted L3 device credentials from Android emulators. Common sources:
-- VideoHelp forum: "Ready to use CDMs" thread
-- Search "ready to use cdms" on Google
+### Credential provenance
+
+Use only a Widevine credential that the operator lawfully owns or is authorized to use. Never obtain, recommend, or use leaked, extracted, shared, or third-party device credentials. Subtitle-only indexing does not load a CDM and must not be blocked on one.
 
 ### How to place it
 
-Copy **one** `.wvd` file into the repo folder:
+Keep the credential outside the repository in operator-private storage with mode `0600`, then select it by path without copying it into the working tree:
 ```bash
-cp /path/to/your.wvd .
+install -m 0600 /path/to/operator-owned.wvd ~/.config/crunchyroll-downloader/device.wvd
+export CRUNCHYROLL_WIDEVINE_DEVICE_FILE="$HOME/.config/crunchyroll-downloader/device.wvd"
 ```
 
-The downloader uses the **first** `.wvd` it finds in the working directory (`drm.go:79`–`87`). Having multiple files there is fine but only one is used — the one that sorts first alphabetically.
+The downloader never scans its working directory for a device. Keep the configured path in operator-owned runtime configuration and do not copy the credential into the repository.
 
 ### CDMs get revoked
 
-L3 CDMs are periodically revoked by Google/Widevine. A revoked CDM will still **load** fine but will fail at license time. If you see a license error at runtime (`drm.go:336`), swap in a different `.wvd`.
+An operator-owned device can become unusable or revoked. A device may still **load** but fail at license time. If that happens, stop the full-media workflow and have the operator provision another authorized device; do not search for shared credentials.
 
 ### Verifying a CDM (optional)
 
@@ -102,16 +103,16 @@ The downloader needs your Crunchyroll `etp_rt` cookie to authenticate.
 
 ### How to store it safely
 
-The `etp_rt` value is a secret. Save it to a gitignored file so it never gets committed:
+The `etp_rt` value is a secret. Save it outside the repository in an operator-private `0600` file:
 
 ```bash
-# The file etp_rt.txt is in .gitignore
-echo "YOUR_ETP_RT_VALUE_HERE" > etp_rt.txt
+install -d -m 0700 ~/.config/crunchyroll-downloader
+install -m 0600 /path/to/newly-provisioned-etp-rt ~/.config/crunchyroll-downloader/etp_rt.txt
 ```
 
-Then use it via shell substitution so the value doesn't appear in your shell history:
+Pass only the file path. Never put the value in argv, shell substitution, logs, receipts, prompts, fixtures, or Git:
 ```bash
-./crunchyroll-downloader --url "..." --etp-rt "$(cat etp_rt.txt)"
+./crunchyroll-downloader --url "..." --etp-rt-file ~/.config/crunchyroll-downloader/etp_rt.txt
 ```
 
 ### Token expiry
@@ -126,7 +127,7 @@ Access tokens expire. The downloader handles this automatically — `http_reques
 |---|---|---|
 | `-url` | — | URL of an episode (`/watch/...`) or series (`/series/...`) |
 | `-file` | — | Path to a text file with one URL per line (batch) |
-| `-etp-rt` | — | Your `etp_rt` cookie value (**required**) |
+| `-etp-rt-file` | — | Path to a regular `0600` file containing the `etp_rt` cookie (**required**) |
 | `-season` | `0` | Season number (only for `/series/` URLs; `0` = all seasons) |
 | `-audio-lang` | `ja-JP` | Audio language(s), comma-separated. First = default track. Use `all` for every available dub. |
 | `-subs-lang` | `en-US` | Subtitle language(s), comma-separated. First = default track. Use `all` for every available sub. |
@@ -140,43 +141,43 @@ Access tokens expire. The downloader handles this automatically — `http_reques
 # Single episode (Japanese audio + English subs)
 ./crunchyroll-downloader \
   --url "https://www.crunchyroll.com/watch/GE00350806JAJP/the-long-sought-elbaph-the-big-reunion-banquet" \
-  --etp-rt "$(cat etp_rt.txt)"
+  --etp-rt-file ~/.config/crunchyroll-downloader/etp_rt.txt
 
 # Entire season
 ./crunchyroll-downloader \
   --url "https://www.crunchyroll.com/series/GJ0H7Q5ZJ/hells-paradise" \
   --season 1 \
-  --etp-rt "$(cat etp_rt.txt)"
+  --etp-rt-file ~/.config/crunchyroll-downloader/etp_rt.txt
 
 # All seasons of a series
 ./crunchyroll-downloader \
   --url "https://www.crunchyroll.com/series/GJ0H7Q5ZJ/hells-paradise" \
-  --etp-rt "$(cat etp_rt.txt)"
+  --etp-rt-file ~/.config/crunchyroll-downloader/etp_rt.txt
 
 # English dub audio
 ./crunchyroll-downloader \
   --url "https://www.crunchyroll.com/watch/GE00350806JAJP/..." \
-  --etp-rt "$(cat etp_rt.txt)" \
+  --etp-rt-file ~/.config/crunchyroll-downloader/etp_rt.txt \
   --audio-lang en-US
 
 # Multiple audio + subtitle tracks in one file (first of each = default)
 ./crunchyroll-downloader \
   --url "https://www.crunchyroll.com/watch/GE00350806JAJP/..." \
-  --etp-rt "$(cat etp_rt.txt)" \
+  --etp-rt-file ~/.config/crunchyroll-downloader/etp_rt.txt \
   --audio-lang ja-JP,en-US \
   --subs-lang en-US,es-419,de-DE
 
 # Download ALL available dubs + ALL subtitles
 ./crunchyroll-downloader \
   --url "https://www.crunchyroll.com/watch/GE00350806JAJP/..." \
-  --etp-rt "$(cat etp_rt.txt)" \
+  --etp-rt-file ~/.config/crunchyroll-downloader/etp_rt.txt \
   --audio-lang all \
   --subs-lang all
 
 # Batch download from a file (one URL per line)
 ./crunchyroll-downloader \
   --file list.txt \
-  --etp-rt "$(cat etp_rt.txt)" \
+  --etp-rt-file ~/.config/crunchyroll-downloader/etp_rt.txt \
   --subs-lang en-US
 ```
 
@@ -188,7 +189,7 @@ Files are saved to `<SeriesTitle>/<SeriesTitle> S<SS>E<EE> - <EpisodeTitle> [<qu
 
 If a download fails or behaves unexpectedly, add `--debug-manifest` to see the raw API responses:
 ```bash
-./crunchyroll-downloader --url "..." --etp-rt "$(cat etp_rt.txt)" --debug-manifest
+./crunchyroll-downloader --url "..." --etp-rt-file ~/.config/crunchyroll-downloader/etp_rt.txt --debug-manifest
 ```
 
 ## 7. Available qualities
@@ -330,10 +331,10 @@ crunchyroll-downloader/
 ├── go.mod / go.sum      # Go dependencies
 ├── .gitignore           # Ignores *.wvd, *.mkv, etp_rt.txt, .env
 ├── cdm_test.go          # Optional test: verifies .wvd loads correctly
-├── etp_rt.txt           # Your cookie (gitignored — you create this)
-├── *.wvd                # Your CDM (gitignored — you provide this)
 └── crunchyroll-downloader  # Built binary
 ```
+
+Authentication and device files belong in private operator storage outside this tree; only their paths are configured at runtime.
 
 ### Key dependencies
 
@@ -348,8 +349,8 @@ crunchyroll-downloader/
 
 | Problem | Cause | Fix |
 |---|---|---|
-| `no widevine device provided` | No `.wvd` (or `client_id.bin` + `private_key.pem`) in the working directory | Copy a `.wvd` into the repo folder |
-| `getLicense` error / no keys | CDM is revoked | Swap in a different `.wvd` |
+| `no widevine device provided` | A full-media run has no explicit authorized device-file environment configuration | Provision an authorized device in private `0600` storage and set the documented file variable; subtitle-only indexing needs none |
+| `getLicense` error / no keys | The operator-owned device may be invalid or revoked | Stop and have the operator provision another authorized device |
 | `Access token expired` message | Normal — token auto-refreshes | Nothing; it retries automatically |
 | `Audio locale X is not available` | Episode doesn't have that dub | Remove it from `-audio-lang` or use `all` |
 | `Subtitle locale X is not available` | Episode doesn't have that sub | Remove it from `-subs-lang` or use `all` |
@@ -361,8 +362,9 @@ crunchyroll-downloader/
 
 ## 13. Security notes
 
-- **`etp_rt.txt` is gitignored** — never commit it. The `.gitignore` also blocks `*.wvd`, `*.mkv`, `client_id.bin`, `private_key.pem`, and `.env`.
+- Keep `etp_rt` and device credentials outside the repository in `0700` directories and `0600` regular files; ignore rules are defense in depth, not storage policy.
 - The `etp_rt` cookie grants access to your Crunchyroll account. Treat it like a password.
-- CDMs are leaked device credentials. They are not "yours" — they get revoked and you should not share them publicly.
+- Never pass a raw credential in argv or record it in logs, prompts, fixtures, receipts, or Git.
+- Use only operator-owned or lawfully provisioned Widevine credentials. Never use leaked, extracted, shared, or third-party device credentials.
 - The downloader authenticates as your account. Download only content you have legitimate access to.
 - Decrypted output files are DRM-free. Respect Crunchyroll's terms of service regarding offline copies.

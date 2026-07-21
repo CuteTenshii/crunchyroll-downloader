@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -74,35 +75,41 @@ func sendChallenge(contentId, videoToken string, challenge []byte) ([]byte, erro
 }
 
 func getWidevineDevice() (*widevine.Device, error) {
-	var clientID []byte
-	var privateKey []byte
-	files, _ := os.ReadDir(".")
-	for _, file := range files {
-		if strings.HasSuffix(file.Name(), ".wvd") {
-			wvd, err := os.Open(file.Name())
-			if err != nil {
-				return nil, err
-			}
-
-			return widevine.NewDevice(widevine.FromWVD(io.NopCloser(wvd)))
-		} else if file.Name() == "client_id.bin" {
-			f, err := os.Open("client_id.bin")
-			if err != nil {
-				return nil, err
-			}
-			defer f.Close()
-
-			clientID, err = io.ReadAll(f)
-		} else if file.Name() == "private_key.pem" {
-			f, err := os.Open("private_key.pem")
-			if err != nil {
-				return nil, err
-			}
-			defer f.Close()
-
-			privateKey, err = io.ReadAll(f)
-			break
+	wvdPath := strings.TrimSpace(os.Getenv("CRUNCHYROLL_WIDEVINE_DEVICE_FILE"))
+	if wvdPath != "" {
+		wvd, err := openPrivateRegularFile(wvdPath)
+		if err != nil {
+			return nil, fmt.Errorf("open Widevine device file: %w", err)
 		}
+		defer wvd.Close()
+		return widevine.NewDevice(widevine.FromWVD(io.NopCloser(wvd)))
+	}
+
+	clientIDPath := strings.TrimSpace(os.Getenv("CRUNCHYROLL_WIDEVINE_CLIENT_ID_FILE"))
+	privateKeyPath := strings.TrimSpace(os.Getenv("CRUNCHYROLL_WIDEVINE_PRIVATE_KEY_FILE"))
+	if clientIDPath == "" && privateKeyPath == "" {
+		return nil, nil
+	}
+	if clientIDPath == "" || privateKeyPath == "" {
+		return nil, fmt.Errorf("both CRUNCHYROLL_WIDEVINE_CLIENT_ID_FILE and CRUNCHYROLL_WIDEVINE_PRIVATE_KEY_FILE are required")
+	}
+	clientIDFile, err := openPrivateRegularFile(clientIDPath)
+	if err != nil {
+		return nil, fmt.Errorf("open Widevine client id file: %w", err)
+	}
+	defer clientIDFile.Close()
+	privateKeyFile, err := openPrivateRegularFile(privateKeyPath)
+	if err != nil {
+		return nil, fmt.Errorf("open Widevine private key file: %w", err)
+	}
+	defer privateKeyFile.Close()
+	clientID, err := io.ReadAll(clientIDFile)
+	if err != nil {
+		return nil, fmt.Errorf("read Widevine client id file: %w", err)
+	}
+	privateKey, err := io.ReadAll(privateKeyFile)
+	if err != nil {
+		return nil, fmt.Errorf("read Widevine private key file: %w", err)
 	}
 
 	if len(clientID) > 0 && len(privateKey) > 0 {
@@ -112,12 +119,40 @@ func getWidevineDevice() (*widevine.Device, error) {
 	return nil, nil
 }
 
+func openPrivateRegularFile(path string) (*os.File, error) {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return nil, err
+	}
+	if !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("credential path must be a regular file")
+	}
+	if info.Mode().Perm() != 0o600 {
+		return nil, fmt.Errorf("credential file mode must be 0600")
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	opened, err := file.Stat()
+	if err != nil {
+		file.Close()
+		return nil, err
+	}
+	if !os.SameFile(info, opened) {
+		file.Close()
+		return nil, fmt.Errorf("credential file changed while opening")
+	}
+	return file, nil
+}
+
 func getLicense(psshData, contentId, videoToken string) error {
 	device, err := getWidevineDevice()
-	if device == nil {
-		return errors.New("no widevine device provided. You either need:\n- a \".wvd\" file,\n- or \"client_id.bin\" and \"private_key.pem\" files.\nI'm not sharing links for obvious reasons, but search \"ready to use cdms\" on Google :)\n")
-	} else if err != nil {
+	if err != nil {
 		return err
+	}
+	if device == nil {
+		return errors.New("no authorized Widevine device configured; set CRUNCHYROLL_WIDEVINE_DEVICE_FILE or both private raw-device file variables for full-media downloads (subtitle indexing requires none)")
 	}
 	cdm := widevine.NewCDM(device)
 	decodedPssh, err := base64.StdEncoding.DecodeString(psshData)

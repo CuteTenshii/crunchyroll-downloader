@@ -24,18 +24,37 @@ const (
 	indexStatusPending         = "pending"
 	indexStatusIndexed         = "indexed"
 	indexStatusSubtitleCached  = "subtitle_cached"
-	indexStatusSubtitleMissing = "subtitle_missing"
-	indexStatusSubtitleFailed  = "subtitle_failed"
+	indexStatusSubtitleMissing = "subtitle_missing_locale"
+	indexStatusRetryableFailed = "subtitle_retryable_failed"
+	indexStatusPermanentFailed = "subtitle_permanent_failed"
+	indexStatusThrottled       = "subtitle_throttled"
+	// Deprecated source alias retained for older focused tests and callers;
+	// serialized checkpoints use the typed retryable value above.
+	indexStatusSubtitleFailed = indexStatusRetryableFailed
 )
 
 // indexFile is a durable, self-contained checkpoint. Every terminal episode
 // state is followed by an atomic rewrite of this full snapshot.
 type indexFile struct {
-	Series    string        `json:"series"`
-	SeriesURL string        `json:"series_url"`
-	IndexedAt string        `json:"indexed_at"`
-	SubsLang  string        `json:"subs_lang,omitempty"`
-	Seasons   []indexSeason `json:"seasons"`
+	Series     string          `json:"series"`
+	SeriesURL  string          `json:"series_url"`
+	IndexedAt  string          `json:"indexed_at"`
+	SubsLang   string          `json:"subs_lang,omitempty"`
+	Seasons    []indexSeason   `json:"seasons"`
+	Checkpoint indexCheckpoint `json:"checkpoint,omitempty"`
+}
+
+type indexCheckpoint struct {
+	CursorProviderID string            `json:"cursor_provider_id,omitempty"`
+	UpdatedAt        string            `json:"updated_at,omitempty"`
+	Circuit          indexCircuitState `json:"circuit"`
+}
+
+type indexCircuitState struct {
+	State                 string `json:"state"`
+	Consecutive4294       int    `json:"consecutive_4294"`
+	OpenedAt              string `json:"opened_at,omitempty"`
+	NextEligibleAttemptAt string `json:"next_eligible_attempt_at,omitempty"`
 }
 
 type indexSeason struct {
@@ -44,20 +63,30 @@ type indexSeason struct {
 }
 
 type indexEpisode struct {
-	Episode               int      `json:"episode"`
-	Title                 string   `json:"title"`
-	Description           string   `json:"description,omitempty"`
-	ID                    string   `json:"id"`
-	URL                   string   `json:"url"`
-	AirDate               string   `json:"air_date,omitempty"`
-	AudioLangs            []string `json:"audio_langs,omitempty"`
-	SubtitleLangs         []string `json:"subtitle_langs,omitempty"`
-	Status                string   `json:"status"`
-	SubtitleFile          string   `json:"subtitle_file,omitempty"`
-	SubtitleLocale        string   `json:"subtitle_locale,omitempty"`
-	SubtitleSHA256        string   `json:"subtitle_sha256,omitempty"`
-	SubtitleParserVersion string   `json:"subtitle_parser_version,omitempty"`
-	Error                 string   `json:"error,omitempty"`
+	Episode                   int                      `json:"episode"`
+	Title                     string                   `json:"title"`
+	Description               string                   `json:"description,omitempty"`
+	ID                        string                   `json:"id"`
+	URL                       string                   `json:"url"`
+	AirDate                   string                   `json:"air_date,omitempty"`
+	AudioLangs                []string                 `json:"audio_langs,omitempty"`
+	SubtitleLangs             []string                 `json:"subtitle_langs,omitempty"`
+	Status                    string                   `json:"status"`
+	SubtitleFile              string                   `json:"subtitle_file,omitempty"`
+	SubtitleLocale            string                   `json:"subtitle_locale,omitempty"`
+	SubtitleSHA256            string                   `json:"subtitle_sha256,omitempty"`
+	SubtitleParserVersion     string                   `json:"subtitle_parser_version,omitempty"`
+	SubtitleAttemptCount      int                      `json:"subtitle_attempt_count,omitempty"`
+	SubtitleFetchAttemptCount int                      `json:"subtitle_fetch_attempt_count,omitempty"`
+	StreamReleaseAttemptCount int                      `json:"stream_release_attempt_count,omitempty"`
+	SubtitleLastAttemptAt     string                   `json:"subtitle_last_attempt_at,omitempty"`
+	SubtitleNextEligibleAt    string                   `json:"subtitle_next_eligible_at,omitempty"`
+	HTTPStatus                int                      `json:"http_status,omitempty"`
+	ProviderApplicationCode   string                   `json:"provider_application_code,omitempty"`
+	RetryAfter                string                   `json:"retry_after,omitempty"`
+	RateLimit                 ProviderRateLimitHeaders `json:"rate_limit,omitempty"`
+	StreamReleaseOutcome      string                   `json:"stream_release_outcome,omitempty"`
+	Error                     string                   `json:"error,omitempty"`
 }
 
 func (episode indexEpisode) isVerifiedRawASS() bool {
@@ -211,8 +240,16 @@ func sortedSubtitleLocales(subtitles map[string]*Subtitle) []string {
 }
 
 type subtitleFetchResult struct {
-	AvailableLangs []string
-	RawASS         []byte
+	AvailableLangs          []string
+	RawASS                  []byte
+	PlaybackAttempts        int
+	SubtitleFetchAttempts   int
+	StreamReleaseAttempts   int
+	StreamReleaseOutcome    string
+	HTTPStatus              int
+	ProviderApplicationCode string
+	RetryAfter              string
+	RateLimit               ProviderRateLimitHeaders
 }
 
 // SubtitleLocaleMismatchError is terminal: the provider map key is not
@@ -248,10 +285,17 @@ func fetchSubtitles(episodeID, locale string) (result subtitleFetchResult, err e
 	if err := func() (err error) {
 		defer func() {
 			if recovered := recover(); recovered != nil {
-				err = fmt.Errorf("open playback for %s: %v", episodeID, recovered)
+				if recoveredErr, ok := recovered.(error); ok {
+					err = fmt.Errorf("open playback for %s: %w", episodeID, recoveredErr)
+				} else {
+					err = fmt.Errorf("open playback for %s: %v", episodeID, recovered)
+				}
 			}
 		}()
-		episode = openPlaybackWithRetry(episodeID, openIndexPlayback, *playback4294Retries, *playback4294Backoff, sleepPlaybackRetry)
+		episode = openPlaybackWithRetry(episodeID, func(id string) Episode {
+			result.PlaybackAttempts++
+			return openIndexPlayback(id)
+		}, indexPlayback4294Retries(), *playback4294Backoff, sleepPlaybackRetry)
 		return nil
 	}(); err != nil {
 		return result, err
@@ -264,8 +308,16 @@ func fetchSubtitles(episodeID, locale string) (result subtitleFetchResult, err e
 			var recovered any
 			func() {
 				defer func() { recovered = recover() }()
+				result.StreamReleaseAttempts++
 				released = deleteStream(episodeID, episode.Token)
 			}()
+			if recovered != nil {
+				result.StreamReleaseOutcome = "failed"
+			} else if released {
+				result.StreamReleaseOutcome = "released"
+			} else {
+				result.StreamReleaseOutcome = "not_released"
+			}
 			if err == nil && recovered != nil {
 				err = fmt.Errorf("release playback stream for %s: %v", episodeID, recovered)
 			} else if err == nil && !released {
@@ -283,6 +335,7 @@ func fetchSubtitles(episodeID, locale string) (result subtitleFetchResult, err e
 		return result, err
 	}
 	raw, err := fetchSubtitleASS(subtitle.URL)
+	result.SubtitleFetchAttempts++
 	if err != nil {
 		return result, err
 	}
@@ -304,6 +357,29 @@ type indexEpisodeWork struct {
 	SeasonIndex  int
 	EpisodeIndex int
 	Episode      SeasonEpisode
+}
+
+// sortIndexWorkNewestFirst returns a deterministic traversal plan without
+// changing catalog presentation order. Provider availability time is the
+// canonical newest signal; season and episode numbers break equal-date ties,
+// and provider episode ID makes duplicate-number variants collision-stable.
+func sortIndexWorkNewestFirst(work []indexEpisodeWork) []indexEpisodeWork {
+	ordered := append([]indexEpisodeWork(nil), work...)
+	sort.SliceStable(ordered, func(i, j int) bool {
+		left := ordered[i].Episode
+		right := ordered[j].Episode
+		if left.AvailabilityStarts != right.AvailabilityStarts {
+			return left.AvailabilityStarts > right.AvailabilityStarts
+		}
+		if left.SeasonNumber != right.SeasonNumber {
+			return left.SeasonNumber > right.SeasonNumber
+		}
+		if left.EpisodeNumber != right.EpisodeNumber {
+			return left.EpisodeNumber > right.EpisodeNumber
+		}
+		return left.ID < right.ID
+	})
+	return ordered
 }
 
 // parseIndexPriorityIDs normalizes the comma-separated CLI value while
@@ -384,10 +460,11 @@ func reorderIndexWork(work []indexEpisodeWork, priorityIDs []string) ([]indexEpi
 // pending so an interrupted run never publishes a misleading processed prefix.
 func newIndexCatalog(seriesTitle, seriesURL, subsLocale string, seasons []Season, seasonEpisodes map[string][]SeasonEpisode, prior map[string]indexEpisode, fetchSubs bool) (indexFile, []indexEpisodeWork) {
 	catalog := indexFile{
-		Series:    seriesTitle,
-		SeriesURL: seriesURL,
-		SubsLang:  subsLocale,
-		Seasons:   make([]indexSeason, 0, len(seasons)),
+		Series:     seriesTitle,
+		SeriesURL:  seriesURL,
+		SubsLang:   subsLocale,
+		Seasons:    make([]indexSeason, 0, len(seasons)),
+		Checkpoint: indexCheckpoint{Circuit: indexCircuitState{State: "closed"}},
 	}
 	work := make([]indexEpisodeWork, 0)
 	for _, season := range seasons {
@@ -420,6 +497,31 @@ func newIndexCatalog(seriesTitle, seriesURL, subsLocale string, seasons []Season
 				entry.SubtitleSHA256 = cached.SubtitleSHA256
 				entry.SubtitleParserVersion = cached.SubtitleParserVersion
 				entry.SubtitleLangs = cached.SubtitleLangs
+				entry.SubtitleAttemptCount = cached.SubtitleAttemptCount
+				entry.SubtitleFetchAttemptCount = cached.SubtitleFetchAttemptCount
+				entry.StreamReleaseAttemptCount = cached.StreamReleaseAttemptCount
+				entry.SubtitleLastAttemptAt = cached.SubtitleLastAttemptAt
+			} else if fetchSubs {
+				priorEntry := prior[indexEpisodeKey(ep.ID)]
+				if priorEntry.SubtitleLocale == subsLocale {
+					entry.SubtitleAttemptCount = priorEntry.SubtitleAttemptCount
+					entry.SubtitleFetchAttemptCount = priorEntry.SubtitleFetchAttemptCount
+					entry.StreamReleaseAttemptCount = priorEntry.StreamReleaseAttemptCount
+					entry.SubtitleLastAttemptAt = priorEntry.SubtitleLastAttemptAt
+					entry.SubtitleNextEligibleAt = priorEntry.SubtitleNextEligibleAt
+					entry.HTTPStatus = priorEntry.HTTPStatus
+					entry.ProviderApplicationCode = priorEntry.ProviderApplicationCode
+					entry.RetryAfter = priorEntry.RetryAfter
+					entry.RateLimit = priorEntry.RateLimit
+					entry.StreamReleaseOutcome = priorEntry.StreamReleaseOutcome
+					entry.Error = priorEntry.Error
+					switch priorEntry.Status {
+					case "subtitle_failed":
+						entry.Status = indexStatusRetryableFailed
+					case indexStatusSubtitleMissing, indexStatusRetryableFailed, indexStatusPermanentFailed, indexStatusThrottled:
+						entry.Status = priorEntry.Status
+					}
+				}
 			}
 			catalog.Seasons[seasonIndex].Episodes = append(catalog.Seasons[seasonIndex].Episodes, entry)
 			work = append(work, indexEpisodeWork{SeasonIndex: seasonIndex, EpisodeIndex: len(catalog.Seasons[seasonIndex].Episodes) - 1, Episode: ep})
@@ -480,7 +582,12 @@ func writeIndexWithLoaders(seriesURL, contentID, primaryAudio, primarySubs strin
 	}
 	prior := priorEpisodes(previous)
 	catalog, work := newIndexCatalog(seriesTitle, seriesURL, primarySubs, seasons, seasonEpisodes, prior, fetchSubs)
+	catalog.Checkpoint = previous.Checkpoint
+	if catalog.Checkpoint.Circuit.State == "" {
+		catalog.Checkpoint.Circuit.State = "closed"
+	}
 	if fetchSubs {
+		work = sortIndexWorkNewestFirst(work)
 		priorityIDs := parseIndexPriorityIDs(*indexPriority)
 		var err error
 		work, err = reorderIndexWork(work, priorityIDs)
@@ -505,27 +612,53 @@ func writeIndexWithLoaders(seriesURL, contentID, primaryAudio, primarySubs strin
 		return fmt.Errorf("cannot create subtitle directory %s: %w", subsDir, err)
 	}
 
-	for _, item := range work {
-		entry := catalog.Seasons[item.SeasonIndex].Episodes[item.EpisodeIndex]
-		var needsDelay bool
-		entry, needsDelay = checkpointSubtitle(item.Episode, entry, primarySubs, subsDir, prior[indexEpisodeKey(item.Episode.ID)])
-		replaceCatalogEpisode(&catalog, item, entry)
-		// Each terminal state updates the already-complete catalog atomically.
-		if err := snapshotIndex(indexPath, &catalog); err != nil {
-			return fmt.Errorf("cannot checkpoint %s: %w", indexPath, err)
-		}
-		// A checksum-valid raw ASS resume did not touch playback or the
-		// subtitle endpoint. Only actual attempts need the provider pacing delay.
-		if needsDelay {
-			delaySeconds := *indexDelay
-			if delaySeconds < minimumIndexDelaySeconds {
-				delaySeconds = minimumIndexDelaySeconds
-			}
-			time.Sleep(time.Duration(delaySeconds) * time.Second)
-		}
+	delaySeconds := *indexDelay
+	if delaySeconds < minimumIndexDelaySeconds {
+		delaySeconds = minimumIndexDelaySeconds
+	}
+	summaryPath := strings.TrimSpace(*indexSummaryPath)
+	if summaryPath == "" {
+		summaryPath = indexPath + ".run-summary.json"
+	}
+	startedAt := time.Now().UTC()
+	summary, err := processIndexWorkBounded(&catalog, work, prior, primarySubs, subsDir, fetchSubtitles, func(file *indexFile) error {
+		return snapshotIndex(indexPath, file)
+	}, indexRunOptions{
+		Window: *indexWindow, Circuit4294Limit: *indexCircuitLimit,
+		CircuitCooldown: *indexCircuitCooldown,
+		Delay:           time.Duration(delaySeconds) * time.Second, Sleep: time.Sleep,
+		Now: func() time.Time { return time.Now().UTC() }, StartedAt: startedAt,
+		ProviderMetrics: providerCallMetricsSnapshot,
+	})
+	if writeErr := writeIndexRunSummary(summaryPath, summary); writeErr != nil {
+		return fmt.Errorf("cannot write terminal run summary %s: %w", summaryPath, writeErr)
+	}
+	if err != nil {
+		return fmt.Errorf("cannot checkpoint %s: %w", indexPath, err)
 	}
 
 	fmt.Printf("Index written: %s\n", indexPath)
+	return nil
+}
+
+type indexSnapshotter func(*indexFile) error
+
+// processIndexWork is deliberately serial. Each identity reaches a terminal
+// cached/missing/failed state and is durably snapshotted before the next
+// identity is attempted. Fetch failures are record-local and never stop older
+// work; only inability to persist the checkpoint stops traversal.
+func processIndexWork(catalog *indexFile, work []indexEpisodeWork, prior map[string]indexEpisode, locale, subsDir string, fetch subtitleFetcher, snapshot indexSnapshotter, delay time.Duration, sleep playbackSleeper) error {
+	for _, item := range work {
+		entry := catalog.Seasons[item.SeasonIndex].Episodes[item.EpisodeIndex]
+		entry, needsDelay := checkpointSubtitleWithFetcher(item.Episode, entry, locale, subsDir, prior[indexEpisodeKey(item.Episode.ID)], fetch)
+		replaceCatalogEpisode(catalog, item, entry)
+		if err := snapshot(catalog); err != nil {
+			return err
+		}
+		if needsDelay {
+			sleep(delay)
+		}
+	}
 	return nil
 }
 
@@ -539,6 +672,13 @@ func checkpointSubtitle(ep SeasonEpisode, entry indexEpisode, locale, subsDir st
 
 type subtitleFetcher func(string, string) (subtitleFetchResult, error)
 
+func indexPlayback4294Retries() int {
+	// The persisted global circuit owns 4294 recovery during indexing. Retrying
+	// inside one identity would hide consecutive responses from that circuit and
+	// multiply provider calls before the cursor can be checkpointed.
+	return 0
+}
+
 func checkpointSubtitleWithFetcher(ep SeasonEpisode, entry indexEpisode, locale, subsDir string, prior indexEpisode, fetch subtitleFetcher) (indexEpisode, bool) {
 	entry.SubtitleLocale = locale
 	if canResumeRawASS(prior, locale) {
@@ -551,13 +691,48 @@ func checkpointSubtitleWithFetcher(ep SeasonEpisode, entry indexEpisode, locale,
 	}
 
 	result, err := fetch(ep.ID, locale)
+	attempts := result.PlaybackAttempts
+	if attempts < 1 {
+		// Test and alternate fetchers predate playback-attempt telemetry, but a
+		// fetch invocation is still one real acquisition attempt.
+		attempts = 1
+	}
+	entry.SubtitleAttemptCount = prior.SubtitleAttemptCount + attempts
+	entry.SubtitleFetchAttemptCount = prior.SubtitleFetchAttemptCount + result.SubtitleFetchAttempts
+	entry.StreamReleaseAttemptCount = prior.StreamReleaseAttemptCount + result.StreamReleaseAttempts
+	entry.SubtitleLastAttemptAt = time.Now().UTC().Format(time.RFC3339Nano)
 	entry.SubtitleLangs = result.AvailableLangs
+	entry.StreamReleaseOutcome = result.StreamReleaseOutcome
+	entry.HTTPStatus = result.HTTPStatus
+	entry.ProviderApplicationCode = result.ProviderApplicationCode
+	entry.RetryAfter = result.RetryAfter
+	entry.RateLimit = result.RateLimit
 	if err != nil {
 		var missing *SubtitleLocaleError
+		var mismatch *SubtitleLocaleMismatchError
+		var playbackErr *PlaybackAPIError
+		var httpErr *HTTPStatusError
+		if errors.As(err, &playbackErr) {
+			entry.HTTPStatus = playbackErr.HTTPStatus
+			entry.ProviderApplicationCode = playbackErr.Code
+			entry.RetryAfter = playbackErr.RetryAfter
+			entry.RateLimit = playbackErr.RateLimit
+		}
+		if errors.As(err, &httpErr) {
+			entry.HTTPStatus = httpErr.StatusCode
+			entry.RetryAfter = httpErr.RetryAfter
+			entry.RateLimit = httpErr.RateLimit
+		}
 		if errors.As(err, &missing) {
 			entry.Status = indexStatusSubtitleMissing
+		} else if errors.As(err, &mismatch) {
+			entry.Status = indexStatusPermanentFailed
+		} else if errors.As(err, &playbackErr) && playbackErr.Code == playback4294Code {
+			entry.Status = indexStatusThrottled
+		} else if errors.As(err, &httpErr) && httpErr.StatusCode >= 400 && httpErr.StatusCode < 500 && httpErr.StatusCode != 408 && httpErr.StatusCode != 429 {
+			entry.Status = indexStatusPermanentFailed
 		} else {
-			entry.Status = indexStatusSubtitleFailed
+			entry.Status = indexStatusRetryableFailed
 		}
 		entry.Error = redactSensitiveURLs(err.Error())
 		return entry, true
