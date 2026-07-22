@@ -29,7 +29,7 @@ var (
 	videoQuality          = flag.String("video-quality", "1080p", "Video quality")
 	audioQuality          = flag.String("audio-quality", "192k", "Audio quality")
 	seasonNumber          = flag.Int("season", 0, "Season number. Not used if an episode link is entered")
-	etpRtFile             = flag.String("etp-rt-file", "", "Path to a 0600 regular file containing the etp_rt cookie (or set CRUNCHYROLL_ETP_RT)")
+	etpRtFile             = flag.String("etp-rt-file", "", "Path to a 0600 regular file containing the etp_rt cookie")
 	debug                 = flag.Bool("debug-manifest", false, "Log raw episode playback JSON and manifest XML")
 	index                 = flag.Bool("index", false, "Build a metadata catalog of all episodes in a series (no download). Requires a /series/ URL")
 	indexSubs             = flag.Bool("index-subs", false, "Like --index, but also download subtitle transcripts for every episode. Resumable")
@@ -118,13 +118,10 @@ func validateOpenedCredentialFile(path string, entryInfo, openedInfo os.FileInfo
 }
 
 func loadETPRT(filePath string) (string, error) {
-	if filePath != "" {
-		return readETPRTFile(filepath.Clean(filePath))
+	if filePath == "" {
+		return "", fmt.Errorf("provide --etp-rt-file with a 0600 regular file")
 	}
-	if secret := strings.TrimSpace(os.Getenv("CRUNCHYROLL_ETP_RT")); secret != "" {
-		return secret, nil
-	}
-	return "", fmt.Errorf("provide --etp-rt-file with a 0600 regular file or set CRUNCHYROLL_ETP_RT")
+	return readETPRTFile(filepath.Clean(filePath))
 }
 
 func validatePlaybackRetryConfig(retries int, backoff time.Duration) error {

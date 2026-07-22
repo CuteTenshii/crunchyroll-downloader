@@ -36,8 +36,6 @@ Usage of ./crunchyroll-downloader:
         Audio quality (default "192k")
   -etp-rt-file string
         Path to a 0600 regular file containing the "etp_rt" cookie of your account
-        (or set the CRUNCHYROLL_ETP_RT environment variable — the raw value never
-        goes on the command line, where any local process could read it from argv)
   -season int
         Season number. Not used if an episode link is entered
   -subs-lang string

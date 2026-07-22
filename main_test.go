@@ -30,6 +30,13 @@ func TestReadETPRTFileRequiresPrivateRegularFile(t *testing.T) {
 	}
 }
 
+func TestLoadETPRTRequiresFileEvenWhenLegacyEnvironmentValueExists(t *testing.T) {
+	t.Setenv("CRUNCHYROLL_ETP_RT", "legacy-value-must-not-be-used")
+	if _, err := loadETPRT(""); err == nil || err.Error() != "provide --etp-rt-file with a 0600 regular file" {
+		t.Fatalf("expected file-only credential error, got %v", err)
+	}
+}
+
 func TestValidatePlaybackRetryConfig(t *testing.T) {
 	for _, test := range []struct {
 		name    string
