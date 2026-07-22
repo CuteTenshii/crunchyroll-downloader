@@ -10,6 +10,8 @@ import (
 	"github.com/unki2aut/go-mpd"
 )
 
+var manifestHTTPClient = &http.Client{Timeout: providerHTTPTimeout}
+
 func parseManifest(url string) *mpd.MPD {
 	req, err := http.NewRequest(http.MethodGet, url, nil)
 	if err != nil {
@@ -17,7 +19,7 @@ func parseManifest(url string) *mpd.MPD {
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("User-Agent", "Mozilla/5.0 (X11; Linux x86_64; rv:147.0) Gecko/20100101 Firefox/147.0")
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := manifestHTTPClient.Do(req)
 	if err != nil {
 		panic(err)
 	}
@@ -38,11 +40,22 @@ func parseManifest(url string) *mpd.MPD {
 }
 
 func getBaseUrl(set *mpd.AdaptationSet, isVideoSet bool, quality string) (*string, *string) {
-	for _, representation := range set.Representations {
+	var bestVideo *mpd.Representation
+	var bestVideoHeight uint64
+	requestedVideoHeight, requestedVideoHeightErr := strconv.ParseUint(strings.TrimSuffix(quality, "p"), 10, 64)
+
+	for representationIndex := range set.Representations {
+		representation := &set.Representations[representationIndex]
 		if isVideoSet {
-			toInt, _ := strconv.ParseInt(strings.ReplaceAll(quality, "p", ""), 10, 64)
-			if *representation.Height == uint64(toInt) {
+			if representation.Height == nil || len(representation.BaseURL) == 0 || representation.ID == nil {
+				continue
+			}
+			if requestedVideoHeightErr == nil && *representation.Height == requestedVideoHeight {
 				return &representation.BaseURL[0].Value, representation.ID
+			}
+			if *representation.Height > bestVideoHeight {
+				bestVideo = representation
+				bestVideoHeight = *representation.Height
 			}
 		} else {
 			if strings.Contains(*representation.ID, "audio/") {
@@ -63,10 +76,17 @@ func getBaseUrl(set *mpd.AdaptationSet, isVideoSet bool, quality string) (*strin
 			}
 		}
 	}
+	if isVideoSet && bestVideo != nil {
+		fmt.Printf("Video quality %s not found, deferring to %dp (%s)\n", quality, bestVideoHeight, *bestVideo.ID)
+		return &bestVideo.BaseURL[0].Value, bestVideo.ID
+	}
 	if len(set.Representations) == 0 {
 		return nil, nil
 	}
 	firstRep := set.Representations[0]
+	if len(firstRep.BaseURL) == 0 || firstRep.ID == nil {
+		return nil, nil
+	}
 	fmt.Printf("Audio quality %s not found, deferring to %s\n", quality, *firstRep.ID)
 	return &firstRep.BaseURL[0].Value, firstRep.ID
 }

@@ -2,11 +2,143 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
-	"os"
+	"strconv"
+	"strings"
+	"time"
 )
+
+const playback4294Code = "4294"
+
+// PlaybackAPIError is the safe, typed provider boundary for playback-open
+// failures. It deliberately retains only the episode ID and parsed scalar
+// code/message; the raw provider body is never stored or formatted.
+type PlaybackAPIError struct {
+	EpisodeID  string
+	Code       string
+	Message    string
+	HTTPStatus int
+	RetryAfter string
+	RateLimit  ProviderRateLimitHeaders
+}
+
+func (e *PlaybackAPIError) Error() string {
+	if e.Message != "" {
+		return fmt.Sprintf("playback API error for %s: code %s: %s", e.EpisodeID, e.Code, e.Message)
+	}
+	return fmt.Sprintf("playback API error for %s: code %s", e.EpisodeID, e.Code)
+}
+
+func safeProviderMessage(message string) string {
+	message = strings.Join(strings.Fields(message), " ")
+	message = redactSensitiveURLs(message)
+	const maxProviderMessageBytes = 160
+	if len(message) > maxProviderMessageBytes {
+		message = message[:maxProviderMessageBytes] + "..."
+	}
+	return message
+}
+
+func safeHeaderScalar(value string) string {
+	value = strings.Join(strings.Fields(value), " ")
+	if len(value) > 80 {
+		return value[:80]
+	}
+	return value
+}
+
+type ProviderRateLimitHeaders struct {
+	Limit     string `json:"limit,omitempty"`
+	Remaining string `json:"remaining,omitempty"`
+	Reset     string `json:"reset,omitempty"`
+}
+
+func providerCode(value any) string {
+	switch value := value.(type) {
+	case json.Number:
+		return value.String()
+	case string:
+		if _, err := strconv.ParseInt(value, 10, 64); err == nil {
+			return value
+		}
+	case float64:
+		return strconv.FormatFloat(value, 'f', -1, 64)
+	}
+	return "unknown"
+}
+
+func parsePlaybackAPIError(episodeID string, raw json.RawMessage) *PlaybackAPIError {
+	parsed := &PlaybackAPIError{EpisodeID: episodeID, Code: "unknown"}
+	decoder := json.NewDecoder(strings.NewReader(string(raw)))
+	decoder.UseNumber()
+	var value any
+	if err := decoder.Decode(&value); err != nil {
+		parsed.Message = "provider returned an unreadable error"
+		return parsed
+	}
+	switch value := value.(type) {
+	case json.Number:
+		parsed.Code = providerCode(value)
+	case string:
+		if code := providerCode(value); code != "unknown" {
+			parsed.Code = code
+		} else {
+			parsed.Message = safeProviderMessage(value)
+		}
+	case map[string]any:
+		parsed.Code = providerCode(value["code"])
+		if message, ok := value["message"].(string); ok {
+			parsed.Message = safeProviderMessage(message)
+		}
+	default:
+		parsed.Message = "provider returned an unrecognized error"
+	}
+	return parsed
+}
+
+type playbackOpener func(string) Episode
+type playbackSleeper func(time.Duration)
+
+var sleepPlaybackRetry playbackSleeper = time.Sleep
+
+func playbackRetryDelay(base time.Duration, retry int) time.Duration {
+	delay := base
+	for i := 0; i < retry && delay < maxPlayback4294Backoff; i++ {
+		delay *= 2
+		if delay > maxPlayback4294Backoff {
+			delay = maxPlayback4294Backoff
+		}
+	}
+	return delay
+}
+
+// openPlaybackWithRetry retries only the provider's typed 4294 response.
+// Other panics retain their original value and propagate immediately.
+func openPlaybackWithRetry(id string, open playbackOpener, retries int, backoff time.Duration, sleep playbackSleeper) Episode {
+	for attempt := 0; ; attempt++ {
+		var episode Episode
+		var recovered any
+		func() {
+			defer func() { recovered = recover() }()
+			episode = open(id)
+		}()
+		if recovered == nil {
+			return episode
+		}
+		err, ok := recovered.(error)
+		if !ok {
+			panic(recovered)
+		}
+		var playbackErr *PlaybackAPIError
+		if !errors.As(err, &playbackErr) || playbackErr.Code != playback4294Code || attempt >= retries {
+			panic(recovered)
+		}
+		sleep(playbackRetryDelay(backoff, attempt))
+	}
+}
 
 type Episode struct {
 	// Dash manifest file URL
@@ -15,8 +147,9 @@ type Episode struct {
 	Subtitles map[string]*Subtitle `json:"subtitles"`
 	// Token to give to the Widevine CDM challenge
 	Token string `json:"token"`
-	// Error, `nil` if there's no error
-	Error *string `json:"error"`
+	// Error, `nil` if there's no error. Crunchyroll returns this as a string
+	// or sometimes a number, so use json.RawMessage to tolerate either.
+	Error json.RawMessage `json:"error"`
 }
 
 type Subtitle struct {
@@ -44,12 +177,33 @@ func getEpisode(id string) Episode {
 	if err != nil {
 		panic(err)
 	}
-	if err = json.Unmarshal(body, &episode); err != nil {
-		panic(err)
+	decodeErr := json.Unmarshal(body, &episode)
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		if decodeErr == nil && len(episode.Error) > 0 && string(episode.Error) != "null" {
+			providerErr := parsePlaybackAPIError(id, episode.Error)
+			providerErr.HTTPStatus = resp.StatusCode
+			providerErr.RetryAfter = safeHeaderScalar(resp.Header.Get("Retry-After"))
+			providerErr.RateLimit = providerRateLimitHeaders(resp.Header)
+			panic(providerErr)
+		}
+		panic(&HTTPStatusError{
+			URL:        redactURL(req.URL.String()),
+			StatusCode: resp.StatusCode,
+			RetryAfter: safeHeaderScalar(resp.Header.Get("Retry-After")),
+			RateLimit:  providerRateLimitHeaders(resp.Header),
+		})
 	}
-	if episode.Error != nil {
-		print("Error:", *episode.Error)
-		os.Exit(1)
+	if decodeErr != nil {
+		panic(decodeErr)
+	}
+	if len(episode.Error) > 0 && string(episode.Error) != "null" {
+		// Panic rather than os.Exit so callers (download loop, index loop) can
+		// recover and continue past a single bad episode instead of dying.
+		providerErr := parsePlaybackAPIError(id, episode.Error)
+		providerErr.HTTPStatus = resp.StatusCode
+		providerErr.RetryAfter = safeHeaderScalar(resp.Header.Get("Retry-After"))
+		providerErr.RateLimit = providerRateLimitHeaders(resp.Header)
+		panic(providerErr)
 	}
 
 	if *debug {
@@ -74,6 +228,7 @@ type EpisodeMetadata struct {
 	EpisodeNumber int    `json:"episode_number"`
 	SeasonNumber  int    `json:"season_number"`
 	SeriesTitle   string `json:"series_title"`
+	Description   string `json:"description"`
 	// AvailabilityStarts represents the date when the episode was released on Crunchyroll
 	AvailabilityStarts string        `json:"availability_starts"`
 	Versions           []*DubVersion `json:"versions"`
@@ -121,6 +276,7 @@ func deleteStream(contentId, sToken string) bool {
 	if err != nil {
 		panic(err)
 	}
+	defer resp.Body.Close()
 
 	return resp.StatusCode == http.StatusNoContent
 }

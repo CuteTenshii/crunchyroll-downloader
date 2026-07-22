@@ -2,7 +2,7 @@
 
 Downloads anime from Crunchyroll and outputs them in a MKV file.
 
-You won't be banned or anything, I downloaded all Kaguya-Sama seasons to test during 30 mins and everything went fine
+Use the downloader only with an authorized account and content you are entitled to access. Provider restrictions and account enforcement are outside this tool's control.
 
 ## Features
 
@@ -18,7 +18,7 @@ You won't be banned or anything, I downloaded all Kaguya-Sama seasons to test du
 
 - [FFmpeg](https://www.ffmpeg.org/download.html#get-packages)
 - To download Premium-only content, a Crunchyroll Premium account. No, this can't be bypassed and a free trial should be enough
-- Either a `.wvd` file, or a `client_id.bin` and `private_key.pem`
+- For full-media downloads only, an operator-owned and lawfully provisioned `.wvd` file or matching raw device files, stored outside the repository as mode `0600` and selected with `CRUNCHYROLL_WIDEVINE_DEVICE_FILE` (or the paired raw-file environment variables). Subtitle-only indexing does not require a Widevine device.
 
 ## Download
 
@@ -34,8 +34,8 @@ Usage of ./crunchyroll-downloader:
         Audio language(s), comma-separated for multiple (e.g. "ja-JP,en-US"). First is the default track (default "ja-JP")
   -audio-quality string
         Audio quality (default "192k")
-  -etp-rt string
-        The "etp_rt" cookie value of your account
+  -etp-rt-file string
+        Path to a 0600 regular file containing the "etp_rt" cookie of your account
   -season int
         Season number. Not used if an episode link is entered
   -subs-lang string
@@ -50,23 +50,72 @@ Usage of ./crunchyroll-downloader:
 
 Ex: to download the first season of *Hell's Paradise*:
 ```shell
-./crunchyroll-downloader --url https://www.crunchyroll.com/series/GJ0H7Q5ZJ/hells-paradise --season 1 --etp-rt replace_this
+./crunchyroll-downloader --url https://www.crunchyroll.com/series/GJ0H7Q5ZJ/hells-paradise --season 1 --etp-rt-file ~/.config/crunchyroll/etp_rt.txt
 ```
 
 To download a specific episode:
 ```shell
-./crunchyroll-downloader --url https://www.crunchyroll.com/watch/GE00198973JAJP/dawn-and-confusion --etp-rt replace_this
+./crunchyroll-downloader --url https://www.crunchyroll.com/watch/GE00198973JAJP/dawn-and-confusion --etp-rt-file ~/.config/crunchyroll/etp_rt.txt
 ```
 
 To batch download from a file (one URL per line):
 ```shell
-./crunchyroll-downloader --urls list.txt --etp-rt replace_this --subs-lang pt-BR
+./crunchyroll-downloader --urls list.txt --etp-rt-file ~/.config/crunchyroll/etp_rt.txt --subs-lang pt-BR
 ```
 
 To download multiple audio tracks and subtitles into a single file (the first of each is set as the default track). If any requested language is missing for an episode, that episode is skipped:
 ```shell
-./crunchyroll-downloader --url https://www.crunchyroll.com/watch/GE00198973JAJP/dawn-and-confusion --etp-rt replace_this --audio-lang ja-JP,en-US --subs-lang en-US,es-419,de-DE
+./crunchyroll-downloader --url https://www.crunchyroll.com/watch/GE00198973JAJP/dawn-and-confusion --etp-rt-file ~/.config/crunchyroll/etp_rt.txt --audio-lang ja-JP,en-US --subs-lang en-US,es-419,de-DE
 ```
+
+## Resumable subtitle indexing
+
+`--index-subs` opens playback only to collect the exact requested subtitle
+locale. It does not load a Widevine CDM. Authentication remains file-only:
+provide `--etp-rt-file` pointing at a regular mode-`0600` operator-private
+file; do not put a cookie in an environment variable or command-line value.
+
+```shell
+./crunchyroll-downloader \
+  --url https://www.crunchyroll.com/series/GJ0H7Q5ZJ/hells-paradise \
+  --index-subs \
+  --subs-lang en-US \
+  --index-window 25 \
+  --index-terminal-recheck-window 3 \
+  --etp-rt-file ~/.config/crunchyroll/etp_rt.txt
+```
+
+Every attempted provider identity is checkpointed atomically before the next
+one. The default bounded window is 25 identities. Verified raw `.ass` bytes
+are reused by SHA-256 and are never redownloaded merely to regenerate derived
+telemetry. The global playback circuit can pause later attempts with a
+cooldown after consecutive provider code `4294` responses.
+
+Code `4294` by itself is recorded as
+`subtitle_unknown_provider_playback_restriction`; it is not evidence of a
+specific provider cause. `subtitle_provider_rate_limited` is used only when
+the HTTP response or direct rate-limit headers provide supporting evidence.
+The private run summary uses matching outcomes
+`unknown_provider_playback_restriction` and `provider_rate_limited` when the
+circuit is open.
+
+Each checksum-verified subtitle cache records `subtitle_cue_quality` with
+`healthy` or `degraded` outcome, plus counts for malformed, empty, and skipped
+ASS dialogue cues. A cache is marked degraded when it has no usable cues or
+when malformed cues exceed 5%, empty cues exceed 20%, or skipped cues exceed
+5%. Degraded is a quality observation, not a reason to overwrite or
+redownload the original raw ASS bytes.
+
+Rows recorded as `subtitle_missing_locale` or `subtitle_permanent_failed` do
+not receive a full historical playback sweep. A stable per-episode source
+version and catalog snapshot permit only a deterministic, newest-first sparse
+recheck when provider metadata changes, capped by
+`--index-terminal-recheck-window` and never above `--index-window`.
+
+For a multi-URL `--file` index run, provider-call counters are reset for each
+catalog summary. Omit `--index-run-summary` so each catalog uses its own
+default summary path; one explicit summary path is rejected for multiple URLs
+instead of being overwritten.
 
 ## Building
 
@@ -93,9 +142,7 @@ To download multiple audio tracks and subtitles into a single file (the first of
 
 ### What is a `.wvd` file and do I really need one?
 
-Yes, Crunchyroll uses DRM-only content. This file is used to get a Widevine license, which gives the keys to decrypt the media.
-
-If you don't have a rooted Android device or are just lazy, search "ready to use cdms" and you'll find plenty of websites providing those files.
+Full-media downloads require an operator-owned, lawfully provisioned device credential. Subtitle-only indexing does not require one. Keep device credentials outside the repository in private `0600` storage; never use leaked, extracted, shared, or third-party credentials.
 
 ## License
 
