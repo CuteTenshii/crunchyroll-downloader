@@ -13,35 +13,37 @@ import (
 )
 
 const (
-	defaultPlayback4294Retries = 2
-	defaultPlayback4294Backoff = 8 * time.Second
-	maxPlayback4294Retries     = 5
-	maxPlayback4294Backoff     = time.Minute
-	defaultIndexWindow         = 25
-	defaultIndexCircuitLimit   = 3
-	defaultIndexCooldown       = 30 * time.Minute
+	defaultPlayback4294Retries        = 2
+	defaultPlayback4294Backoff        = 8 * time.Second
+	maxPlayback4294Retries            = 5
+	maxPlayback4294Backoff            = time.Minute
+	defaultIndexWindow                = 25
+	defaultIndexTerminalRecheckWindow = 3
+	defaultIndexCircuitLimit          = 3
+	defaultIndexCooldown              = 30 * time.Minute
 )
 
 var (
-	token                 = ""
-	audioLang             = flag.String("audio-lang", "ja-JP", "Audio language(s), comma-separated for multiple (e.g. \"ja-JP,en-US\"). First is the default track")
-	subtitlesLang         = flag.String("subs-lang", "en-US", "Subtitle language(s), comma-separated for multiple (e.g. \"en-US,es-419\"). First is the default track")
-	videoQuality          = flag.String("video-quality", "1080p", "Video quality")
-	audioQuality          = flag.String("audio-quality", "192k", "Audio quality")
-	seasonNumber          = flag.Int("season", 0, "Season number. Not used if an episode link is entered")
-	etpRtFile             = flag.String("etp-rt-file", "", "Path to a 0600 regular file containing the etp_rt cookie")
-	debug                 = flag.Bool("debug-manifest", false, "Log raw episode playback JSON and manifest XML")
-	index                 = flag.Bool("index", false, "Build a metadata catalog of all episodes in a series (no download). Requires a /series/ URL")
-	indexSubs             = flag.Bool("index-subs", false, "Like --index, but also download subtitle transcripts for every episode. Resumable")
-	indexDelay            = flag.Int("index-delay", 3, "Seconds to wait between subtitle acquisition attempts")
-	indexPriority         = flag.String("index-priority-ids", "", "Episode provider IDs to process first in --index-subs mode, comma-separated")
-	indexWindow           = flag.Int("index-window", defaultIndexWindow, "Maximum provider identities attempted in one resumable index run (1-100)")
-	indexCircuitLimit     = flag.Int("index-circuit-4294-limit", defaultIndexCircuitLimit, "Consecutive provider 4294 responses before the global playback circuit opens")
-	indexCircuitCooldown  = flag.Duration("index-circuit-cooldown", defaultIndexCooldown, "Global cooldown after the playback circuit opens")
-	indexSummaryPath      = flag.String("index-run-summary", "", "Machine-readable terminal run summary path (default: <index>.run-summary.json)")
-	playback4294Retries   = flag.Int("playback-4294-retries", defaultPlayback4294Retries, "Additional retries for playback provider error 4294")
-	playback4294Backoff   = flag.Duration("playback-4294-backoff", defaultPlayback4294Backoff, "Initial backoff for playback provider error 4294")
-	getProcessEpisodeInfo = getEpisodeInfo
+	token                      = ""
+	audioLang                  = flag.String("audio-lang", "ja-JP", "Audio language(s), comma-separated for multiple (e.g. \"ja-JP,en-US\"). First is the default track")
+	subtitlesLang              = flag.String("subs-lang", "en-US", "Subtitle language(s), comma-separated for multiple (e.g. \"en-US,es-419\"). First is the default track")
+	videoQuality               = flag.String("video-quality", "1080p", "Video quality")
+	audioQuality               = flag.String("audio-quality", "192k", "Audio quality")
+	seasonNumber               = flag.Int("season", 0, "Season number. Not used if an episode link is entered")
+	etpRtFile                  = flag.String("etp-rt-file", "", "Path to a 0600 regular file containing the etp_rt cookie")
+	debug                      = flag.Bool("debug-manifest", false, "Log raw episode playback JSON and manifest XML")
+	index                      = flag.Bool("index", false, "Build a metadata catalog of all episodes in a series (no download). Requires a /series/ URL")
+	indexSubs                  = flag.Bool("index-subs", false, "Like --index, but also download subtitle transcripts for every episode. Resumable")
+	indexDelay                 = flag.Int("index-delay", 3, "Seconds to wait between subtitle acquisition attempts")
+	indexPriority              = flag.String("index-priority-ids", "", "Episode provider IDs to process first in --index-subs mode, comma-separated")
+	indexWindow                = flag.Int("index-window", defaultIndexWindow, "Maximum provider identities attempted in one resumable index run (1-100)")
+	indexTerminalRecheckWindow = flag.Int("index-terminal-recheck-window", defaultIndexTerminalRecheckWindow, "Maximum missing-locale/permanent rows sparsely rechecked after a source version or catalog snapshot change (0-25)")
+	indexCircuitLimit          = flag.Int("index-circuit-4294-limit", defaultIndexCircuitLimit, "Consecutive provider 4294 responses before the global playback circuit opens")
+	indexCircuitCooldown       = flag.Duration("index-circuit-cooldown", defaultIndexCooldown, "Global cooldown after the playback circuit opens")
+	indexSummaryPath           = flag.String("index-run-summary", "", "Machine-readable terminal run summary path (default: <index>.run-summary.json)")
+	playback4294Retries        = flag.Int("playback-4294-retries", defaultPlayback4294Retries, "Additional retries for playback provider error 4294")
+	playback4294Backoff        = flag.Duration("playback-4294-backoff", defaultPlayback4294Backoff, "Initial backoff for playback provider error 4294")
+	getProcessEpisodeInfo      = getEpisodeInfo
 )
 
 const maxETPRTBytes int64 = 16 << 10
@@ -145,6 +147,26 @@ func validateIndexRunConfig(window, circuitLimit int, cooldown time.Duration) er
 		return fmt.Errorf("--index-circuit-cooldown must be between 1m and 24h")
 	}
 	return nil
+}
+
+func validateIndexTerminalRecheckWindow(window int) error {
+	if window < 0 || window > 25 {
+		return fmt.Errorf("--index-terminal-recheck-window must be between 0 and 25")
+	}
+	return nil
+}
+
+func validateBatchIndexSummaryPath(urlCount int, fetchSubs bool, summaryPath string) error {
+	if fetchSubs && urlCount > 1 && strings.TrimSpace(summaryPath) != "" {
+		return errors.New("--index-run-summary cannot be shared by multiple --file URLs; omit it to use per-catalog summary paths")
+	}
+	return nil
+}
+
+func beginBatchIndexCatalogMetrics(fetchSubs bool) {
+	if fetchSubs {
+		resetProviderCallMetrics()
+	}
 }
 
 // parseLangs splits a comma-separated locale list, trimming spaces and dropping
@@ -260,6 +282,9 @@ func run(url, urlsFile string) error {
 		if err := validateIndexRunConfig(*indexWindow, *indexCircuitLimit, *indexCircuitCooldown); err != nil {
 			return err
 		}
+		if err := validateIndexTerminalRecheckWindow(*indexTerminalRecheckWindow); err != nil {
+			return err
+		}
 		resetProviderCallMetrics()
 	}
 
@@ -290,10 +315,14 @@ func run(url, urlsFile string) error {
 		if err := scanner.Err(); err != nil {
 			return fmt.Errorf("read URLs file: %w", err)
 		}
+		if err := validateBatchIndexSummaryPath(len(urls), *indexSubs, *indexSummaryPath); err != nil {
+			return err
+		}
 
 		fmt.Printf("Found %d URLs to download\n\n", len(urls))
 		failed := false
 		for i, u := range urls {
+			beginBatchIndexCatalogMetrics(*indexSubs)
 			fmt.Printf("=== [%d/%d] %s ===\n", i+1, len(urls), u)
 			if err := processUrl(u); err != nil {
 				fmt.Printf("! %s\n", err)

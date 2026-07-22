@@ -2,11 +2,55 @@ package main
 
 import (
 	"errors"
+	"io"
+	"net/http"
 	"reflect"
 	"strings"
 	"testing"
 	"time"
 )
+
+func TestGetEpisodeRejectsJSONAndNonJSON429AtHTTPBoundary(t *testing.T) {
+	originalClient := authenticatedHTTPClient
+	t.Cleanup(func() { authenticatedHTTPClient = originalClient })
+
+	for _, test := range []struct {
+		name string
+		body string
+	}{
+		{name: "json", body: `{}`},
+		{name: "non-json", body: `rate limited`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			authenticatedHTTPClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+				header := make(http.Header)
+				header.Set("Retry-After", "17")
+				header.Set("RateLimit-Limit", "20")
+				header.Set("RateLimit-Remaining", "0")
+				header.Set("RateLimit-Reset", "123")
+				return &http.Response{
+					StatusCode: http.StatusTooManyRequests,
+					Header:     header,
+					Body:       io.NopCloser(strings.NewReader(test.body)),
+					Request:    req,
+				}, nil
+			})}
+
+			var recovered any
+			func() {
+				defer func() { recovered = recover() }()
+				_ = getEpisode("episode")
+			}()
+			var statusErr *HTTPStatusError
+			if !errors.As(asError(recovered), &statusErr) {
+				t.Fatalf("recovered=%#v, want HTTPStatusError", recovered)
+			}
+			if statusErr.StatusCode != http.StatusTooManyRequests || statusErr.RetryAfter != "17" || statusErr.RateLimit.Limit != "20" || statusErr.RateLimit.Remaining != "0" || statusErr.RateLimit.Reset != "123" {
+				t.Fatalf("typed playback HTTP error lost evidence: %#v", statusErr)
+			}
+		})
+	}
+}
 
 func TestParsePlaybackAPIErrorAcceptsNumericAndString4294(t *testing.T) {
 	for _, raw := range []string{"4294", `"4294"`} {

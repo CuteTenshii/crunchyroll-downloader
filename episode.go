@@ -177,8 +177,24 @@ func getEpisode(id string) Episode {
 	if err != nil {
 		panic(err)
 	}
-	if err = json.Unmarshal(body, &episode); err != nil {
-		panic(err)
+	decodeErr := json.Unmarshal(body, &episode)
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		if decodeErr == nil && len(episode.Error) > 0 && string(episode.Error) != "null" {
+			providerErr := parsePlaybackAPIError(id, episode.Error)
+			providerErr.HTTPStatus = resp.StatusCode
+			providerErr.RetryAfter = safeHeaderScalar(resp.Header.Get("Retry-After"))
+			providerErr.RateLimit = providerRateLimitHeaders(resp.Header)
+			panic(providerErr)
+		}
+		panic(&HTTPStatusError{
+			URL:        redactURL(req.URL.String()),
+			StatusCode: resp.StatusCode,
+			RetryAfter: safeHeaderScalar(resp.Header.Get("Retry-After")),
+			RateLimit:  providerRateLimitHeaders(resp.Header),
+		})
+	}
+	if decodeErr != nil {
+		panic(decodeErr)
 	}
 	if len(episode.Error) > 0 && string(episode.Error) != "null" {
 		// Panic rather than os.Exit so callers (download loop, index loop) can

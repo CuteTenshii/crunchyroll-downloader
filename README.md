@@ -68,6 +68,55 @@ To download multiple audio tracks and subtitles into a single file (the first of
 ./crunchyroll-downloader --url https://www.crunchyroll.com/watch/GE00198973JAJP/dawn-and-confusion --etp-rt-file ~/.config/crunchyroll/etp_rt.txt --audio-lang ja-JP,en-US --subs-lang en-US,es-419,de-DE
 ```
 
+## Resumable subtitle indexing
+
+`--index-subs` opens playback only to collect the exact requested subtitle
+locale. It does not load a Widevine CDM. Authentication remains file-only:
+provide `--etp-rt-file` pointing at a regular mode-`0600` operator-private
+file; do not put a cookie in an environment variable or command-line value.
+
+```shell
+./crunchyroll-downloader \
+  --url https://www.crunchyroll.com/series/GJ0H7Q5ZJ/hells-paradise \
+  --index-subs \
+  --subs-lang en-US \
+  --index-window 25 \
+  --index-terminal-recheck-window 3 \
+  --etp-rt-file ~/.config/crunchyroll/etp_rt.txt
+```
+
+Every attempted provider identity is checkpointed atomically before the next
+one. The default bounded window is 25 identities. Verified raw `.ass` bytes
+are reused by SHA-256 and are never redownloaded merely to regenerate derived
+telemetry. The global playback circuit can pause later attempts with a
+cooldown after consecutive provider code `4294` responses.
+
+Code `4294` by itself is recorded as
+`subtitle_unknown_provider_playback_restriction`; it is not evidence of a
+specific provider cause. `subtitle_provider_rate_limited` is used only when
+the HTTP response or direct rate-limit headers provide supporting evidence.
+The private run summary uses matching outcomes
+`unknown_provider_playback_restriction` and `provider_rate_limited` when the
+circuit is open.
+
+Each checksum-verified subtitle cache records `subtitle_cue_quality` with
+`healthy` or `degraded` outcome, plus counts for malformed, empty, and skipped
+ASS dialogue cues. A cache is marked degraded when it has no usable cues or
+when malformed cues exceed 5%, empty cues exceed 20%, or skipped cues exceed
+5%. Degraded is a quality observation, not a reason to overwrite or
+redownload the original raw ASS bytes.
+
+Rows recorded as `subtitle_missing_locale` or `subtitle_permanent_failed` do
+not receive a full historical playback sweep. A stable per-episode source
+version and catalog snapshot permit only a deterministic, newest-first sparse
+recheck when provider metadata changes, capped by
+`--index-terminal-recheck-window` and never above `--index-window`.
+
+For a multi-URL `--file` index run, provider-call counters are reset for each
+catalog summary. Omit `--index-run-summary` so each catalog uses its own
+default summary path; one explicit summary path is rejected for multiple URLs
+instead of being overwritten.
+
 ## Building
 
 ### Requirements

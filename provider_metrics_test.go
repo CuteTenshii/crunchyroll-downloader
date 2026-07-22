@@ -32,3 +32,26 @@ func TestProviderCallMetricsClassifyEveryProviderBoundary(t *testing.T) {
 		t.Fatalf("provider total = %d, want 5", metrics.total())
 	}
 }
+
+func TestBatchIndexCatalogMetricsAreIsolatedPerSummary(t *testing.T) {
+	resetProviderCallMetrics()
+	t.Cleanup(resetProviderCallMetrics)
+	providerCalls.authentication.Add(1) // Shared batch authentication is outside each catalog scope.
+
+	beginBatchIndexCatalogMetrics(true)
+	providerCalls.catalog.Add(3)
+	providerCalls.playbackOpen.Add(2)
+	providerCalls.subtitleFetch.Add(1)
+	first := providerCallMetricsSnapshot()
+	if first.Authentication != 0 || first.Catalog != 3 || first.PlaybackOpen != 2 || first.SubtitleFetch != 1 || first.total() != 6 {
+		t.Fatalf("first catalog metrics=%#v", first)
+	}
+
+	beginBatchIndexCatalogMetrics(true)
+	providerCalls.catalog.Add(2)
+	providerCalls.playbackOpen.Add(1)
+	second := providerCallMetricsSnapshot()
+	if second.Authentication != 0 || second.Catalog != 2 || second.PlaybackOpen != 1 || second.SubtitleFetch != 0 || second.total() != 3 {
+		t.Fatalf("second catalog inherited cumulative metrics: %#v", second)
+	}
+}

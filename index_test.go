@@ -212,12 +212,221 @@ func TestInitialCatalogPreservesOnlyVerifiedPriorCheckpoints(t *testing.T) {
 	}
 }
 
+func TestInitialCatalogMigratesLegacy4294InferenceToNeutralRestriction(t *testing.T) {
+	seasons := []Season{{ID: "season", SeasonNumber: 1}}
+	episodes := map[string][]SeasonEpisode{"season": {{ID: "episode", EpisodeNumber: 1, SeriesTitle: "Series"}}}
+	prior := map[string]indexEpisode{
+		"episode": {Status: legacyIndexStatusThrottled, SubtitleLocale: "en-US", SubtitleAttemptCount: 4},
+	}
+	catalog, _ := newIndexCatalog("Series", "https://example.test/series", "en-US", seasons, episodes, prior, true)
+	entry := catalog.Seasons[0].Episodes[0]
+	if entry.Status != indexStatusUnknownProviderPlaybackRestriction || entry.SubtitleAttemptCount != 4 {
+		t.Fatalf("legacy provider state was not safely normalized: %#v", entry)
+	}
+}
+
 func TestParseASSPreservesCommasInText(t *testing.T) {
 	raw := []byte("[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\nDialogue: 0,0:01:02.34,0:01:04.00,Default,,0,0,0,,Hello, world, again!\\N{\\i1}Still here\n")
 	got := parseASS(raw)
 	want := "[00:01:02] Hello, world, again! Still here\n"
 	if got != want {
 		t.Fatalf("parseASS() = %q, want %q", got, want)
+	}
+}
+
+func TestAssessASSCueQualityReportsMalformedEmptyAndSkippedCues(t *testing.T) {
+	raw := []byte("[Events]\nFormat: Start, Text\nDialogue: 0:01:02.34,Valid cue\nDialogue: malformed\nDialogue: 0:01:04.00,{\\i1}\nDialogue: invalid-time,Skipped cue\n")
+	transcript, quality := parseASSWithCueQuality(raw)
+	if transcript != "[00:01:02] Valid cue\n" {
+		t.Fatalf("transcript=%q", transcript)
+	}
+	if quality.Version != assCueQualityVersion || quality.TotalCues != 4 || quality.UsableCues != 1 || quality.MalformedCues != 1 || quality.EmptyCues != 1 || quality.SkippedCues != 1 || quality.Outcome != "degraded" {
+		t.Fatalf("cue quality=%#v", quality)
+	}
+	if quality.MaxMalformedCueRatio != maxMalformedASSCueRatio || quality.MaxEmptyCueRatio != maxEmptyASSCueRatio || quality.MaxSkippedCueRatio != maxSkippedASSCueRatio {
+		t.Fatalf("cue-quality thresholds=%#v", quality)
+	}
+}
+
+func TestAssessASSCueQualityAllowsCountsWithinExplicitThresholds(t *testing.T) {
+	var raw strings.Builder
+	raw.WriteString("[Events]\nFormat: Start, Text\n")
+	for i := 0; i < 20; i++ {
+		raw.WriteString("Dialogue: 0:01:02.00,Valid cue\n")
+	}
+	raw.WriteString("Dialogue: malformed\n")
+	quality := assessASSCueQuality([]byte(raw.String()))
+	if quality.MalformedCues != 1 || quality.TotalCues != 21 || quality.Outcome != "healthy" {
+		t.Fatalf("cue quality=%#v", quality)
+	}
+}
+
+func TestCheckpointSubtitleCachesDegradedRawASSWithoutChangingBytes(t *testing.T) {
+	dir := t.TempDir()
+	raw := []byte("[Events]\nFormat: Start, Text\nDialogue: 0:01:02.00,{\\i1}\n")
+	entry, attempted := checkpointSubtitleWithFetcher(
+		SeasonEpisode{ID: "episode", SeasonNumber: 1, EpisodeNumber: 1}, indexEpisode{}, "en-US", dir, indexEpisode{},
+		func(string, string) (subtitleFetchResult, error) {
+			return subtitleFetchResult{AvailableLangs: []string{"en-US"}, RawASS: raw, PlaybackAttempts: 1, SubtitleFetchAttempts: 1}, nil
+		},
+	)
+	if !attempted || entry.Status != indexStatusSubtitleCached || entry.SubtitleCueQuality == nil || entry.SubtitleCueQuality.Outcome != "degraded" {
+		t.Fatalf("checkpoint=%#v attempted=%v", entry, attempted)
+	}
+	stored, err := os.ReadFile(entry.SubtitleFile)
+	if err != nil || string(stored) != string(raw) {
+		t.Fatalf("stored raw ASS err=%v bytes=%q", err, stored)
+	}
+}
+
+func TestCheckpointSubtitleAddsCueTelemetryToVerifiedCacheWithoutRedownload(t *testing.T) {
+	dir := t.TempDir()
+	raw := []byte("[Events]\nFormat: Start, Text\nDialogue: 0:01:02.00,Existing cache\n")
+	path := rawASSPath(dir, 1, 1, "episode")
+	if err := atomicWriteFile(path, raw, 0644); err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(raw)
+	prior := indexEpisode{
+		Status: indexStatusSubtitleCached, SubtitleFile: path, SubtitleLocale: "en-US",
+		SubtitleSHA256: hex.EncodeToString(sum[:]), SubtitleParserVersion: rawASSParserVersion,
+	}
+	entry, attempted := checkpointSubtitleWithFetcher(
+		SeasonEpisode{ID: "episode", SeasonNumber: 1, EpisodeNumber: 1}, indexEpisode{}, "en-US", dir, prior,
+		func(string, string) (subtitleFetchResult, error) {
+			t.Fatal("verified cache must not redownload")
+			return subtitleFetchResult{}, nil
+		},
+	)
+	if attempted || entry.SubtitleCueQuality == nil || entry.SubtitleCueQuality.Outcome != "healthy" {
+		t.Fatalf("checkpoint=%#v attempted=%v", entry, attempted)
+	}
+	stored, err := os.ReadFile(path)
+	if err != nil || string(stored) != string(raw) {
+		t.Fatalf("cached raw ASS changed err=%v bytes=%q", err, stored)
+	}
+}
+
+func TestScheduleSparseTerminalRechecksIsSnapshotAwareAndBounded(t *testing.T) {
+	seasons := []Season{{ID: "season", SeasonNumber: 1}}
+	initialEpisodes := map[string][]SeasonEpisode{"season": {
+		{ID: "old-newest", SeriesTitle: "Series", SeasonNumber: 1, EpisodeNumber: 3, AvailabilityStarts: "2026-07-03T00:00:00Z"},
+		{ID: "old-middle", SeriesTitle: "Series", SeasonNumber: 1, EpisodeNumber: 2, AvailabilityStarts: "2026-07-02T00:00:00Z"},
+		{ID: "old-oldest", SeriesTitle: "Series", SeasonNumber: 1, EpisodeNumber: 1, AvailabilityStarts: "2026-07-01T00:00:00Z"},
+	}}
+	previous, _ := newIndexCatalog("Series", "https://example.test/series", "en-US", seasons, initialEpisodes, nil, true)
+	prior := priorEpisodes(previous)
+	for id, entry := range prior {
+		entry.Status = indexStatusSubtitleMissing
+		prior[id] = entry
+	}
+
+	currentEpisodes := map[string][]SeasonEpisode{"season": {
+		{ID: "fresh", SeriesTitle: "Series", SeasonNumber: 1, EpisodeNumber: 4, AvailabilityStarts: "2026-07-04T00:00:00Z"},
+		initialEpisodes["season"][0], initialEpisodes["season"][1], initialEpisodes["season"][2],
+	}}
+	current, work := newIndexCatalog("Series", "https://example.test/series", "en-US", seasons, currentEpisodes, prior, true)
+	work = sortIndexWorkNewestFirst(work)
+	if got := scheduleSparseTerminalRechecks(&current, work, prior, previous.CatalogSnapshot, 2); got != 2 {
+		t.Fatalf("scheduled=%d want=2", got)
+	}
+	byID := priorEpisodes(current)
+	if byID["fresh"].Status != indexStatusPending || byID["old-newest"].Status != indexStatusPending || byID["old-middle"].Status != indexStatusPending || byID["old-oldest"].Status != indexStatusSubtitleMissing {
+		t.Fatalf("sparse scheduling swept or reordered rows: %#v", byID)
+	}
+	if byID["old-newest"].SubtitleRecheckReason != "catalog_snapshot_changed" || byID["old-middle"].SubtitleRecheckReason != "catalog_snapshot_changed" {
+		t.Fatalf("unexpected sparse recheck reasons: %#v", byID)
+	}
+
+	// Once an unchanged snapshot has been recorded for a terminal recheck, it
+	// cannot trigger a repeat playback attempt on the next resumed run.
+	for _, id := range []string{"old-newest", "old-middle"} {
+		entry := byID[id]
+		entry.Status = indexStatusSubtitleMissing
+		entry.SubtitleRecheckSnapshot = current.CatalogSnapshot
+		prior[id] = entry
+	}
+	stable, stableWork := newIndexCatalog("Series", "https://example.test/series", "en-US", seasons, currentEpisodes, prior, true)
+	if got := scheduleSparseTerminalRechecks(&stable, sortIndexWorkNewestFirst(stableWork), prior, current.CatalogSnapshot, 2); got != 0 {
+		t.Fatalf("unchanged snapshot rescheduled %d terminal rows", got)
+	}
+}
+
+func TestScheduleSparseTerminalRechecksPrioritizesSourceVersionChange(t *testing.T) {
+	seasons := []Season{{ID: "season", SeasonNumber: 1}}
+	initialEpisodes := map[string][]SeasonEpisode{"season": {{ID: "episode", SeriesTitle: "Series", SeasonNumber: 1, EpisodeNumber: 1, Title: "Original", AvailabilityStarts: "2026-07-01T00:00:00Z"}}}
+	previous, _ := newIndexCatalog("Series", "https://example.test/series", "en-US", seasons, initialEpisodes, nil, true)
+	prior := priorEpisodes(previous)
+	entry := prior["episode"]
+	entry.Status = indexStatusPermanentFailed
+	prior["episode"] = entry
+
+	updatedEpisodes := map[string][]SeasonEpisode{"season": {{ID: "episode", SeriesTitle: "Series", SeasonNumber: 1, EpisodeNumber: 1, Title: "Updated", AvailabilityStarts: "2026-07-01T00:00:00Z"}}}
+	current, work := newIndexCatalog("Series", "https://example.test/series", "en-US", seasons, updatedEpisodes, prior, true)
+	if got := scheduleSparseTerminalRechecks(&current, sortIndexWorkNewestFirst(work), prior, previous.CatalogSnapshot, 1); got != 1 {
+		t.Fatalf("scheduled=%d want=1", got)
+	}
+	updated := current.Seasons[0].Episodes[0]
+	if updated.Status != indexStatusPending || updated.SubtitleRecheckReason != "source_version_changed" {
+		t.Fatalf("source-version recheck=%#v", updated)
+	}
+}
+
+func TestScheduleSparseTerminalRechecksKeepsPriorityOrderAndRetainsSourceTruth(t *testing.T) {
+	seasons := []Season{{ID: "season", SeasonNumber: 1}}
+	initialEpisodes := map[string][]SeasonEpisode{"season": {
+		{ID: "snapshot-only", SeriesTitle: "Series", SeasonNumber: 1, EpisodeNumber: 3, Title: "Stable", AvailabilityStarts: "2026-07-03T00:00:00Z"},
+		{ID: "source-first", SeriesTitle: "Series", SeasonNumber: 1, EpisodeNumber: 2, Title: "Original A", AvailabilityStarts: "2026-07-02T00:00:00Z"},
+		{ID: "source-later", SeriesTitle: "Series", SeasonNumber: 1, EpisodeNumber: 1, Title: "Original B", AvailabilityStarts: "2026-07-01T00:00:00Z"},
+	}}
+	previous, _ := newIndexCatalog("Series", "https://example.test/series", "en-US", seasons, initialEpisodes, nil, true)
+	prior := priorEpisodes(previous)
+	for id, entry := range prior {
+		entry.Status = indexStatusSubtitleMissing
+		entry.SubtitleCheckedSourceVersion = entry.SourceVersion
+		prior[id] = entry
+	}
+
+	currentEpisodes := map[string][]SeasonEpisode{"season": {
+		{ID: "fresh", SeriesTitle: "Series", SeasonNumber: 1, EpisodeNumber: 4, Title: "Fresh", AvailabilityStarts: "2026-07-04T00:00:00Z"},
+		initialEpisodes["season"][0],
+		{ID: "source-first", SeriesTitle: "Series", SeasonNumber: 1, EpisodeNumber: 2, Title: "Updated A", AvailabilityStarts: "2026-07-02T00:00:00Z"},
+		{ID: "source-later", SeriesTitle: "Series", SeasonNumber: 1, EpisodeNumber: 1, Title: "Updated B", AvailabilityStarts: "2026-07-01T00:00:00Z"},
+	}}
+	current, work := newIndexCatalog("Series", "https://example.test/series", "en-US", seasons, currentEpisodes, prior, true)
+	ordered, err := reorderIndexWork(sortIndexWorkNewestFirst(work), []string{"snapshot-only"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := scheduleSparseTerminalRechecks(&current, ordered, prior, previous.CatalogSnapshot, 1); got != 1 {
+		t.Fatalf("scheduled=%d want=1", got)
+	}
+	byID := priorEpisodes(current)
+	if entry := byID["snapshot-only"]; entry.Status != indexStatusPending || entry.SubtitleRecheckReason != "catalog_snapshot_changed" {
+		t.Fatalf("priority snapshot recheck did not win quota: %#v", entry)
+	}
+	if byID["source-first"].Status != indexStatusSubtitleMissing || byID["source-later"].Status != indexStatusSubtitleMissing {
+		t.Fatalf("source changes exceeded the quota: %#v", byID)
+	}
+	if byID["source-first"].SubtitleCheckedSourceVersion == byID["source-first"].SourceVersion {
+		t.Fatalf("deferred source change was erased: %#v", byID["source-first"])
+	}
+
+	resumedPrior := priorEpisodes(current)
+	resumed, resumedWork := newIndexCatalog("Series", "https://example.test/series", "en-US", seasons, currentEpisodes, resumedPrior, true)
+	resumedOrdered, err := reorderIndexWork(sortIndexWorkNewestFirst(resumedWork), []string{"snapshot-only"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := scheduleSparseTerminalRechecks(&resumed, resumedOrdered, resumedPrior, current.CatalogSnapshot, 1); got != 1 {
+		t.Fatalf("resumed source change scheduled=%d want=1", got)
+	}
+	resumedByID := priorEpisodes(resumed)
+	if entry := resumedByID["source-first"]; entry.Status != indexStatusPending || entry.SubtitleRecheckReason != "source_version_changed" {
+		t.Fatalf("deferred source change was not recovered on resume: %#v", entry)
+	}
+	if resumedByID["source-later"].Status != indexStatusSubtitleMissing || resumedByID["source-later"].SubtitleCheckedSourceVersion == resumedByID["source-later"].SourceVersion {
+		t.Fatalf("later source change was not retained beyond resumed quota: %#v", resumedByID["source-later"])
 	}
 }
 
@@ -380,7 +589,7 @@ func TestProcessIndexWorkSnapshotsEveryIdentityAndContinuesAfterFailure(t *testi
 	if strings.Join(fetched, ",") != "newest,middle,oldest" {
 		t.Fatalf("failure blocked older work: fetched=%#v", fetched)
 	}
-	if len(snapshots) != 3 || snapshots[0][0] != indexStatusThrottled || snapshots[0][1] != indexStatusPending || snapshots[2][2] != indexStatusSubtitleCached {
+	if len(snapshots) != 3 || snapshots[0][0] != indexStatusUnknownProviderPlaybackRestriction || snapshots[0][1] != indexStatusPending || snapshots[2][2] != indexStatusSubtitleCached {
 		t.Fatalf("per-record snapshots = %#v", snapshots)
 	}
 	if len(sleeps) != 3 || sleeps[0] != 7*time.Second {

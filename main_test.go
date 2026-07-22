@@ -59,6 +59,36 @@ func TestValidatePlaybackRetryConfig(t *testing.T) {
 	}
 }
 
+func TestValidateIndexTerminalRecheckWindow(t *testing.T) {
+	for _, window := range []int{-1, 26} {
+		if err := validateIndexTerminalRecheckWindow(window); err == nil {
+			t.Fatalf("window %d unexpectedly accepted", window)
+		}
+	}
+	if err := validateIndexTerminalRecheckWindow(defaultIndexTerminalRecheckWindow); err != nil {
+		t.Fatalf("default terminal recheck window rejected: %v", err)
+	}
+}
+
+func TestValidateBatchIndexSummaryPathRejectsSharedExplicitPath(t *testing.T) {
+	if err := validateBatchIndexSummaryPath(2, true, "shared-summary.json"); err == nil {
+		t.Fatal("shared explicit batch summary path was accepted")
+	}
+	for _, test := range []struct {
+		count     int
+		fetchSubs bool
+		path      string
+	}{
+		{count: 2, fetchSubs: true, path: ""},
+		{count: 1, fetchSubs: true, path: "one.json"},
+		{count: 2, fetchSubs: false, path: "unused.json"},
+	} {
+		if err := validateBatchIndexSummaryPath(test.count, test.fetchSubs, test.path); err != nil {
+			t.Fatalf("valid batch summary configuration rejected: %#v err=%v", test, err)
+		}
+	}
+}
+
 func TestReadETPRTFileRejectsSymlink(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, "target")
