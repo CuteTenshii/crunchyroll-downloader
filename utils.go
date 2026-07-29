@@ -1,5 +1,7 @@
 package main
 
+import "regexp"
+
 var languageNames = map[string]string{
 	"ja-JP":  "日本語",
 	"en-US":  "English",
@@ -58,4 +60,20 @@ var languageCodes = map[string]string{
 	"zh-TW":  "zho",
 	"ko-KR":  "kor",
 	"th-TH":  "tha",
+}
+
+// sanitizeFilename removes illegal OS characters and formats the string safely
+func sanitizeFilename(name string) string {
+	if name == "" {
+		return "Unknown"
+	}
+	// Replace illegal characters and quotes with an underscore
+	re := regexp.MustCompile(`[\\/:*?"<>|'’\x60“”]`)
+	res := re.ReplaceAllString(name, "_")
+	
+	// Collapse multiple consecutive underscores into a single one
+	reCollapse := regexp.MustCompile(`_+`)
+	res = reCollapse.ReplaceAllString(res, "_")
+	
+	return strings.TrimRight(res, " .")
 }
