@@ -1,6 +1,9 @@
 package main
 
-import "regexp"
+import (
+    "regexp"
+    "strings"
+)
 
 var languageNames = map[string]string{
 	"ja-JP":  "日本語",
