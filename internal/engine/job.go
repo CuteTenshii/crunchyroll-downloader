@@ -10,15 +10,16 @@ import (
 
 // DownloadJob describes a multi-episode download queue for the GUI/CLI job runner.
 // Authentication (etp_rt / access token) must already be loaded before RunDownloadJob.
+// JSON tags are required so Wails includes fields when binding from the frontend.
 type DownloadJob struct {
-	EpisodeIDs    []string
-	AudioLangs    []string // empty = original locale from episode metadata
-	SubtitleLangs []string // empty = none
-	CaptionLangs  []string // empty = none
-	VideoQuality  string   // "max" or concrete e.g. 1080p
-	AudioQuality  string   // "max" or concrete e.g. 192k
-	OutputDir     string
-	StrictLangs   bool
+	EpisodeIDs    []string `json:"episodeIds"`
+	AudioLangs    []string `json:"audioLangs"`    // empty = original locale from episode metadata
+	SubtitleLangs []string `json:"subtitleLangs"` // empty = none
+	CaptionLangs  []string `json:"captionLangs"`  // empty = none
+	VideoQuality  string   `json:"videoQuality"`  // "max" or concrete e.g. 1080p
+	AudioQuality  string   `json:"audioQuality"`  // "max" or concrete e.g. 192k
+	OutputDir     string   `json:"outputDir"`
+	StrictLangs   bool     `json:"strictLangs"`
 }
 
 // Test seams so job tests do not hit live Crunchyroll or the full download path.

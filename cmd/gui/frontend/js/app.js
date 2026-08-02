@@ -756,12 +756,62 @@
   function errMessage(err) {
     if (!err) return "unknown error";
     if (typeof err === "string") return err;
+    // Wails often returns { message: "..." } or plain Error-like objects.
     if (err.message) return err.message;
+    if (err.Message) return err.Message;
+    if (err.error) return String(err.error);
     try {
+      var s = JSON.stringify(err);
+      if (s && s !== "{}" && s !== "null") return s;
       return String(err);
     } catch (e) {
       return "unknown error";
     }
+  }
+
+  /** Read a field that may be PascalCase (Go) or camelCase (json tags). */
+  function field(obj, pascal, camel) {
+    if (!obj) return undefined;
+    if (obj[pascal] !== undefined && obj[pascal] !== null) return obj[pascal];
+    if (camel && obj[camel] !== undefined && obj[camel] !== null) return obj[camel];
+    return undefined;
+  }
+
+  /** Normalize InspectResult so the rest of the UI always sees PascalCase. */
+  function normalizeInspectResult(raw) {
+    if (!raw) return null;
+    var episodes = field(raw, "Episodes", "episodes") || [];
+    var seasons = field(raw, "Seasons", "seasons") || [];
+    return {
+      ContentType: field(raw, "ContentType", "contentType") || "",
+      ContentID: field(raw, "ContentID", "contentID") || field(raw, "ContentID", "contentId") || "",
+      Seasons: seasons.map(function (s) {
+        return {
+          ID: field(s, "ID", "id") || "",
+          SeasonNumber: field(s, "SeasonNumber", "seasonNumber") || 0,
+        };
+      }),
+      Episodes: episodes.map(function (ep) {
+        return {
+          ID: field(ep, "ID", "id") || "",
+          SeasonNumber: field(ep, "SeasonNumber", "seasonNumber") || 0,
+          EpisodeNumber: field(ep, "EpisodeNumber", "episodeNumber") || 0,
+          Title: field(ep, "Title", "title") || "",
+          SeriesTitle: field(ep, "SeriesTitle", "seriesTitle") || "",
+          AudioLocales: field(ep, "AudioLocales", "audioLocales") || [],
+        };
+      }),
+      AudioLocales: field(raw, "AudioLocales", "audioLocales") || [],
+      SubtitleLocales: field(raw, "SubtitleLocales", "subtitleLocales") || [],
+      CaptionLocales: field(raw, "CaptionLocales", "captionLocales") || [],
+      VideoQualities: field(raw, "VideoQualities", "videoQualities") || [],
+      AudioQualities: field(raw, "AudioQualities", "audioQualities") || [],
+      DefaultEpisodeID:
+        field(raw, "DefaultEpisodeID", "defaultEpisodeID") ||
+        field(raw, "DefaultEpisodeID", "defaultEpisodeId") ||
+        "",
+      OriginalAudio: field(raw, "OriginalAudio", "originalAudio") || "",
+    };
   }
 
   /* ── Catalog rendering ── */
@@ -1326,18 +1376,20 @@
         })[0] || "";
     }
 
+    // camelCase keys match Go json tags (required by Wails bindings).
     var req = {
-      URL: url,
-      ETPRTFile: state.cookieFile,
-      PrimaryAudioHint: audioHint,
-      PrimarySubsHint: subsHint,
-      ProbePlayback: true,
-      ProbeContentID: "",
+      url: url,
+      etpRtFile: state.cookieFile,
+      primaryAudioHint: audioHint,
+      primarySubsHint: subsHint,
+      probePlayback: true,
+      probeContentId: "",
     };
 
     try {
       await persistPrefs();
-      var result = await app.Inspect(req);
+      var raw = await app.Inspect(req);
+      var result = normalizeInspectResult(raw);
       applyDefaults(result);
       await persistPrefs();
       var epCount = (result.Episodes || []).length;
@@ -1493,15 +1545,16 @@
     state.captionLangs = captions;
     var output =
       (els.output && els.output.value.trim()) || state.outputDir || "./Downloads";
+    // camelCase keys match Go json tags (required by Wails bindings).
     return {
-      EpisodeIDs: epIds,
-      AudioLangs: audio,
-      SubtitleLangs: subs,
-      CaptionLangs: captions,
-      VideoQuality: state.videoQuality || "max",
-      AudioQuality: state.audioQuality || "max",
-      OutputDir: output,
-      StrictLangs: !!state.strictLanguages,
+      episodeIds: epIds,
+      audioLangs: audio,
+      subtitleLangs: subs,
+      captionLangs: captions,
+      videoQuality: state.videoQuality || "max",
+      audioQuality: state.audioQuality || "max",
+      outputDir: output,
+      strictLangs: !!state.strictLanguages,
     };
   }
 
@@ -1524,12 +1577,12 @@
     }
 
     var job = buildDownloadJob();
-    if (!job.EpisodeIDs.length) {
+    if (!job.episodeIds.length) {
       showBanner("Select at least one episode before downloading.", "warn");
       logLine("Download blocked: no episodes selected", "warn");
       return;
     }
-    if (!job.AudioLangs.length) {
+    if (!job.audioLangs.length) {
       showBanner("Select at least one audio language.", "warn");
       logLine("Download blocked: no audio selected", "warn");
       return;
@@ -1562,21 +1615,21 @@
     subscribeProgress();
     logLine(
       "Download started · " +
-        job.EpisodeIDs.length +
+        job.episodeIds.length +
         " episode(s) · audio " +
-        job.AudioLangs.join(",") +
-        (job.SubtitleLangs.length
-          ? " · subs " + job.SubtitleLangs.join(",")
+        job.audioLangs.join(",") +
+        (job.subtitleLangs.length
+          ? " · subs " + job.subtitleLangs.join(",")
           : " · no subs") +
-        (job.CaptionLangs.length
-          ? " · CC " + job.CaptionLangs.join(",")
+        (job.captionLangs.length
+          ? " · CC " + job.captionLangs.join(",")
           : "") +
-        (job.StrictLangs ? " · strict langs" : ""),
+        (job.strictLangs ? " · strict langs" : ""),
       "ok"
     );
     if (els.queue) {
       els.queue.textContent =
-        "Queued · " + job.EpisodeIDs.length + " episode(s)";
+        "Queued · " + job.episodeIds.length + " episode(s)";
     }
   }
 

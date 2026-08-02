@@ -10,13 +10,14 @@ import (
 )
 
 // InspectRequest describes a catalog/quality probe against a Crunchyroll URL.
+// JSON tags are required so Wails includes fields when binding from the frontend.
 type InspectRequest struct {
-	URL              string
-	ETPRTFile        string
-	PrimaryAudioHint string // default ja-JP
-	PrimarySubsHint  string // for CMS locale params only
-	ProbePlayback    bool   // open playback once for subs/CC/qualities
-	ProbeContentID   string // empty = first episode / watch id
+	URL              string `json:"url"`
+	ETPRTFile        string `json:"etpRtFile"`
+	PrimaryAudioHint string `json:"primaryAudioHint"` // default ja-JP
+	PrimarySubsHint  string `json:"primarySubsHint"`  // for CMS locale params only
+	ProbePlayback    bool   `json:"probePlayback"`    // open playback once for subs/CC/qualities
+	ProbeContentID   string `json:"probeContentId"`   // empty = first episode / watch id
 }
 
 // CatalogSeason is a series season entry returned by Inspect.
