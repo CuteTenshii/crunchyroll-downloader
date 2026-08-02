@@ -20,3 +20,5 @@ crunchyroll-downloader.media*
 *_index*.json
 *_indexer_*.log
 One Piece_subs/
+
+.superpowers/
