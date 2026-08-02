@@ -7,11 +7,149 @@
   <link rel="stylesheet" href="css/app.css" />
 </head>
 <body>
-  <main class="shell">
-    <header class="brand">
-      <h1>Crunchyroll Downloader</h1>
-      <p class="muted">Loading UI later…</p>
+  <div class="app">
+    <header class="header">
+      <div class="brand">
+        <div class="brand-mark" aria-hidden="true">CR</div>
+        <div class="brand-text">
+          <div class="brand-title">Crunchyroll Downloader</div>
+          <div class="brand-sub">Local · authorized account only</div>
+        </div>
+      </div>
+      <div class="mode-toggle" role="tablist" aria-label="Mode">
+        <button type="button" class="mode-btn is-on" id="mode-normal" data-mode="normal" role="tab" aria-selected="true">Normal</button>
+        <button type="button" class="mode-btn" id="mode-advanced" data-mode="advanced" role="tab" aria-selected="false">Advanced</button>
+      </div>
     </header>
-  </main>
+
+    <div id="banner" class="banner err" role="alert" hidden>
+      <span class="banner-dot" aria-hidden="true"></span>
+      <div class="banner-body" id="banner-text"></div>
+      <button type="button" class="banner-close" id="banner-close" aria-label="Dismiss">×</button>
+    </div>
+
+    <div class="toolbar">
+      <input
+        class="cr-input"
+        type="text"
+        id="url"
+        placeholder="Paste series or episode URL…"
+        spellcheck="false"
+        autocomplete="off"
+      />
+      <button type="button" class="cr-btn cr-btn-ghost" id="btn-cookie" title="Set etp_rt cookie file path">Cookie</button>
+      <button type="button" class="cr-btn cr-btn-primary" id="btn-inspect">Inspect</button>
+    </div>
+
+    <div class="workspace">
+      <div class="main-pane" id="main-pane">
+        <div id="view-normal" class="view is-on" role="tabpanel">
+          <div class="cols">
+            <!-- Col 1: Seasons + Episodes -->
+            <section class="panel">
+              <span class="cr-label">Seasons</span>
+              <div id="season-chips" class="chip-row">
+                <span class="muted-hint">Inspect a series to load seasons</span>
+              </div>
+
+              <div class="row-between">
+                <span class="cr-label">Episodes</span>
+                <button type="button" class="cr-chip cr-chip-action" id="select-all-eps">Select all</button>
+              </div>
+              <div id="episode-list" class="check-list">
+                <span class="muted-hint">No catalog yet</span>
+              </div>
+            </section>
+
+            <!-- Col 2: Audio + Subtitles -->
+            <section class="panel">
+              <span class="cr-label">Audio</span>
+              <div id="audio-list" class="check-list compact">
+                <span class="muted-hint">Available after Inspect</span>
+              </div>
+
+              <span class="cr-label" style="margin-top: 14px">Subtitles</span>
+              <div id="sub-list" class="check-list compact">
+                <button type="button" class="cr-check is-on" data-sub="none" id="sub-none-default">
+                  <span class="cr-box" aria-hidden="true">
+                    <svg class="cr-tick" viewBox="0 0 12 12" fill="none">
+                      <path d="M2.2 6.2L4.8 8.8L9.8 3.2" stroke="#0c0a09" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                  </span>
+                  <span class="cr-check-label">No subtitles</span>
+                </button>
+              </div>
+            </section>
+
+            <!-- Col 3: Quality + Output + Download -->
+            <section class="panel">
+              <span class="cr-label">Video quality</span>
+              <div class="cr-dd" id="dd-video" data-value="max">
+                <button type="button" class="cr-dd-btn" aria-haspopup="listbox" aria-expanded="false">
+                  <span class="cr-dd-value">max</span>
+                  <span class="cr-dd-chevron" aria-hidden="true"></span>
+                </button>
+                <div class="cr-dd-menu" role="listbox">
+                  <button type="button" class="cr-dd-item is-active" data-val="max">max</button>
+                </div>
+              </div>
+
+              <span class="cr-label" style="margin-top: 14px">Audio quality</span>
+              <div class="cr-dd" id="dd-audio" data-value="max">
+                <button type="button" class="cr-dd-btn" aria-haspopup="listbox" aria-expanded="false">
+                  <span class="cr-dd-value">max</span>
+                  <span class="cr-dd-chevron" aria-hidden="true"></span>
+                </button>
+                <div class="cr-dd-menu" role="listbox">
+                  <button type="button" class="cr-dd-item is-active" data-val="max">max</button>
+                </div>
+              </div>
+
+              <span class="cr-label" style="margin-top: 14px">Output folder</span>
+              <div class="output-row">
+                <input class="cr-input is-muted" type="text" id="output-dir" value="./Downloads" spellcheck="false" />
+                <button type="button" class="cr-btn cr-btn-ghost" id="btn-output" title="Set output folder path">…</button>
+              </div>
+
+              <div class="spacer"></div>
+              <button type="button" class="cr-btn-download" id="btn-download">Download selected</button>
+            </section>
+          </div>
+        </div>
+
+        <div id="view-advanced" class="view" role="tabpanel" hidden>
+          <div class="advanced-stub">
+            <strong>Advanced</strong><br />
+            Coming in Advanced task
+          </div>
+        </div>
+      </div>
+
+      <aside class="side-pane">
+        <div>
+          <div class="side-label">Queue</div>
+          <div id="queue" class="queue-box">No jobs yet</div>
+        </div>
+
+        <div class="progress-wrap">
+          <div class="progress-meta">
+            <span id="progress-label">Progress</span>
+            <span id="progress-value">—</span>
+          </div>
+          <div class="progress-bar" id="progress-bar"><i id="progress-fill"></i></div>
+        </div>
+
+        <div class="activity-wrap">
+          <div class="side-label">Activity</div>
+          <div id="activity" class="activity-log" aria-live="polite">
+            <div class="ok">● Ready</div>
+            <div>Waiting for URL + cookie file…</div>
+          </div>
+        </div>
+      </aside>
+    </div>
+  </div>
+
+  <script src="js/app.js"></script>
 </body>
 </html>
