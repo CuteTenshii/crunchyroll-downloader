@@ -1,6 +1,6 @@
 package engine
 
-// CRImage is one size entry under images.thumbnail / poster_* arrays from CMS JSON.
+// CRImage is one size entry under images.thumbnail / poster_* from CMS JSON.
 type CRImage struct {
 	Width  int    `json:"width"`
 	Height int    `json:"height"`
@@ -8,11 +8,28 @@ type CRImage struct {
 	Type   string `json:"type"`
 }
 
-// CRImages is the standard Crunchyroll CMS image map on objects/episodes/series.
+// CRImages is the Crunchyroll CMS image map.
+//
+// CMS returns nested arrays: each key is [][]CRImage (groups of size variants),
+// e.g. "thumbnail": [ [ {w:120,...}, {w:320,...}, ... ] ].
+// Unmarshaling into []CRImage fails with:
+// "cannot unmarshal array into Go struct field ... of type engine.CRImage".
 type CRImages struct {
-	Thumbnail  []CRImage `json:"thumbnail"`
-	PosterTall []CRImage `json:"poster_tall"`
-	PosterWide []CRImage `json:"poster_wide"`
+	Thumbnail  [][]CRImage `json:"thumbnail"`
+	PosterTall [][]CRImage `json:"poster_tall"`
+	PosterWide [][]CRImage `json:"poster_wide"`
+}
+
+// flattenImageGroups joins nested CMS image groups into a single slice.
+func flattenImageGroups(groups [][]CRImage) []CRImage {
+	if len(groups) == 0 {
+		return nil
+	}
+	var out []CRImage
+	for _, group := range groups {
+		out = append(out, group...)
+	}
+	return out
 }
 
 // pickImageURL chooses a reasonably sized image for UI thumbs.
@@ -58,24 +75,28 @@ func pickImageURL(images []CRImage, maxWidth int) string {
 	return ""
 }
 
+func pickImageURLFromGroups(groups [][]CRImage, maxWidth int) string {
+	return pickImageURL(flattenImageGroups(groups), maxWidth)
+}
+
 func thumbnailFromImages(images CRImages) string {
 	// Episode thumbs: prefer thumbnail, then wide poster crop.
-	if u := pickImageURL(images.Thumbnail, 320); u != "" {
+	if u := pickImageURLFromGroups(images.Thumbnail, 320); u != "" {
 		return u
 	}
-	if u := pickImageURL(images.PosterWide, 480); u != "" {
+	if u := pickImageURLFromGroups(images.PosterWide, 480); u != "" {
 		return u
 	}
-	return pickImageURL(images.PosterTall, 240)
+	return pickImageURLFromGroups(images.PosterTall, 240)
 }
 
 func posterFromImages(images CRImages) string {
 	// Series/movie hero: prefer tall poster for portrait card, then wide, then thumb.
-	if u := pickImageURL(images.PosterTall, 360); u != "" {
+	if u := pickImageURLFromGroups(images.PosterTall, 360); u != "" {
 		return u
 	}
-	if u := pickImageURL(images.PosterWide, 640); u != "" {
+	if u := pickImageURLFromGroups(images.PosterWide, 640); u != "" {
 		return u
 	}
-	return pickImageURL(images.Thumbnail, 480)
+	return pickImageURLFromGroups(images.Thumbnail, 480)
 }
