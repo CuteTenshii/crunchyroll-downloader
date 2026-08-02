@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/iyear/gowidevine"
@@ -74,49 +75,125 @@ func sendChallenge(contentId, videoToken string, challenge []byte) ([]byte, erro
 	return decoded, nil
 }
 
-func getWidevineDevice() (*widevine.Device, error) {
-	wvdPath := strings.TrimSpace(os.Getenv("CRUNCHYROLL_WIDEVINE_DEVICE_FILE"))
-	if wvdPath != "" {
-		wvd, err := openPrivateRegularFile(wvdPath)
-		if err != nil {
-			return nil, fmt.Errorf("open Widevine device file: %w", err)
+func regularFileExists(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.Mode().IsRegular()
+}
+
+// widevineSearchDirs returns directories that may contain operator-provided CDM files.
+// Matches pre-PR#25 "files next to the binary / in the download folder" workflows.
+func widevineSearchDirs() []string {
+	seen := map[string]struct{}{}
+	var dirs []string
+	add := func(dir string) {
+		dir = strings.TrimSpace(dir)
+		if dir == "" {
+			return
 		}
-		defer wvd.Close()
-		return widevine.NewDevice(widevine.FromWVD(io.NopCloser(wvd)))
+		abs, err := filepath.Abs(dir)
+		if err == nil {
+			dir = abs
+		}
+		if _, ok := seen[dir]; ok {
+			return
+		}
+		seen[dir] = struct{}{}
+		dirs = append(dirs, dir)
 	}
 
+	if cwd, err := os.Getwd(); err == nil {
+		add(cwd)
+	}
+	if exe, err := os.Executable(); err == nil {
+		add(filepath.Dir(exe))
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		// User's existing project that already holds client_id.bin / private_key.pem
+		add(filepath.Join(home, "Documents", "Projects", "Crunchyroll-Downloader"))
+		add(filepath.Join(home, "Documents", "Github", "crunchyroll-downloader"))
+	}
+	return dirs
+}
+
+// resolveLocalWidevinePaths finds a .wvd or client_id+private_key pair on disk
+// when environment variables are not set (old crdl-windows.exe behavior).
+func resolveLocalWidevinePaths() (wvdPath, clientIDPath, privateKeyPath string) {
+	for _, dir := range widevineSearchDirs() {
+		for _, name := range []string{"device.wvd", "device_client.wvd"} {
+			p := filepath.Join(dir, name)
+			if regularFileExists(p) {
+				return p, "", ""
+			}
+		}
+		clientID := filepath.Join(dir, "client_id.bin")
+		privateKey := filepath.Join(dir, "private_key.pem")
+		if regularFileExists(clientID) && regularFileExists(privateKey) {
+			return "", clientID, privateKey
+		}
+	}
+	return "", "", ""
+}
+
+func loadWidevineFromWVD(path string) (*widevine.Device, error) {
+	wvd, err := openPrivateRegularFile(path)
+	if err != nil {
+		// Local operator files on Windows often aren't mode 0600; fall back to Open.
+		f, openErr := os.Open(path)
+		if openErr != nil {
+			return nil, fmt.Errorf("open Widevine device file: %w", err)
+		}
+		defer f.Close()
+		return widevine.NewDevice(widevine.FromWVD(io.NopCloser(f)))
+	}
+	defer wvd.Close()
+	return widevine.NewDevice(widevine.FromWVD(io.NopCloser(wvd)))
+}
+
+func loadWidevineFromRaw(clientIDPath, privateKeyPath string) (*widevine.Device, error) {
+	readFile := func(path string) ([]byte, error) {
+		f, err := openPrivateRegularFile(path)
+		if err != nil {
+			return os.ReadFile(path)
+		}
+		defer f.Close()
+		return io.ReadAll(f)
+	}
+	clientID, err := readFile(clientIDPath)
+	if err != nil {
+		return nil, fmt.Errorf("read Widevine client id file: %w", err)
+	}
+	privateKey, err := readFile(privateKeyPath)
+	if err != nil {
+		return nil, fmt.Errorf("read Widevine private key file: %w", err)
+	}
+	if len(clientID) == 0 || len(privateKey) == 0 {
+		return nil, nil
+	}
+	return widevine.NewDevice(widevine.FromRaw(clientID, privateKey))
+}
+
+func getWidevineDevice() (*widevine.Device, error) {
+	wvdPath := strings.TrimSpace(os.Getenv("CRUNCHYROLL_WIDEVINE_DEVICE_FILE"))
 	clientIDPath := strings.TrimSpace(os.Getenv("CRUNCHYROLL_WIDEVINE_CLIENT_ID_FILE"))
 	privateKeyPath := strings.TrimSpace(os.Getenv("CRUNCHYROLL_WIDEVINE_PRIVATE_KEY_FILE"))
+
+	// Fall back to local files (cwd / next-to-exe / known project folders)
+	// so full downloads work like the old crdl-windows.exe without env setup.
+	if wvdPath == "" && clientIDPath == "" && privateKeyPath == "" {
+		wvdPath, clientIDPath, privateKeyPath = resolveLocalWidevinePaths()
+	}
+
+	if wvdPath != "" {
+		return loadWidevineFromWVD(wvdPath)
+	}
+
 	if clientIDPath == "" && privateKeyPath == "" {
 		return nil, nil
 	}
 	if clientIDPath == "" || privateKeyPath == "" {
 		return nil, fmt.Errorf("both CRUNCHYROLL_WIDEVINE_CLIENT_ID_FILE and CRUNCHYROLL_WIDEVINE_PRIVATE_KEY_FILE are required")
 	}
-	clientIDFile, err := openPrivateRegularFile(clientIDPath)
-	if err != nil {
-		return nil, fmt.Errorf("open Widevine client id file: %w", err)
-	}
-	defer clientIDFile.Close()
-	privateKeyFile, err := openPrivateRegularFile(privateKeyPath)
-	if err != nil {
-		return nil, fmt.Errorf("open Widevine private key file: %w", err)
-	}
-	defer privateKeyFile.Close()
-	clientID, err := io.ReadAll(clientIDFile)
-	if err != nil {
-		return nil, fmt.Errorf("read Widevine client id file: %w", err)
-	}
-	privateKey, err := io.ReadAll(privateKeyFile)
-	if err != nil {
-		return nil, fmt.Errorf("read Widevine private key file: %w", err)
-	}
-
-	if len(clientID) > 0 && len(privateKey) > 0 {
-		return widevine.NewDevice(widevine.FromRaw(clientID, privateKey))
-	}
-
-	return nil, nil
+	return loadWidevineFromRaw(clientIDPath, privateKeyPath)
 }
 
 func openPrivateRegularFile(path string) (*os.File, error) {

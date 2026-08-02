@@ -259,7 +259,7 @@ func runtimeConfigFromPrefs(p engine.Preferences) engine.RuntimeConfig {
 }
 
 // applyWidevineEnvFromPrefs sets CRUNCHYROLL_WIDEVINE_* from preference paths when set.
-// Empty paths leave any existing process environment untouched.
+// Empty paths leave discovery to the engine (cwd / next-to-exe / known folders).
 func applyWidevineEnvFromPrefs(p engine.Preferences) {
 	if v := strings.TrimSpace(p.WVDPath); v != "" {
 		_ = os.Setenv("CRUNCHYROLL_WIDEVINE_DEVICE_FILE", v)
