@@ -30,11 +30,17 @@ body {
   min-height: 100%;
   background: var(--bg);
   color: var(--text);
-  font-family: ui-sans-serif, system-ui, "Segoe UI", sans-serif;
+  /* Lato — Crunchyroll UI/body face (self-hosted in fonts.css) */
+  font-family: "Lato", ui-sans-serif, system-ui, "Segoe UI", sans-serif;
+  font-weight: 400;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 button,
-input {
+input,
+textarea,
+select {
   font: inherit;
   color: inherit;
 }
@@ -88,13 +94,14 @@ button {
 
 .brand-title {
   font-size: 14px;
-  font-weight: 600;
+  font-weight: 700;
   letter-spacing: 0.02em;
   line-height: 1.2;
 }
 
 .brand-sub {
   font-size: 11px;
+  font-weight: 400;
   color: var(--muted);
   line-height: 1.2;
   margin-top: 2px;
@@ -1024,8 +1031,10 @@ textarea.cr-input {
   border: 1px solid var(--line);
   background: var(--panel);
   padding: 10px 12px;
-  font-family: ui-monospace, Consolas, monospace;
-  font-size: 11px;
+  /* Keep log slightly denser; still Lato for CR UI consistency */
+  font-family: "Lato", ui-sans-serif, system-ui, sans-serif;
+  font-size: 12px;
+  font-weight: 400;
   line-height: 1.55;
   overflow: auto;
   color: var(--muted);
