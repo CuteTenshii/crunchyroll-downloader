@@ -1,4 +1,4 @@
-package main
+package engine
 
 import (
 	"encoding/json"
@@ -210,7 +210,7 @@ func getEpisode(id string) Episode {
 		panic(providerErr)
 	}
 
-	if *debug {
+	if activeConfig.DebugManifest {
 		fmt.Printf("\n%s\n", string(body))
 	}
 

@@ -1,4 +1,4 @@
-package main
+package engine
 
 import (
 	"fmt"
@@ -32,7 +32,7 @@ func parseManifest(url string) *mpd.MPD {
 	mpd := new(mpd.MPD)
 	mpd.Decode(body)
 
-	if *debug {
+	if activeConfig.DebugManifest {
 		fmt.Printf("\n%s\n", string(body))
 	}
 

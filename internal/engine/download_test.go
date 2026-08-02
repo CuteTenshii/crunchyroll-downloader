@@ -1,4 +1,4 @@
-package main
+package engine
 
 import (
 	"bytes"
@@ -135,7 +135,7 @@ func TestDownloadEpisodeReturnsRecoveredPanicAndReleasesActiveStream(t *testing.
 	err = downloadEpisode("GY19Q77GR", EpisodeInfo{
 		EpisodeMetadata: EpisodeMetadata{SeriesTitle: "One Piece", AudioLocale: "ja-JP"},
 		Title:           "Episode 31",
-	}, []string{"ja-JP"}, nil, nil, strPtr("1080p"), strPtr("192k"))
+	}, []string{"ja-JP"}, nil, nil, "1080p", "192k")
 	if err == nil {
 		t.Fatal("downloadEpisode swallowed the recovered panic")
 	}
@@ -188,15 +188,15 @@ func TestDownloadEpisodeRetries4294ThenUsesSuccessfulPlayback(t *testing.T) {
 	originalClose := closeDownloadPlayback
 	originalParse := parseDownloadManifest
 	originalSleep := sleepPlaybackRetry
-	originalRetries := *playback4294Retries
-	originalBackoff := *playback4294Backoff
+	originalRetries := activeConfig.Playback4294Retries
+	originalBackoff := activeConfig.Playback4294Backoff
 	defer func() {
 		openDownloadPlayback = originalOpen
 		closeDownloadPlayback = originalClose
 		parseDownloadManifest = originalParse
 		sleepPlaybackRetry = originalSleep
-		*playback4294Retries = originalRetries
-		*playback4294Backoff = originalBackoff
+		activeConfig.Playback4294Retries = originalRetries
+		activeConfig.Playback4294Backoff = originalBackoff
 	}()
 
 	originalWD, err := os.Getwd()
@@ -208,8 +208,8 @@ func TestDownloadEpisodeRetries4294ThenUsesSuccessfulPlayback(t *testing.T) {
 	}
 	defer func() { _ = os.Chdir(originalWD) }()
 
-	*playback4294Retries = 2
-	*playback4294Backoff = 5 * time.Second
+	activeConfig.Playback4294Retries = 2
+	activeConfig.Playback4294Backoff = 5 * time.Second
 	var calls int
 	var delays []time.Duration
 	openDownloadPlayback = func(id string) Episode {
@@ -228,7 +228,7 @@ func TestDownloadEpisodeRetries4294ThenUsesSuccessfulPlayback(t *testing.T) {
 	err = downloadEpisode("GY19Q77GR", EpisodeInfo{
 		EpisodeMetadata: EpisodeMetadata{SeriesTitle: "One Piece", AudioLocale: "ja-JP"},
 		Title:           "Episode 31",
-	}, []string{"ja-JP"}, nil, nil, strPtr("1080p"), strPtr("192k"))
+	}, []string{"ja-JP"}, nil, nil, "1080p", "192k")
 	if err == nil || !strings.Contains(err.Error(), "stop after playback") {
 		t.Fatalf("downloadEpisode() error = %v", err)
 	}
@@ -240,13 +240,13 @@ func TestDownloadEpisodeRetries4294ThenUsesSuccessfulPlayback(t *testing.T) {
 func TestDownloadEpisodeExhausted4294ReturnsError(t *testing.T) {
 	originalOpen := openDownloadPlayback
 	originalSleep := sleepPlaybackRetry
-	originalRetries := *playback4294Retries
-	originalBackoff := *playback4294Backoff
+	originalRetries := activeConfig.Playback4294Retries
+	originalBackoff := activeConfig.Playback4294Backoff
 	defer func() {
 		openDownloadPlayback = originalOpen
 		sleepPlaybackRetry = originalSleep
-		*playback4294Retries = originalRetries
-		*playback4294Backoff = originalBackoff
+		activeConfig.Playback4294Retries = originalRetries
+		activeConfig.Playback4294Backoff = originalBackoff
 	}()
 
 	originalWD, err := os.Getwd()
@@ -258,8 +258,8 @@ func TestDownloadEpisodeExhausted4294ReturnsError(t *testing.T) {
 	}
 	defer func() { _ = os.Chdir(originalWD) }()
 
-	*playback4294Retries = 1
-	*playback4294Backoff = time.Second
+	activeConfig.Playback4294Retries = 1
+	activeConfig.Playback4294Backoff = time.Second
 	calls := 0
 	openDownloadPlayback = func(id string) Episode {
 		calls++
@@ -270,10 +270,8 @@ func TestDownloadEpisodeExhausted4294ReturnsError(t *testing.T) {
 	err = downloadEpisode("GY19Q77GR", EpisodeInfo{
 		EpisodeMetadata: EpisodeMetadata{SeriesTitle: "One Piece", AudioLocale: "ja-JP"},
 		Title:           "Episode 31",
-	}, []string{"ja-JP"}, nil, nil, strPtr("1080p"), strPtr("192k"))
+	}, []string{"ja-JP"}, nil, nil, "1080p", "192k")
 	if err == nil || !strings.Contains(err.Error(), "code 4294") || calls != 2 {
 		t.Fatalf("downloadEpisode() error=%v calls=%d", err, calls)
 	}
 }
-
-func strPtr(value string) *string { return &value }

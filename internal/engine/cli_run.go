@@ -1,9 +1,8 @@
-package main
+package engine
 
 import (
 	"bufio"
 	"errors"
-	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -12,40 +11,36 @@ import (
 	"time"
 )
 
-const (
-	defaultPlayback4294Retries        = 2
-	defaultPlayback4294Backoff        = 8 * time.Second
-	maxPlayback4294Retries            = 5
-	maxPlayback4294Backoff            = time.Minute
-	defaultIndexWindow                = 25
-	defaultIndexTerminalRecheckWindow = 3
-	defaultIndexCircuitLimit          = 3
-	defaultIndexCooldown              = 30 * time.Minute
-)
+// CLIOptions holds per-run selection options (languages, season, index mode,
+// credential path) that are not part of RuntimeConfig quality/retry settings.
+type CLIOptions struct {
+	AudioLang     string
+	SubtitlesLang string
+	CCLang        string
+	SeasonNumber  int
+	Index         bool
+	IndexSubs     bool
+	EtpRtFile     string
+}
 
-var (
-	token                      = ""
-	audioLang                  = flag.String("audio-lang", "ja-JP", "Audio language(s), comma-separated for multiple (e.g. \"ja-JP,en-US\"). First is the default track")
-	subtitlesLang              = flag.String("subs-lang", "en-US", "Subtitle language(s), comma-separated for multiple (e.g. \"en-US,es-419\"). First is the default track")
-	ccLang                     = flag.String("cc-lang", "", "Closed caption language(s), comma-separated for multiple (e.g. \"en-US\"). Downloaded in addition to --subs-lang, not instead of it")
-	videoQuality               = flag.String("video-quality", "1080p", "Video quality")
-	audioQuality               = flag.String("audio-quality", "192k", "Audio quality")
-	seasonNumber               = flag.Int("season", 0, "Season number. Not used if an episode link is entered")
-	etpRtFile                  = flag.String("etp-rt-file", "", "Path to a 0600 regular file containing the etp_rt cookie")
-	debug                      = flag.Bool("debug-manifest", false, "Log raw episode playback JSON and manifest XML")
-	index                      = flag.Bool("index", false, "Build a metadata catalog of all episodes in a series (no download). Requires a /series/ URL")
-	indexSubs                  = flag.Bool("index-subs", false, "Like --index, but also download subtitle transcripts for every episode. Resumable")
-	indexDelay                 = flag.Int("index-delay", 3, "Seconds to wait between subtitle acquisition attempts")
-	indexPriority              = flag.String("index-priority-ids", "", "Episode provider IDs to process first in --index-subs mode, comma-separated")
-	indexWindow                = flag.Int("index-window", defaultIndexWindow, "Maximum provider identities attempted in one resumable index run (1-100)")
-	indexTerminalRecheckWindow = flag.Int("index-terminal-recheck-window", defaultIndexTerminalRecheckWindow, "Maximum missing-locale/permanent rows sparsely rechecked after a source version or catalog snapshot change (0-25)")
-	indexCircuitLimit          = flag.Int("index-circuit-4294-limit", defaultIndexCircuitLimit, "Consecutive provider 4294 responses before the global playback circuit opens")
-	indexCircuitCooldown       = flag.Duration("index-circuit-cooldown", defaultIndexCooldown, "Global cooldown after the playback circuit opens")
-	indexSummaryPath           = flag.String("index-run-summary", "", "Machine-readable terminal run summary path (default: <index>.run-summary.json)")
-	playback4294Retries        = flag.Int("playback-4294-retries", defaultPlayback4294Retries, "Additional retries for playback provider error 4294")
-	playback4294Backoff        = flag.Duration("playback-4294-backoff", defaultPlayback4294Backoff, "Initial backoff for playback provider error 4294")
-	getProcessEpisodeInfo      = getEpisodeInfo
-)
+// DefaultCLIOptions returns the same language/season defaults the CLI flags used.
+func DefaultCLIOptions() CLIOptions {
+	return CLIOptions{
+		AudioLang:     "ja-JP",
+		SubtitlesLang: "en-US",
+	}
+}
+
+// activeCLI is process-wide CLI selection state. Configure sets it before Run.
+var activeCLI = DefaultCLIOptions()
+
+// Configure applies runtime and CLI options for the next Run/processUrl call.
+func Configure(cfg RuntimeConfig, cli CLIOptions) {
+	activeConfig = cfg
+	activeCLI = cli
+}
+
+var getProcessEpisodeInfo = getEpisodeInfo
 
 const maxETPRTBytes int64 = 16 << 10
 
@@ -231,12 +226,12 @@ func processUrl(url string) (err error) {
 		return fmt.Errorf("Invalid URL (must be /watch/ or /series/): %s", url)
 	}
 
-	audioLangs := parseLangs(*audioLang)
+	audioLangs := parseLangs(activeCLI.AudioLang)
 	if len(audioLangs) == 0 {
 		audioLangs = []string{"ja-JP"}
 	}
-	subsLangs := parseLangs(*subtitlesLang)
-	ccLangs := parseLangs(*ccLang)
+	subsLangs := parseLangs(activeCLI.SubtitlesLang)
+	ccLangs := parseLangs(activeCLI.CCLang)
 
 	// The season/series API endpoints take a single preferred locale; use the
 	// primary (first) requested one. All dub versions are still listed per
@@ -249,12 +244,15 @@ func processUrl(url string) (err error) {
 
 	// Index mode: build a metadata catalog (optionally with subtitles) and exit
 	// without downloading any video. Only meaningful for /series/ URLs.
-	if *index || *indexSubs {
+	if activeCLI.Index || activeCLI.IndexSubs {
 		if contentType != "series" {
 			return errors.New("--index/--index-subs requires a /series/ URL")
 		}
-		return writeIndex(url, contentId, primaryAudio, primarySubs, *indexSubs)
+		return writeIndex(url, contentId, primaryAudio, primarySubs, activeCLI.IndexSubs)
 	}
+
+	videoQuality := activeConfig.VideoQuality
+	audioQuality := activeConfig.AudioQuality
 
 	if contentType == "watch" {
 		info := getProcessEpisodeInfo(contentId)
@@ -267,16 +265,16 @@ func processUrl(url string) (err error) {
 			return errors.New("no seasons found")
 		}
 
-		if *seasonNumber != 0 {
+		if activeCLI.SeasonNumber != 0 {
 			var seasonId string
 			for _, season := range seasons {
-				if season.SeasonNumber == *seasonNumber {
+				if season.SeasonNumber == activeCLI.SeasonNumber {
 					seasonId = season.ID
 					break
 				}
 			}
 			if seasonId == "" {
-				return fmt.Errorf("This anime has no season %v!", *seasonNumber)
+				return fmt.Errorf("This anime has no season %v!", activeCLI.SeasonNumber)
 			}
 
 			episodes := getSeasonEpisodes(seasonId, primaryAudio, primarySubs)
@@ -297,24 +295,26 @@ func processUrl(url string) (err error) {
 	return nil
 }
 
-func run(url, urlsFile string) error {
+// Run authenticates and processes a single URL or a batch file of URLs.
+// Configure must be called first (or defaults apply).
+func Run(url, urlsFile string) error {
 	if url == "" && urlsFile == "" {
 		return errors.New("provide --url or --file")
 	}
-	if err := validatePlaybackRetryConfig(*playback4294Retries, *playback4294Backoff); err != nil {
+	if err := validatePlaybackRetryConfig(activeConfig.Playback4294Retries, activeConfig.Playback4294Backoff); err != nil {
 		return err
 	}
-	if (*index || *indexSubs) && *indexSubs {
-		if err := validateIndexRunConfig(*indexWindow, *indexCircuitLimit, *indexCircuitCooldown); err != nil {
+	if (activeCLI.Index || activeCLI.IndexSubs) && activeCLI.IndexSubs {
+		if err := validateIndexRunConfig(activeConfig.IndexWindow, activeConfig.IndexCircuitLimit, activeConfig.IndexCircuitCooldown); err != nil {
 			return err
 		}
-		if err := validateIndexTerminalRecheckWindow(*indexTerminalRecheckWindow); err != nil {
+		if err := validateIndexTerminalRecheckWindow(activeConfig.IndexTerminalRecheckWindow); err != nil {
 			return err
 		}
 		resetProviderCallMetrics()
 	}
 
-	etpRT, err := loadETPRT(*etpRtFile)
+	etpRT, err := loadETPRT(activeCLI.EtpRtFile)
 	if err != nil {
 		return fmt.Errorf("Authentication setup failed: %w", err)
 	}
@@ -341,14 +341,14 @@ func run(url, urlsFile string) error {
 		if err := scanner.Err(); err != nil {
 			return fmt.Errorf("read URLs file: %w", err)
 		}
-		if err := validateBatchIndexSummaryPath(len(urls), *indexSubs, *indexSummaryPath); err != nil {
+		if err := validateBatchIndexSummaryPath(len(urls), activeCLI.IndexSubs, activeConfig.IndexSummaryPath); err != nil {
 			return err
 		}
 
 		fmt.Printf("Found %d URLs to download\n\n", len(urls))
 		failed := false
 		for i, u := range urls {
-			beginBatchIndexCatalogMetrics(*indexSubs)
+			beginBatchIndexCatalogMetrics(activeCLI.IndexSubs)
 			fmt.Printf("=== [%d/%d] %s ===\n", i+1, len(urls), u)
 			if err := processUrl(u); err != nil {
 				fmt.Printf("! %s\n", err)
@@ -363,20 +363,4 @@ func run(url, urlsFile string) error {
 	}
 
 	return processUrl(url)
-}
-
-func main() {
-	url := flag.String("url", "", "URL of the episode/season to download")
-	urlsFile := flag.String("file", "", "Path to a text file with one URL per line")
-	flag.Parse()
-
-	if *url == "" && *urlsFile == "" {
-		flag.Usage()
-		fmt.Println("provide --url or --file")
-		os.Exit(1)
-	}
-	if err := run(*url, *urlsFile); err != nil {
-		fmt.Println(err)
-		os.Exit(1)
-	}
 }

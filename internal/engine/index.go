@@ -1,4 +1,4 @@
-package main
+package engine
 
 import (
 	"crypto/sha256"
@@ -459,7 +459,7 @@ func fetchSubtitles(episodeID, locale string) (result subtitleFetchResult, err e
 		episode = openPlaybackWithRetry(episodeID, func(id string) Episode {
 			result.PlaybackAttempts++
 			return openIndexPlayback(id)
-		}, indexPlayback4294Retries(), *playback4294Backoff, sleepPlaybackRetry)
+		}, indexPlayback4294Retries(), activeConfig.Playback4294Backoff, sleepPlaybackRetry)
 		return nil
 	}(); err != nil {
 		return result, err
@@ -801,15 +801,15 @@ func writeIndexWithLoaders(seriesURL, contentID, primaryAudio, primarySubs strin
 	}
 	if fetchSubs {
 		work = sortIndexWorkNewestFirst(work)
-		priorityIDs := parseIndexPriorityIDs(*indexPriority)
+		priorityIDs := parseIndexPriorityIDs(activeConfig.IndexPriorityIDs)
 		var err error
 		work, err = reorderIndexWork(work, priorityIDs)
 		if err != nil {
 			return err
 		}
-		recheckWindow := *indexTerminalRecheckWindow
-		if recheckWindow > *indexWindow {
-			recheckWindow = *indexWindow
+		recheckWindow := activeConfig.IndexTerminalRecheckWindow
+		if recheckWindow > activeConfig.IndexWindow {
+			recheckWindow = activeConfig.IndexWindow
 		}
 		scheduleSparseTerminalRechecks(&catalog, work, prior, previous.CatalogSnapshot, recheckWindow)
 	}
@@ -830,11 +830,11 @@ func writeIndexWithLoaders(seriesURL, contentID, primaryAudio, primarySubs strin
 		return fmt.Errorf("cannot create subtitle directory %s: %w", subsDir, err)
 	}
 
-	delaySeconds := *indexDelay
+	delaySeconds := activeConfig.IndexDelaySeconds
 	if delaySeconds < minimumIndexDelaySeconds {
 		delaySeconds = minimumIndexDelaySeconds
 	}
-	summaryPath := strings.TrimSpace(*indexSummaryPath)
+	summaryPath := strings.TrimSpace(activeConfig.IndexSummaryPath)
 	if summaryPath == "" {
 		summaryPath = indexPath + ".run-summary.json"
 	}
@@ -842,8 +842,8 @@ func writeIndexWithLoaders(seriesURL, contentID, primaryAudio, primarySubs strin
 	summary, err := processIndexWorkBounded(&catalog, work, prior, primarySubs, subsDir, fetchSubtitles, func(file *indexFile) error {
 		return snapshotIndex(indexPath, file)
 	}, indexRunOptions{
-		Window: *indexWindow, Circuit4294Limit: *indexCircuitLimit,
-		CircuitCooldown: *indexCircuitCooldown,
+		Window: activeConfig.IndexWindow, Circuit4294Limit: activeConfig.IndexCircuitLimit,
+		CircuitCooldown: activeConfig.IndexCircuitCooldown,
 		Delay:           time.Duration(delaySeconds) * time.Second, Sleep: time.Sleep,
 		Now: func() time.Time { return time.Now().UTC() }, StartedAt: startedAt,
 		ProviderMetrics: providerCallMetricsSnapshot,

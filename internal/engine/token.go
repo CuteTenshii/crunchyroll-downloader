@@ -1,4 +1,4 @@
-package main
+package engine
 
 import (
 	"encoding/json"
@@ -13,6 +13,9 @@ import (
 )
 
 var deviceID = uuid.NewString()
+
+// token is the current bearer access token for provider API calls.
+var token = ""
 
 var tokenEndpoint = "https://www.crunchyroll.com/auth/v1/token"
 var tokenHTTPClient = &http.Client{Timeout: providerHTTPTimeout}

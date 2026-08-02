@@ -1,4 +1,4 @@
-package main
+package engine
 
 import (
 	"crypto/sha256"
@@ -96,17 +96,17 @@ func TestCheckpointSubtitleFetchFailureRequiresDelay(t *testing.T) {
 func TestFetchSubtitlesSurfacesFirst4294ToGlobalCircuit(t *testing.T) {
 	originalOpen := openIndexPlayback
 	originalSleep := sleepPlaybackRetry
-	originalRetries := *playback4294Retries
-	originalBackoff := *playback4294Backoff
+	originalRetries := activeConfig.Playback4294Retries
+	originalBackoff := activeConfig.Playback4294Backoff
 	defer func() {
 		openIndexPlayback = originalOpen
 		sleepPlaybackRetry = originalSleep
-		*playback4294Retries = originalRetries
-		*playback4294Backoff = originalBackoff
+		activeConfig.Playback4294Retries = originalRetries
+		activeConfig.Playback4294Backoff = originalBackoff
 	}()
 
-	*playback4294Retries = 2
-	*playback4294Backoff = 4 * time.Second
+	activeConfig.Playback4294Retries = 2
+	activeConfig.Playback4294Backoff = 4 * time.Second
 	calls := 0
 	var delays []time.Duration
 	openIndexPlayback = func(id string) Episode {
@@ -477,9 +477,9 @@ func TestParseIndexPriorityIDsTrimsAndDeduplicates(t *testing.T) {
 }
 
 func TestIndexPlayback4294RetriesAreOwnedByGlobalCircuit(t *testing.T) {
-	original := *playback4294Retries
-	t.Cleanup(func() { *playback4294Retries = original })
-	*playback4294Retries = 5
+	original := activeConfig.Playback4294Retries
+	t.Cleanup(func() { activeConfig.Playback4294Retries = original })
+	activeConfig.Playback4294Retries = 5
 	if got := indexPlayback4294Retries(); got != 0 {
 		t.Fatalf("index playback retries = %d, want 0", got)
 	}
@@ -672,13 +672,13 @@ func TestWriteIndexWithLoadersConvertsProviderPanicToError(t *testing.T) {
 }
 
 func TestRunReturnsAuthenticationSetupErrorWithoutExiting(t *testing.T) {
-	oldPath := *etpRtFile
-	defer func() { *etpRtFile = oldPath }()
-	*etpRtFile = ""
+	oldPath := activeCLI.EtpRtFile
+	defer func() { activeCLI.EtpRtFile = oldPath }()
+	activeCLI.EtpRtFile = ""
 	t.Setenv("CRUNCHYROLL_ETP_RT", "")
 
-	err := run("https://www.crunchyroll.com/series/series-id", "")
+	err := Run("https://www.crunchyroll.com/series/series-id", "")
 	if err == nil || !strings.Contains(err.Error(), "Authentication setup failed") {
-		t.Fatalf("run() error = %v, want authentication setup failure", err)
+		t.Fatalf("Run() error = %v, want authentication setup failure", err)
 	}
 }

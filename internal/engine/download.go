@@ -1,4 +1,4 @@
-package main
+package engine
 
 import (
 	"bytes"
@@ -444,7 +444,7 @@ func releaseDownloadPlayback(contentID, streamToken string) (released bool, err 
 	return closeDownloadPlayback(contentID, streamToken), nil
 }
 
-func downloadEpisode(baseContentId string, info EpisodeInfo, audioLangs, subsLangs, ccLangs []string, videoQuality, audioQuality *string) (err error) {
+func downloadEpisode(baseContentId string, info EpisodeInfo, audioLangs, subsLangs, ccLangs []string, videoQuality, audioQuality string) (err error) {
 	cleanSeriesTitle := sanitizeFilename(info.EpisodeMetadata.SeriesTitle)
 	cleanEpisodeTitle := sanitizeFilename(info.Title)
 
@@ -457,7 +457,7 @@ func downloadEpisode(baseContentId string, info EpisodeInfo, audioLangs, subsLan
 		info.EpisodeMetadata.SeasonNumber,
 		info.EpisodeMetadata.EpisodeNumber,
 		cleanEpisodeTitle,
-		*videoQuality,
+		videoQuality,
 	))
 
 	if _, err := os.Stat(outputFile); err == nil {
@@ -545,7 +545,7 @@ func downloadEpisode(baseContentId string, info EpisodeInfo, audioLangs, subsLan
 
 	// Fetch the first version's playback first so we can validate subtitle
 	// and caption availability before downloading anything heavy.
-	firstEpisode := openPlaybackWithRetry(versions[0].contentId, openDownloadPlayback, *playback4294Retries, *playback4294Backoff, sleepPlaybackRetry)
+	firstEpisode := openPlaybackWithRetry(versions[0].contentId, openDownloadPlayback, activeConfig.Playback4294Retries, activeConfig.Playback4294Backoff, sleepPlaybackRetry)
 	activeStreams[versions[0].contentId] = firstEpisode.Token
 
 	if len(subsLangs) == 1 && subsLangs[0] == "all" {
@@ -627,7 +627,7 @@ func downloadEpisode(baseContentId string, info EpisodeInfo, audioLangs, subsLan
 	for i, version := range versions {
 		episode := firstEpisode
 		if i > 0 {
-			episode = openPlaybackWithRetry(version.contentId, openDownloadPlayback, *playback4294Retries, *playback4294Backoff, sleepPlaybackRetry)
+			episode = openPlaybackWithRetry(version.contentId, openDownloadPlayback, activeConfig.Playback4294Retries, activeConfig.Playback4294Backoff, sleepPlaybackRetry)
 			activeStreams[version.contentId] = episode.Token
 		}
 
@@ -644,7 +644,7 @@ func downloadEpisode(baseContentId string, info EpisodeInfo, audioLangs, subsLan
 
 		audioSet := manifest.Period[0].AdaptationSets[1]
 		fmt.Printf("Downloading %s audio...\n", trackTitle(version.locale))
-		audioBaseUrl, audioRepresentationId := getBaseUrl(audioSet, false, *audioQuality)
+		audioBaseUrl, audioRepresentationId := getBaseUrl(audioSet, false, audioQuality)
 		if audioBaseUrl == nil {
 			return fmt.Errorf("failed to get the audio base URL for %s; check the requested audio quality", version.locale)
 		}
@@ -659,7 +659,7 @@ func downloadEpisode(baseContentId string, info EpisodeInfo, audioLangs, subsLan
 		if i == 0 {
 			videoSet := manifest.Period[0].AdaptationSets[0]
 			fmt.Println("Downloading video...")
-			baseUrl, representationId := getBaseUrl(videoSet, true, *videoQuality)
+			baseUrl, representationId := getBaseUrl(videoSet, true, videoQuality)
 			if baseUrl == nil {
 				return errors.New("failed to get the video base URL; check the requested video quality")
 			}
@@ -683,7 +683,7 @@ func downloadEpisode(baseContentId string, info EpisodeInfo, audioLangs, subsLan
 	return nil
 }
 
-func downloadSeason(videoQuality, audioQuality *string, audioLangs, subsLangs, ccLangs []string, episodes []SeasonEpisode) error {
+func downloadSeason(videoQuality, audioQuality string, audioLangs, subsLangs, ccLangs []string, episodes []SeasonEpisode) error {
 	if len(episodes) == 0 {
 		return errors.New("season has no episodes")
 	}
