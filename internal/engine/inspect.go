@@ -369,6 +369,52 @@ func fillInspectWatch(result *InspectResult, contentID string) error {
 	return nil
 }
 
+// ListSeasonEpisodes loads episode catalog rows for one season CMS id.
+// Used when the GUI switches seasons after Inspect (which only preloads one season).
+// One CMS GET — no playback stream.
+func ListSeasonEpisodes(seasonID, primaryAudio, primarySubs string) ([]CatalogEpisode, error) {
+	seasonID = strings.TrimSpace(seasonID)
+	if seasonID == "" {
+		return nil, fmt.Errorf("season id is required")
+	}
+	if primaryAudio == "" {
+		primaryAudio = "ja-JP"
+	}
+	if primarySubs == "" {
+		primarySubs = "en-US"
+	}
+
+	var (
+		episodes []SeasonEpisode
+		err      error
+	)
+	func() {
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				err = fmt.Errorf("list season episodes: %w", panicAsError(recovered))
+			}
+		}()
+		episodes = inspectGetSeasonEpisodes(seasonID, primaryAudio, primarySubs)
+	}()
+	if err != nil {
+		return nil, err
+	}
+
+	out := make([]CatalogEpisode, 0, len(episodes))
+	for _, ep := range episodes {
+		out = append(out, CatalogEpisode{
+			ID:            ep.ID,
+			SeasonNumber:  ep.SeasonNumber,
+			EpisodeNumber: ep.EpisodeNumber,
+			Title:         ep.Title,
+			SeriesTitle:   ep.SeriesTitle,
+			AudioLocales:  collectAudioLangs(ep),
+			ThumbnailURL:  thumbnailFromImages(ep.Images),
+		})
+	}
+	return out, nil
+}
+
 func fillInspectSeries(result *InspectResult, contentID, primaryAudio, primarySubs string) error {
 	// Optional series poster/title — one extra CMS GET, no playback.
 	if series, err := inspectGetSeriesInfo(contentID, primarySubs); err == nil {

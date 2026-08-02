@@ -1044,11 +1044,100 @@
         chip.classList.add("is-on");
         state.selectedSeason = s.SeasonNumber;
         state.lastSeason = s.SeasonNumber;
-        renderEpisodes();
         schedulePersist();
+        // Inspect only preloads one season (usually S1). Lazily fetch others.
+        ensureSeasonEpisodesLoaded(s).then(function () {
+          renderEpisodes();
+        });
       });
       root.appendChild(chip);
     });
+  }
+
+  function seasonHasEpisodes(seasonNumber) {
+    if (!state.catalog || !state.catalog.Episodes) return false;
+    return state.catalog.Episodes.some(function (ep) {
+      return (ep.SeasonNumber || 0) === seasonNumber;
+    });
+  }
+
+  function mergeSeasonEpisodes(episodes) {
+    if (!state.catalog) state.catalog = { Episodes: [], AudioLocales: [] };
+    if (!state.catalog.Episodes) state.catalog.Episodes = [];
+    var byId = {};
+    state.catalog.Episodes.forEach(function (ep) {
+      byId[ep.ID] = true;
+    });
+    var audioSeen = {};
+    (state.catalog.AudioLocales || []).forEach(function (a) {
+      audioSeen[a] = true;
+    });
+    (episodes || []).forEach(function (raw) {
+      var ep = {
+        ID: field(raw, "ID", "id") || "",
+        SeasonNumber: field(raw, "SeasonNumber", "seasonNumber") || 0,
+        EpisodeNumber: field(raw, "EpisodeNumber", "episodeNumber") || 0,
+        Title: field(raw, "Title", "title") || "",
+        SeriesTitle: field(raw, "SeriesTitle", "seriesTitle") || "",
+        AudioLocales: field(raw, "AudioLocales", "audioLocales") || [],
+        ThumbnailURL:
+          field(raw, "ThumbnailURL", "thumbnailUrl") ||
+          field(raw, "ThumbnailURL", "thumbnailURL") ||
+          "",
+      };
+      if (!ep.ID || byId[ep.ID]) return;
+      byId[ep.ID] = true;
+      state.catalog.Episodes.push(ep);
+      (ep.AudioLocales || []).forEach(function (a) {
+        if (a && !audioSeen[a]) {
+          audioSeen[a] = true;
+          if (!state.catalog.AudioLocales) state.catalog.AudioLocales = [];
+          state.catalog.AudioLocales.push(a);
+        }
+      });
+    });
+  }
+
+  async function ensureSeasonEpisodesLoaded(season) {
+    if (!season) return;
+    var seasonNumber = season.SeasonNumber;
+    if (seasonHasEpisodes(seasonNumber)) return;
+
+    var seasonId = season.ID || "";
+    if (!seasonId) {
+      logLine("Season " + seasonNumber + " has no CMS id — cannot load episodes", "err");
+      return;
+    }
+
+    var app = goApp();
+    if (!app || typeof app.LoadSeasonEpisodes !== "function") {
+      logLine("LoadSeasonEpisodes binding missing", "err");
+      return;
+    }
+
+    if (els.episodes) {
+      els.episodes.innerHTML =
+        '<span class="muted-hint">Loading season ' + seasonNumber + "…</span>";
+    }
+    logLine("Loading episodes for season " + seasonNumber + "…", "info");
+    try {
+      var rows = await app.LoadSeasonEpisodes(seasonId);
+      mergeSeasonEpisodes(rows || []);
+      // Refresh audio list if new locales appeared
+      renderAudio();
+      logLine(
+        "Season " +
+          seasonNumber +
+          " · " +
+          (rows ? rows.length : 0) +
+          " episode(s)",
+        "ok"
+      );
+    } catch (err) {
+      var msg = errMessage(err);
+      showBanner("Could not load season " + seasonNumber + ": " + msg, "err");
+      logLine("Season " + seasonNumber + " load failed: " + msg, "err");
+    }
   }
 
   function renderEpisodes() {

@@ -71,6 +71,34 @@ func (a *App) Inspect(req engine.InspectRequest) (engine.InspectResult, error) {
 	return engine.Inspect(req, cfg)
 }
 
+// LoadSeasonEpisodes fetches episode list for one season CMS id (lazy load when
+// the user switches seasons). Auth uses the saved cookie path. Returns catalog
+// rows only — no playback open.
+func (a *App) LoadSeasonEpisodes(seasonID string) ([]engine.CatalogEpisode, error) {
+	a.mu.Lock()
+	prefs := a.prefs
+	a.mu.Unlock()
+
+	cookie := strings.TrimSpace(prefs.CookieFile)
+	if cookie == "" {
+		return nil, fmt.Errorf("cookie file path is not configured")
+	}
+	if err := engine.AuthenticateFromCookieFile(cookie); err != nil {
+		return nil, err
+	}
+
+	primaryAudio := "ja-JP"
+	if len(prefs.AudioLangs) > 0 && strings.TrimSpace(prefs.AudioLangs[0]) != "" {
+		primaryAudio = prefs.AudioLangs[0]
+	}
+	primarySubs := "en-US"
+	if len(prefs.SubtitleLangs) > 0 && strings.TrimSpace(prefs.SubtitleLangs[0]) != "" {
+		primarySubs = prefs.SubtitleLangs[0]
+	}
+
+	return engine.ListSeasonEpisodes(seasonID, primaryAudio, primarySubs)
+}
+
 // StartDownload begins a multi-episode download job in a background goroutine.
 // Progress is pushed as "progress" runtime events. Only one job may run at a time.
 func (a *App) StartDownload(job engine.DownloadJob) error {
