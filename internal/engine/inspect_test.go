@@ -62,6 +62,43 @@ func TestListAudioQualitiesFromMPD(t *testing.T) {
 	}
 }
 
+// High-bandwidth video must not be mislabeled as 192k audio.
+// A mixed MPD with 1080p video (Bandwidth >> 192k) and only 96k audio must list solely "96k".
+func TestListAudioQualitiesIgnoresVideoBandwidth(t *testing.T) {
+	h1080 := uint64(1080)
+	idVideo := "video/avc1/1920x1080"
+	// Typical progressive video bitrate far above 192 kbps.
+	bwVideo := uint64(5_000_000)
+	idAudio := "audio/ja-JP/96k"
+	bwAudio := uint64(96000)
+	manifest := &mpd.MPD{
+		Period: []*mpd.Period{{
+			AdaptationSets: []*mpd.AdaptationSet{
+				{
+					Representations: []mpd.Representation{
+						{ID: &idVideo, Height: &h1080, Bandwidth: &bwVideo, BaseURL: []*mpd.BaseURL{{Value: "https://cdn.example/v1080"}}},
+					},
+				},
+				{
+					Representations: []mpd.Representation{
+						{ID: &idAudio, Bandwidth: &bwAudio, BaseURL: []*mpd.BaseURL{{Value: "https://cdn.example/a96"}}},
+					},
+				},
+			},
+		}},
+	}
+	got := ListAudioQualities(manifest)
+	if len(got) != 1 || got[0] != "96k" {
+		t.Fatalf("want [96k] only (no 192k from video), got %v", got)
+	}
+	// Bare "192" in video ID (1920) must never yield 192k.
+	for _, q := range got {
+		if q == "192k" || q == "128k" {
+			t.Fatalf("unexpected quality %q from mixed video/audio MPD: %v", q, got)
+		}
+	}
+}
+
 func TestListVideoQualitiesNilSafe(t *testing.T) {
 	if got := ListVideoQualities(nil); len(got) != 0 {
 		t.Fatalf("nil manifest: got %v", got)

@@ -96,6 +96,8 @@ func ListVideoQualities(manifest *mpd.MPD) []string {
 }
 
 // ListAudioQualities returns detected audio quality labels (192k/128k/96k), highest first.
+// Only audio representations are considered (Height == nil and ID looks like audio).
+// Video reps with high bandwidth must not be labeled as audio bitrates.
 func ListAudioQualities(manifest *mpd.MPD) []string {
 	if manifest == nil {
 		return nil
@@ -121,7 +123,11 @@ func ListAudioQualities(manifest *mpd.MPD) []string {
 				continue
 			}
 			for i := range set.Representations {
-				add(detectAudioQualityLabel(&set.Representations[i]))
+				rep := &set.Representations[i]
+				if !isAudioRepresentation(rep) {
+					continue
+				}
+				add(detectAudioQualityLabel(rep))
 			}
 		}
 	}
@@ -131,19 +137,43 @@ func ListAudioQualities(manifest *mpd.MPD) []string {
 	return qualities
 }
 
+// isAudioRepresentation reports whether a DASH representation is an audio track.
+// Video representations have Height set; Crunchyroll audio IDs typically contain "audio/".
+func isAudioRepresentation(rep *mpd.Representation) bool {
+	if rep == nil {
+		return false
+	}
+	// Pure video (or any visual) stream — never treat as audio.
+	if rep.Height != nil {
+		return false
+	}
+	if rep.ID != nil {
+		id := *rep.ID
+		// Prefer explicit audio/ IDs (same check as getBaseUrl).
+		if strings.Contains(id, "audio/") {
+			return true
+		}
+		// Explicit video IDs without height still skip.
+		if strings.Contains(id, "video/") {
+			return false
+		}
+	}
+	// Height-less rep without a video/ ID: treat as audio candidate
+	// (bandwidth-only matching for non-standard IDs).
+	return true
+}
+
+// detectAudioQualityLabel maps an audio representation to 192k/128k/96k.
+// ID patterns are preferred (matching getBaseUrl's quality substring check on full
+// labels like "192k"), then bandwidth heuristics. Bare "192"/"128"/"96" substrings
+// are avoided so video IDs containing "1920" never match.
 func detectAudioQualityLabel(rep *mpd.Representation) string {
 	if rep == nil {
 		return ""
 	}
 	if rep.ID != nil {
-		id := *rep.ID
-		switch {
-		case strings.Contains(id, "192"):
-			return "192k"
-		case strings.Contains(id, "128"):
-			return "128k"
-		case strings.Contains(id, "96"):
-			return "96k"
+		if label := audioQualityFromID(*rep.ID); label != "" {
+			return label
 		}
 	}
 	if rep.Bandwidth != nil {
@@ -155,6 +185,48 @@ func detectAudioQualityLabel(rep *mpd.Representation) string {
 			return "128k"
 		case bw >= 96000:
 			return "96k"
+		}
+	}
+	return ""
+}
+
+// audioQualityFromID extracts a bitrate label from a representation ID.
+// Matches full quality tokens used by getBaseUrl ("192k") and path suffixes
+// like "/192k", never a bare "192" that would hit "1920" in video dimensions.
+func audioQualityFromID(id string) string {
+	// Prefer longest / most specific labels first.
+	for _, label := range []string{"192k", "128k", "96k"} {
+		if strings.Contains(id, label) {
+			return label
+		}
+	}
+	// Also accept trailing path bitrate without "k" only when delimited:
+	// e.g. ".../192" or ".../192/" — not "1920".
+	for _, num := range []struct {
+		token string
+		label string
+	}{
+		{"/192k", "192k"},
+		{"/128k", "128k"},
+		{"/96k", "96k"},
+		{"/192/", "192k"},
+		{"/128/", "128k"},
+		{"/96/", "96k"},
+	} {
+		if strings.Contains(id, num.token) {
+			return num.label
+		}
+	}
+	for _, num := range []struct {
+		suffix string
+		label  string
+	}{
+		{"/192", "192k"},
+		{"/128", "128k"},
+		{"/96", "96k"},
+	} {
+		if strings.HasSuffix(id, num.suffix) {
+			return num.label
 		}
 	}
 	return ""
