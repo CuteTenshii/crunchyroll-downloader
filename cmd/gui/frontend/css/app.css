@@ -697,11 +697,87 @@ textarea.cr-input {
   overflow: auto;
   min-height: 0;
   flex: 1 1 auto;
+  position: relative;
+  /* Always-visible thin scrollbar so overflow is obvious */
+  scrollbar-width: thin;
+  scrollbar-color: var(--accent) var(--panel2);
 }
 
 .check-list.compact {
   max-height: min(28vh, 200px);
   flex: 0 1 auto;
+}
+
+/* Fade edges when more content is off-screen */
+.check-list.scroll-more-bottom {
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    #000 0%,
+    #000 calc(100% - 32px),
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to bottom,
+    #000 0%,
+    #000 calc(100% - 32px),
+    transparent 100%
+  );
+}
+
+.check-list.scroll-more-top {
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    transparent 0%,
+    #000 28px,
+    #000 100%
+  );
+  mask-image: linear-gradient(
+    to bottom,
+    transparent 0%,
+    #000 28px,
+    #000 100%
+  );
+}
+
+.check-list.scroll-more-top.scroll-more-bottom {
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    transparent 0%,
+    #000 24px,
+    #000 calc(100% - 28px),
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to bottom,
+    transparent 0%,
+    #000 24px,
+    #000 calc(100% - 28px),
+    transparent 100%
+  );
+}
+
+/* “More below” chevron when list overflows */
+.check-list.scroll-hint-bottom::after {
+  content: "▾ more";
+  position: sticky;
+  bottom: 0;
+  display: block;
+  margin-top: 2px;
+  padding: 4px 0 2px;
+  text-align: center;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent-soft);
+  background: linear-gradient(
+    to bottom,
+    transparent 0%,
+    var(--panel) 40%,
+    var(--panel) 100%
+  );
+  pointer-events: none;
+  z-index: 1;
 }
 
 .cr-check {
@@ -1209,7 +1285,22 @@ textarea.cr-input {
   width: 8px;
 }
 
-.check-list::-webkit-scrollbar-thumb,
+.check-list::-webkit-scrollbar-track {
+  background: var(--panel2);
+  border-radius: 999px;
+}
+
+.check-list::-webkit-scrollbar-thumb {
+  background: var(--accent);
+  border-radius: 999px;
+  border: 2px solid var(--panel2);
+}
+
+.activity-log::-webkit-scrollbar,
+.cr-dd-menu::-webkit-scrollbar {
+  width: 8px;
+}
+
 .activity-log::-webkit-scrollbar-thumb,
 .cr-dd-menu::-webkit-scrollbar-thumb {
   background: var(--line2);

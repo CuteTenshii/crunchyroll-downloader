@@ -783,23 +783,44 @@
     }
   }
 
+  function ensureLocalWidevinePaths() {
+    // Prefer explicit prefs; otherwise point Advanced fields at CDMs next to the app repo.
+    // Engine also auto-discovers these; this keeps the UI honest about what will be used.
+    var base =
+      "C:\\Users\\Admin\\Documents\\Github\\crunchyroll-downloader";
+    if (!state.clientIdPath) {
+      state.clientIdPath = base + "\\client_id.bin";
+    }
+    if (!state.privateKeyPath) {
+      state.privateKeyPath = base + "\\private_key.pem";
+    }
+  }
+
   async function loadPreferences() {
     var app = goApp();
     if (!app || typeof app.GetPreferences !== "function") {
       logLine("Preferences: runtime not ready (browser preview)", "warn");
+      ensureLocalWidevinePaths();
       syncAdvancedInputsFromState();
       return;
     }
     try {
       var prefs = await app.GetPreferences();
       applyPreferences(prefs);
+      ensureLocalWidevinePaths();
+      syncAdvancedInputsFromState();
+      schedulePersist();
       if (state.cookieFile) {
         logLine("Loaded preferences · cookie path set", "ok");
       } else {
         logLine("Loaded preferences", "ok");
       }
+      if (state.clientIdPath && state.privateKeyPath) {
+        logLine("Widevine CDM paths ready", "ok");
+      }
     } catch (err) {
       logLine("Failed to load preferences: " + errMessage(err), "err");
+      ensureLocalWidevinePaths();
       syncAdvancedInputsFromState();
     }
   }
@@ -1236,6 +1257,44 @@
       });
       root.appendChild(row);
     });
+    refreshScrollHints(root);
+  }
+
+  /** Selected locales first, then optional preferred (e.g. original), then A–Z. */
+  function sortLocalesSelectedFirst(locales, selectedMap, preferredCode) {
+    return (locales || []).slice().sort(function (a, b) {
+      var aOn = !!(selectedMap && selectedMap[a]);
+      var bOn = !!(selectedMap && selectedMap[b]);
+      if (aOn !== bOn) return aOn ? -1 : 1;
+      if (preferredCode) {
+        if (a === preferredCode && b !== preferredCode) return -1;
+        if (b === preferredCode && a !== preferredCode) return 1;
+      }
+      return localeLabel(a).localeCompare(localeLabel(b), undefined, {
+        sensitivity: "base",
+      });
+    });
+  }
+
+  /** Fade/“more” cues when a check-list can scroll. */
+  function refreshScrollHints(el) {
+    if (!el || !el.classList || !el.classList.contains("check-list")) return;
+    function update() {
+      var can = el.scrollHeight > el.clientHeight + 2;
+      var top = el.scrollTop > 2;
+      var bottom = el.scrollTop + el.clientHeight < el.scrollHeight - 2;
+      el.classList.toggle("can-scroll", can);
+      el.classList.toggle("scroll-more-top", can && top);
+      el.classList.toggle("scroll-more-bottom", can && bottom);
+      el.classList.toggle("scroll-hint-bottom", can && bottom);
+    }
+    if (!el._scrollHintsWired) {
+      el._scrollHintsWired = true;
+      el.addEventListener("scroll", update, { passive: true });
+    }
+    requestAnimationFrame(function () {
+      requestAnimationFrame(update);
+    });
   }
 
   function renderAudio() {
@@ -1246,9 +1305,12 @@
       (state.catalog && state.catalog.AudioLocales) || [];
     if (!locales.length) {
       root.innerHTML = '<span class="muted-hint">Available after Inspect</span>';
+      root.classList.remove("can-scroll", "scroll-more-top", "scroll-more-bottom", "scroll-hint-bottom");
       return;
     }
     var original = (state.catalog && state.catalog.OriginalAudio) || "";
+    // Selected (e.g. Japanese) first so you don't scroll past the whole list.
+    locales = sortLocalesSelectedFirst(locales, state.selectedAudio, original);
     locales.forEach(function (code) {
       var on = !!state.selectedAudio[code];
       var extra =
@@ -1262,14 +1324,15 @@
         labelHtml: label,
         onClick: function () {
           var next = !row.classList.contains("is-on");
-          row.classList.toggle("is-on", next);
           if (next) state.selectedAudio[code] = true;
           else delete state.selectedAudio[code];
           schedulePersist();
+          renderAudio(); // re-sort selected to top
         },
       });
       root.appendChild(row);
     });
+    refreshScrollHints(root);
   }
 
   function renderSubs() {
@@ -1284,16 +1347,18 @@
       onClick: function () {
         state.noSubtitles = true;
         state.selectedSubs = {};
-        root.querySelectorAll(".cr-check").forEach(function (r) {
-          r.classList.remove("is-on");
-        });
-        noneRow.classList.add("is-on");
         schedulePersist();
+        renderSubs();
       },
     });
     root.appendChild(noneRow);
 
     var locales = (state.catalog && state.catalog.SubtitleLocales) || [];
+    locales = sortLocalesSelectedFirst(
+      locales,
+      state.noSubtitles ? {} : state.selectedSubs,
+      null
+    );
     locales.forEach(function (code) {
       var on = !state.noSubtitles && !!state.selectedSubs[code];
       var row = renderCheckbox({
@@ -1305,24 +1370,20 @@
           if (next) {
             state.noSubtitles = false;
             state.selectedSubs[code] = true;
-            noneRow.classList.remove("is-on");
-            row.classList.add("is-on");
           } else {
             delete state.selectedSubs[code];
-            row.classList.remove("is-on");
             var any = Object.keys(state.selectedSubs).some(function (k) {
               return state.selectedSubs[k];
             });
-            if (!any) {
-              state.noSubtitles = true;
-              noneRow.classList.add("is-on");
-            }
+            if (!any) state.noSubtitles = true;
           }
           schedulePersist();
+          renderSubs();
         },
       });
       root.appendChild(row);
     });
+    refreshScrollHints(root);
   }
 
   function renderCaptions() {
@@ -1338,11 +1399,8 @@
         state.noCaptions = true;
         state.selectedCaptions = {};
         state.captionLangs = [];
-        root.querySelectorAll(".cr-check").forEach(function (r) {
-          r.classList.remove("is-on");
-        });
-        noneRow.classList.add("is-on");
         schedulePersist();
+        renderCaptions();
       },
     });
     root.appendChild(noneRow);
@@ -1353,6 +1411,11 @@
     extra.forEach(function (code) {
       if (locales.indexOf(code) < 0) locales = locales.concat([code]);
     });
+    locales = sortLocalesSelectedFirst(
+      locales,
+      state.noCaptions ? {} : state.selectedCaptions,
+      null
+    );
 
     if (!locales.length && state.noCaptions) {
       // Keep No CC only until Inspect discovers caption tracks.
@@ -1369,25 +1432,21 @@
           if (next) {
             state.noCaptions = false;
             state.selectedCaptions[code] = true;
-            noneRow.classList.remove("is-on");
-            row.classList.add("is-on");
           } else {
             delete state.selectedCaptions[code];
-            row.classList.remove("is-on");
             var any = Object.keys(state.selectedCaptions).some(function (k) {
               return state.selectedCaptions[k];
             });
-            if (!any) {
-              state.noCaptions = true;
-              noneRow.classList.add("is-on");
-            }
+            if (!any) state.noCaptions = true;
           }
           state.captionLangs = selectedCaptionLangs();
           schedulePersist();
+          renderCaptions();
         },
       });
       root.appendChild(row);
     });
+    refreshScrollHints(root);
   }
 
   function displayQuality(val, isVideo) {
