@@ -49,11 +49,28 @@ button {
   cursor: pointer;
 }
 
+html,
+body {
+  height: 100%;
+  overflow: hidden;
+}
+
 .app {
-  min-height: 100vh;
+  height: 100vh;
+  max-height: 100vh;
   display: flex;
   flex-direction: column;
   background: var(--bg);
+  overflow: hidden;
+}
+
+/* Fixed top chrome: title, mode, URL, series hero — content scrolls below */
+.app-chrome {
+  flex: 0 0 auto;
+  z-index: 50;
+  background: var(--bg);
+  border-bottom: 1px solid var(--line);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.35);
 }
 
 /* ── Header ── */
@@ -309,10 +326,11 @@ button {
   display: flex;
   align-items: center;
   gap: 14px;
-  margin-bottom: 12px;
-  padding: 10px 12px;
-  border-radius: 12px;
-  border: 1px solid var(--line);
+  margin: 0;
+  padding: 10px 18px;
+  border-radius: 0;
+  border: 0;
+  border-top: 1px solid var(--line);
   background: var(--panel);
 }
 
@@ -396,19 +414,29 @@ button {
   cursor: not-allowed;
 }
 
-/* ── Workspace (full-width main form) ── */
+/* ── Workspace (only this region scrolls under fixed chrome) ── */
 .workspace {
   flex: 1 1 auto;
   display: flex;
   flex-direction: column;
   min-height: 0;
-  padding: 14px 18px 10px;
+  padding: 12px 18px 10px;
   overflow: auto;
 }
 
 .main-pane {
   min-width: 0;
   flex: 1 1 auto;
+}
+
+/* Three columns fill available height so lists share space evenly */
+.view.is-on > .cols {
+  min-height: min(100%, 520px);
+}
+
+.view.is-on > .cols > .panel {
+  min-height: 0;
+  max-height: none;
 }
 
 .view {
@@ -443,7 +471,7 @@ button {
   border: 1px solid var(--line);
   background: var(--panel);
   padding: 14px;
-  min-height: 320px;
+  min-height: 0;
   display: flex;
   flex-direction: column;
 }
@@ -689,37 +717,37 @@ textarea.cr-input {
 }
 
 /* ── Custom checkboxes ── */
+/* Episode list: ~5 rows visible; 6th peeks under bottom fade */
 .check-list {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  max-height: min(42vh, 360px);
+  max-height: 280px; /* ~5 episode rows with thumbs */
   overflow: auto;
   min-height: 0;
   flex: 1 1 auto;
   position: relative;
-  /* Always-visible thin scrollbar so overflow is obvious */
   scrollbar-width: thin;
   scrollbar-color: var(--accent) var(--panel2);
 }
 
 .check-list.compact {
-  max-height: min(28vh, 200px);
-  flex: 0 1 auto;
+  max-height: 160px; /* audio / subs — shorter so panels balance */
+  flex: 1 1 auto;
 }
 
-/* Fade edges when more content is off-screen */
+/* Fade edges only (no “more” label) when content overflows */
 .check-list.scroll-more-bottom {
   -webkit-mask-image: linear-gradient(
     to bottom,
     #000 0%,
-    #000 calc(100% - 32px),
+    #000 calc(100% - 36px),
     transparent 100%
   );
   mask-image: linear-gradient(
     to bottom,
     #000 0%,
-    #000 calc(100% - 32px),
+    #000 calc(100% - 36px),
     transparent 100%
   );
 }
@@ -744,40 +772,16 @@ textarea.cr-input {
     to bottom,
     transparent 0%,
     #000 24px,
-    #000 calc(100% - 28px),
+    #000 calc(100% - 36px),
     transparent 100%
   );
   mask-image: linear-gradient(
     to bottom,
     transparent 0%,
     #000 24px,
-    #000 calc(100% - 28px),
+    #000 calc(100% - 36px),
     transparent 100%
   );
-}
-
-/* “More below” chevron when list overflows */
-.check-list.scroll-hint-bottom::after {
-  content: "▾ more";
-  position: sticky;
-  bottom: 0;
-  display: block;
-  margin-top: 2px;
-  padding: 4px 0 2px;
-  text-align: center;
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--accent-soft);
-  background: linear-gradient(
-    to bottom,
-    transparent 0%,
-    var(--panel) 40%,
-    var(--panel) 100%
-  );
-  pointer-events: none;
-  z-index: 1;
 }
 
 .cr-check {

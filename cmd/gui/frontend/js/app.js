@@ -1276,7 +1276,7 @@
     });
   }
 
-  /** Fade/“more” cues when a check-list can scroll. */
+  /** Edge fade when a check-list can scroll (shading only, no “more” label). */
   function refreshScrollHints(el) {
     if (!el || !el.classList || !el.classList.contains("check-list")) return;
     function update() {
@@ -1286,7 +1286,6 @@
       el.classList.toggle("can-scroll", can);
       el.classList.toggle("scroll-more-top", can && top);
       el.classList.toggle("scroll-more-bottom", can && bottom);
-      el.classList.toggle("scroll-hint-bottom", can && bottom);
     }
     if (!el._scrollHintsWired) {
       el._scrollHintsWired = true;
@@ -1305,7 +1304,7 @@
       (state.catalog && state.catalog.AudioLocales) || [];
     if (!locales.length) {
       root.innerHTML = '<span class="muted-hint">Available after Inspect</span>';
-      root.classList.remove("can-scroll", "scroll-more-top", "scroll-more-bottom", "scroll-hint-bottom");
+      root.classList.remove("can-scroll", "scroll-more-top", "scroll-more-bottom");
       return;
     }
     var original = (state.catalog && state.catalog.OriginalAudio) || "";

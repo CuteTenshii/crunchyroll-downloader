@@ -9,48 +9,52 @@
 </head>
 <body>
   <div class="app">
-    <header class="header">
-      <div class="brand">
-        <div class="brand-mark" aria-hidden="true">CR</div>
-        <div class="brand-text">
-          <div class="brand-title">Crunchyroll Downloader</div>
-          <div class="brand-sub">Local · authorized account only</div>
+    <!-- Fixed top chrome (Android TopAppBar-style): stays put while content scrolls -->
+    <div class="app-chrome">
+      <header class="header">
+        <div class="brand">
+          <div class="brand-mark" aria-hidden="true">CR</div>
+          <div class="brand-text">
+            <div class="brand-title">Crunchyroll Downloader</div>
+            <div class="brand-sub">Local · authorized account only</div>
+          </div>
+        </div>
+        <div class="mode-toggle" role="tablist" aria-label="Mode">
+          <button type="button" class="mode-btn is-on" id="mode-normal" data-mode="normal" role="tab" aria-selected="true">Normal</button>
+          <button type="button" class="mode-btn" id="mode-advanced" data-mode="advanced" role="tab" aria-selected="false">Advanced</button>
+        </div>
+      </header>
+
+      <div id="banner" class="banner err" role="alert" hidden>
+        <span class="banner-dot" aria-hidden="true"></span>
+        <div class="banner-body" id="banner-text"></div>
+        <button type="button" class="banner-close" id="banner-close" aria-label="Dismiss">×</button>
+      </div>
+
+      <div class="toolbar">
+        <input
+          class="cr-input"
+          type="text"
+          id="url"
+          placeholder="Paste series or episode URL…"
+          spellcheck="false"
+          autocomplete="off"
+        />
+        <button type="button" class="cr-btn cr-btn-ghost" id="btn-cookie" title="Set etp_rt cookie file path">Cookie</button>
+        <button type="button" class="cr-btn cr-btn-primary" id="btn-inspect">Inspect</button>
+      </div>
+
+      <div id="media-hero" class="media-hero" hidden>
+        <img id="media-poster" class="media-poster" alt="" />
+        <div class="media-hero-text">
+          <div class="media-hero-kicker" id="media-kicker">Title</div>
+          <div class="media-hero-title" id="media-title">—</div>
         </div>
       </div>
-      <div class="mode-toggle" role="tablist" aria-label="Mode">
-        <button type="button" class="mode-btn is-on" id="mode-normal" data-mode="normal" role="tab" aria-selected="true">Normal</button>
-        <button type="button" class="mode-btn" id="mode-advanced" data-mode="advanced" role="tab" aria-selected="false">Advanced</button>
-      </div>
-    </header>
-
-    <div id="banner" class="banner err" role="alert" hidden>
-      <span class="banner-dot" aria-hidden="true"></span>
-      <div class="banner-body" id="banner-text"></div>
-      <button type="button" class="banner-close" id="banner-close" aria-label="Dismiss">×</button>
-    </div>
-
-    <div class="toolbar">
-      <input
-        class="cr-input"
-        type="text"
-        id="url"
-        placeholder="Paste series or episode URL…"
-        spellcheck="false"
-        autocomplete="off"
-      />
-      <button type="button" class="cr-btn cr-btn-ghost" id="btn-cookie" title="Set etp_rt cookie file path">Cookie</button>
-      <button type="button" class="cr-btn cr-btn-primary" id="btn-inspect">Inspect</button>
     </div>
 
     <div class="workspace">
       <div class="main-pane" id="main-pane">
-        <div id="media-hero" class="media-hero" hidden>
-          <img id="media-poster" class="media-poster" alt="" />
-          <div class="media-hero-text">
-            <div class="media-hero-kicker" id="media-kicker">Title</div>
-            <div class="media-hero-title" id="media-title">—</div>
-          </div>
-        </div>
         <div id="view-normal" class="view is-on" role="tabpanel">
           <div class="cols">
             <!-- Col 1: Seasons + Episodes -->
