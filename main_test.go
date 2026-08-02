@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 )
@@ -39,6 +40,26 @@ func TestLoadETPRTRequiresFileEvenWhenLegacyEnvironmentValueExists(t *testing.T)
 	t.Setenv("CRUNCHYROLL_ETP_RT", "legacy-value-must-not-be-used")
 	if _, err := loadETPRT(""); err == nil || err.Error() != "provide --etp-rt-file with a 0600 regular file" {
 		t.Fatalf("expected file-only credential error, got %v", err)
+	}
+}
+
+func TestIsValidContentID(t *testing.T) {
+	valid := []string{
+		"GWDU82Z05",        // classic episode
+		"GE00198973JAJP",   // locale-tagged episode
+		"GMEE00374450JAJP", // movie (16 chars; previously rejected by 14-char cap)
+		"GJ0H7Q5ZJ",        // series
+	}
+	for _, id := range valid {
+		if !isValidContentID(id) {
+			t.Fatalf("expected valid content id %q", id)
+		}
+	}
+	invalid := []string{"", "short", "has-dash", "has_under", strings.Repeat("A", 33)}
+	for _, id := range invalid {
+		if isValidContentID(id) {
+			t.Fatalf("expected invalid content id %q", id)
+		}
 	}
 }
 

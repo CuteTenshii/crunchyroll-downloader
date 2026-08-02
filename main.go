@@ -182,6 +182,20 @@ func parseLangs(s string) []string {
 	return out
 }
 
+// isValidContentID accepts Crunchyroll watch/series provider IDs.
+// Movies and some catalog rows use longer IDs than classic episodes.
+func isValidContentID(id string) bool {
+	if len(id) < 6 || len(id) > 32 {
+		return false
+	}
+	for _, r := range id {
+		if (r < 'A' || r > 'Z') && (r < 'a' || r > 'z') && (r < '0' || r > '9') {
+			return false
+		}
+	}
+	return true
+}
+
 func processUrl(url string) (err error) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
@@ -194,14 +208,24 @@ func processUrl(url string) (err error) {
 		}
 	}()
 
+	// Strip query/fragment so pasted browser URLs still parse.
+	if i := strings.IndexAny(url, "?#"); i >= 0 {
+		url = url[:i]
+	}
+	url = strings.TrimRight(url, "/")
+
 	parts := strings.Split(url, "/")
 	if len(parts) < 5 {
 		return fmt.Errorf("Invalid URL format: %s", url)
 	}
 	contentType := parts[3]
 	contentId := parts[4]
-	if len(contentId) < 9 || len(contentId) > 14 {
-		return fmt.Errorf("Invalid URL format: %s", url)
+	// Crunchyroll IDs vary by content type: classic episode IDs are ~9 chars
+	// (e.g. GWDU82Z05), locale-tagged IDs ~14 (GE00198973JAJP), and movies can
+	// be 16+ (GMEE00374450JAJP). Accept a broad alphanumeric range rather than
+	// a hard 14-char cap that rejects movies.
+	if !isValidContentID(contentId) {
+		return fmt.Errorf("Invalid URL format (bad content id %q): %s", contentId, url)
 	}
 	if contentType != "watch" && contentType != "series" {
 		return fmt.Errorf("Invalid URL (must be /watch/ or /series/): %s", url)
