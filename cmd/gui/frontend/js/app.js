@@ -484,6 +484,7 @@
       showBanner(msg || "Cancelled", "warn");
     } else if (level === "ok" && phase === "done") {
       showBanner(msg || "All done", "ok");
+      offerOpenOutputFolder();
     } else if (level === "warn" && /4294|backoff|rate/i.test(msg)) {
       showBanner(msg, "warn");
     }
@@ -491,6 +492,49 @@
     if (phase === "done" && state.downloading) {
       setDownloading(false);
     }
+  }
+
+  function currentOutputDir() {
+    return (
+      (els.output && els.output.value.trim()) ||
+      state.outputDir ||
+      "./Downloads"
+    );
+  }
+
+  /** Append a one-shot "Open output folder" control after a successful job. */
+  function offerOpenOutputFolder() {
+    if (!els.activity) return;
+    var app = goApp();
+    if (!app || typeof app.OpenOutputFolder !== "function") return;
+
+    // Avoid stacking duplicate offers for repeated terminal events.
+    var existing = els.activity.querySelector("[data-open-output]");
+    if (existing) existing.remove();
+
+    var dir = currentOutputDir();
+    var row = document.createElement("div");
+    row.className = "ok";
+    row.setAttribute("data-open-output", "1");
+    row.appendChild(document.createTextNode("Finished · "));
+    var btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "cr-btn cr-btn-ghost";
+    btn.style.cssText =
+      "display:inline-block;padding:2px 10px;font-size:12px;vertical-align:baseline;";
+    btn.textContent = "Open output folder";
+    btn.addEventListener("click", async function () {
+      try {
+        await app.OpenOutputFolder(dir);
+        logLine("Opened folder: " + dir, "ok");
+      } catch (err) {
+        logLine("Could not open folder: " + errMessage(err), "err");
+        showBanner("Could not open folder: " + errMessage(err), "err");
+      }
+    });
+    row.appendChild(btn);
+    els.activity.appendChild(row);
+    els.activity.scrollTop = els.activity.scrollHeight;
   }
 
   function subscribeProgress() {
@@ -1353,7 +1397,23 @@
     // Seasons intentionally untouched.
   }
 
-  function onCookie() {
+  async function onCookie() {
+    var app = goApp();
+    if (app && typeof app.PickCookieFile === "function") {
+      try {
+        var picked = await app.PickCookieFile();
+        if (picked == null || picked === "") return; // cancelled
+        state.cookieFile = String(picked).trim();
+        logLine("Cookie path set", "ok");
+        schedulePersist();
+        return;
+      } catch (err) {
+        logLine("Cookie file dialog failed: " + errMessage(err), "err");
+        showBanner("Cookie file dialog failed: " + errMessage(err), "err");
+        return;
+      }
+    }
+    // Browser preview fallback when Wails bindings are unavailable.
     var current = state.cookieFile || "";
     var path = window.prompt(
       "Path to etp_rt cookie file (regular file, private):",
@@ -1370,8 +1430,25 @@
     schedulePersist();
   }
 
-  function onOutputBrowse() {
-    var current = (els.output && els.output.value) || state.outputDir || "./Downloads";
+  async function onOutputBrowse() {
+    var app = goApp();
+    if (app && typeof app.PickOutputDir === "function") {
+      try {
+        var picked = await app.PickOutputDir();
+        if (picked == null || picked === "") return; // cancelled
+        var dir = String(picked).trim() || "./Downloads";
+        state.outputDir = dir;
+        if (els.output) els.output.value = dir;
+        schedulePersist();
+        return;
+      } catch (err) {
+        logLine("Output folder dialog failed: " + errMessage(err), "err");
+        showBanner("Output folder dialog failed: " + errMessage(err), "err");
+        return;
+      }
+    }
+    var current =
+      (els.output && els.output.value) || state.outputDir || "./Downloads";
     var path = window.prompt("Output folder path:", current);
     if (path == null) return;
     path = path.trim();
@@ -1509,6 +1586,16 @@
     return path.trim();
   }
 
+  async function pickDevicePath(title) {
+    var app = goApp();
+    if (app && typeof app.PickDeviceFile === "function") {
+      var picked = await app.PickDeviceFile(title || "Select file");
+      if (picked == null || picked === "") return null; // cancelled
+      return String(picked).trim();
+    }
+    return promptPath(title, "");
+  }
+
   function wirePathField(inputEl, btnEl, title, apply) {
     function commit(path) {
       if (path == null) return;
@@ -1517,9 +1604,14 @@
       schedulePersist();
     }
     if (btnEl) {
-      btnEl.addEventListener("click", function () {
-        var cur = inputEl ? inputEl.value.trim() : "";
-        commit(promptPath(title, cur));
+      btnEl.addEventListener("click", async function () {
+        try {
+          var path = await pickDevicePath(title);
+          commit(path);
+        } catch (err) {
+          logLine("File dialog failed: " + errMessage(err), "err");
+          showBanner("File dialog failed: " + errMessage(err), "err");
+        }
       });
     }
     if (inputEl) {

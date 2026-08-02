@@ -4,13 +4,16 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
 
 	"crunchyroll-downloader/internal/engine"
 
-	"github.com/wailsapp/wails/v2/pkg/runtime"
+	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 // App is the Wails-bound application shell: preferences, Inspect, and download jobs.
@@ -98,7 +101,7 @@ func (a *App) StartDownload(job engine.DownloadJob) error {
 		}()
 
 		emit := func(ev engine.ProgressEvent) {
-			runtime.EventsEmit(parent, "progress", ev)
+			wailsruntime.EventsEmit(parent, "progress", ev)
 		}
 
 		// Authenticate from prefs cookie path (secrets stay on disk).
@@ -239,4 +242,90 @@ func applyWidevineEnvFromPrefs(p engine.Preferences) {
 	if v := strings.TrimSpace(p.PrivateKeyPath); v != "" {
 		_ = os.Setenv("CRUNCHYROLL_WIDEVINE_PRIVATE_KEY_FILE", v)
 	}
+}
+
+// PickCookieFile opens a native file dialog for selecting the etp_rt cookie file.
+// Returns an empty string when the user cancels.
+func (a *App) PickCookieFile() (string, error) {
+	if a.ctx == nil {
+		return "", fmt.Errorf("app not started")
+	}
+	return wailsruntime.OpenFileDialog(a.ctx, wailsruntime.OpenDialogOptions{
+		Title: "Select etp_rt cookie file",
+	})
+}
+
+// PickOutputDir opens a native directory dialog for the download output folder.
+// Returns an empty string when the user cancels.
+func (a *App) PickOutputDir() (string, error) {
+	if a.ctx == nil {
+		return "", fmt.Errorf("app not started")
+	}
+	return wailsruntime.OpenDirectoryDialog(a.ctx, wailsruntime.OpenDialogOptions{
+		Title: "Output folder",
+	})
+}
+
+// PickDeviceFile opens a native file dialog with the given title (Widevine paths, etc.).
+// Returns an empty string when the user cancels.
+func (a *App) PickDeviceFile(title string) (string, error) {
+	if a.ctx == nil {
+		return "", fmt.Errorf("app not started")
+	}
+	title = strings.TrimSpace(title)
+	if title == "" {
+		title = "Select file"
+	}
+	return wailsruntime.OpenFileDialog(a.ctx, wailsruntime.OpenDialogOptions{
+		Title: title,
+	})
+}
+
+// OpenOutputFolder reveals path in the system file manager.
+// Creates the directory when missing. On Windows uses explorer; elsewhere
+// falls back to a file:// URL via the Wails runtime.
+func (a *App) OpenOutputFolder(path string) error {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return fmt.Errorf("output path is empty")
+	}
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return fmt.Errorf("resolve output path: %w", err)
+	}
+	info, err := os.Stat(abs)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			return fmt.Errorf("stat output path: %w", err)
+		}
+		if mkErr := os.MkdirAll(abs, 0o755); mkErr != nil {
+			return fmt.Errorf("create output directory %q: %w", abs, mkErr)
+		}
+		info, err = os.Stat(abs)
+		if err != nil {
+			return fmt.Errorf("stat created output path: %w", err)
+		}
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("output path is not a directory: %s", abs)
+	}
+
+	if runtime.GOOS == "windows" {
+		cmd := exec.Command("explorer", abs)
+		if err := cmd.Start(); err != nil {
+			return fmt.Errorf("open explorer: %w", err)
+		}
+		return nil
+	}
+
+	if a.ctx == nil {
+		return fmt.Errorf("app not started")
+	}
+	// file:/// with forward slashes works on macOS/Linux file managers via browser helper.
+	url := "file://" + filepath.ToSlash(abs)
+	if !strings.HasPrefix(abs, "/") {
+		url = "file:///" + filepath.ToSlash(abs)
+	}
+	wailsruntime.BrowserOpenURL(a.ctx, url)
+	return nil
 }
