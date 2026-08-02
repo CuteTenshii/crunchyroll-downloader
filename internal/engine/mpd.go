@@ -42,6 +42,9 @@ func parseManifest(url string) *mpd.MPD {
 func getBaseUrl(set *mpd.AdaptationSet, isVideoSet bool, quality string) (*string, *string) {
 	var bestVideo *mpd.Representation
 	var bestVideoHeight uint64
+	var bestAudio *mpd.Representation
+	var bestAudioBandwidth uint64
+	wantMax := strings.EqualFold(strings.TrimSpace(quality), "max")
 	requestedVideoHeight, requestedVideoHeightErr := strconv.ParseUint(strings.TrimSuffix(quality, "p"), 10, 64)
 
 	for representationIndex := range set.Representations {
@@ -50,7 +53,7 @@ func getBaseUrl(set *mpd.AdaptationSet, isVideoSet bool, quality string) (*strin
 			if representation.Height == nil || len(representation.BaseURL) == 0 || representation.ID == nil {
 				continue
 			}
-			if requestedVideoHeightErr == nil && *representation.Height == requestedVideoHeight {
+			if !wantMax && requestedVideoHeightErr == nil && *representation.Height == requestedVideoHeight {
 				return &representation.BaseURL[0].Value, representation.ID
 			}
 			if *representation.Height > bestVideoHeight {
@@ -58,6 +61,19 @@ func getBaseUrl(set *mpd.AdaptationSet, isVideoSet bool, quality string) (*strin
 				bestVideoHeight = *representation.Height
 			}
 		} else {
+			if representation.ID == nil || len(representation.BaseURL) == 0 {
+				continue
+			}
+			// Track highest-bandwidth audio for "max" quality selection.
+			if representation.Bandwidth != nil && *representation.Bandwidth > bestAudioBandwidth {
+				bestAudio = representation
+				bestAudioBandwidth = *representation.Bandwidth
+			} else if bestAudio == nil {
+				bestAudio = representation
+			}
+			if wantMax {
+				continue
+			}
 			if strings.Contains(*representation.ID, "audio/") {
 				if strings.Contains(*representation.ID, quality) {
 					return &representation.BaseURL[0].Value, representation.ID
@@ -77,8 +93,20 @@ func getBaseUrl(set *mpd.AdaptationSet, isVideoSet bool, quality string) (*strin
 		}
 	}
 	if isVideoSet && bestVideo != nil {
-		fmt.Printf("Video quality %s not found, deferring to %dp (%s)\n", quality, bestVideoHeight, *bestVideo.ID)
+		if wantMax {
+			fmt.Printf("Video quality max → %dp (%s)\n", bestVideoHeight, *bestVideo.ID)
+		} else {
+			fmt.Printf("Video quality %s not found, deferring to %dp (%s)\n", quality, bestVideoHeight, *bestVideo.ID)
+		}
 		return &bestVideo.BaseURL[0].Value, bestVideo.ID
+	}
+	if !isVideoSet && bestAudio != nil {
+		if wantMax {
+			fmt.Printf("Audio quality max → %s\n", *bestAudio.ID)
+		} else {
+			fmt.Printf("Audio quality %s not found, deferring to %s\n", quality, *bestAudio.ID)
+		}
+		return &bestAudio.BaseURL[0].Value, bestAudio.ID
 	}
 	if len(set.Representations) == 0 {
 		return nil, nil

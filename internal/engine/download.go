@@ -190,6 +190,10 @@ func downloadParts(baseUrl, representationId *string, set *mpd.AdaptationSet) (s
 		go func() {
 			defer wg.Done()
 			for job := range jobs {
+				if err := jobDownloadCancelled(); err != nil {
+					errOnce.Do(func() { downloadErr = err })
+					return
+				}
 				data, err := downloadPart(job.url)
 				if err != nil {
 					errOnce.Do(func() { downloadErr = err })
@@ -198,11 +202,17 @@ func downloadParts(baseUrl, representationId *string, set *mpd.AdaptationSet) (s
 				results[job.index] = data
 				count := done.Add(1)
 				fmt.Printf("\rDownloaded %v of %v segments (%v%%)", count, total, (100*count)/int64(total))
+				emitSegmentProgress(int(count), total)
 			}
 		}()
 	}
 
 	for i, item := range timeline {
+		if err := jobDownloadCancelled(); err != nil {
+			close(jobs)
+			wg.Wait()
+			return "", err
+		}
 		url := buildUrl(*baseUrl, *representationId, *set.SegmentTemplate.Media, &item)
 		jobs <- segmentJob{index: i, url: url}
 	}
