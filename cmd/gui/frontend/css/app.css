@@ -258,14 +258,14 @@ button {
 }
 
 .cr-btn-primary {
-  background: linear-gradient(180deg, #fb923c, var(--accent2));
+  background: var(--accent);
   color: #0c0a09;
   padding: 11px 18px;
   font-weight: 700;
 }
 
 .cr-btn-primary:hover:not(:disabled) {
-  filter: brightness(1.05);
+  background: #ea580c;
 }
 
 .cr-btn-ghost {
@@ -286,18 +286,18 @@ button {
   padding: 12px 16px;
   border: 0;
   border-radius: 12px;
-  background: linear-gradient(180deg, #fb923c, #ea580c);
+  background: var(--accent);
   color: #0c0a09;
   font-weight: 700;
   font-size: 14px;
   letter-spacing: 0.02em;
   text-align: center;
   cursor: pointer;
-  transition: filter 0.15s ease, opacity 0.15s ease;
+  transition: background-color 0.15s ease, opacity 0.15s ease;
 }
 
 .cr-btn-download:hover:not(:disabled) {
-  filter: brightness(1.05);
+  background: #ea580c;
 }
 
 .cr-btn-download:disabled {
