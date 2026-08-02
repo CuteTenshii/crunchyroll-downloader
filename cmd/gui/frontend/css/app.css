@@ -398,20 +398,128 @@ button {
   padding: 8px 4px;
 }
 
-.advanced-stub {
-  border-radius: 12px;
-  border: 1px solid var(--line);
-  background: var(--panel);
-  padding: 28px 20px;
-  color: var(--muted);
-  font-size: 13px;
-  line-height: 1.5;
-  text-align: center;
+/* ── Advanced panel extras ── */
+.adv-lead {
+  margin: -4px 0 14px;
 }
 
-.advanced-stub strong {
-  color: var(--accent-soft);
-  font-weight: 600;
+.cr-hint {
+  font-size: 11px;
+  color: var(--faint);
+  line-height: 1.4;
+  margin: 0 0 10px;
+}
+
+.cr-label-sm {
+  margin-bottom: 6px;
+}
+
+.cr-field {
+  margin-bottom: 12px;
+}
+
+.cr-field:last-child {
+  margin-bottom: 0;
+}
+
+.cr-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.cr-num {
+  width: 100%;
+  padding: 9px 11px;
+  border-radius: 10px;
+  border: 1px solid var(--line2);
+  background: var(--panel2);
+  color: var(--text);
+  font-size: 12.5px;
+  outline: none;
+  transition: border-color 0.18s ease, box-shadow 0.18s ease;
+}
+
+.cr-num:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(249, 115, 22, 0.16);
+}
+
+.cr-textarea {
+  resize: vertical;
+  min-height: 88px;
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+
+.cr-input.sm {
+  padding: 9px 11px;
+  font-size: 12px;
+}
+
+.cr-toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.cr-toggle-row:last-child {
+  border-bottom: 0;
+}
+
+.cr-toggle-title {
+  font-size: 12.5px;
+  color: var(--text);
+}
+
+.cr-switch {
+  width: 40px;
+  height: 22px;
+  border-radius: 999px;
+  border: 1px solid var(--line2);
+  background: var(--panel2);
+  position: relative;
+  cursor: pointer;
+  flex: 0 0 auto;
+  padding: 0;
+  transition: background 0.2s ease, border-color 0.2s ease;
+}
+
+.cr-switch::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--muted);
+  transition: transform 0.2s ease, background 0.2s ease;
+}
+
+.cr-switch.is-on {
+  background: rgba(249, 115, 22, 0.25);
+  border-color: var(--accent);
+}
+
+.cr-switch.is-on::after {
+  transform: translateX(18px);
+  background: var(--accent);
+}
+
+.adv-btn-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+textarea.cr-input {
+  font: inherit;
+  color: inherit;
 }
 
 /* ── Season chips ── */
@@ -829,14 +937,16 @@ button {
 }
 
 /* Cancel stays clickable while the form is dimmed during download */
-.main-pane.is-busy #btn-download.is-cancel {
+.main-pane.is-busy #btn-download.is-cancel,
+.main-pane.is-busy #btn-download-adv.is-cancel {
   pointer-events: auto;
   opacity: 1;
   position: relative;
   z-index: 2;
 }
 
-#btn-download.is-cancel {
+#btn-download.is-cancel,
+#btn-download-adv.is-cancel {
   background: linear-gradient(180deg, #78716c 0%, #57534e 100%);
   border-color: #57534e;
 }

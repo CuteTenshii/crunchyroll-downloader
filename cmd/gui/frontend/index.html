@@ -118,9 +118,121 @@
         </div>
 
         <div id="view-advanced" class="view" role="tabpanel" hidden>
-          <div class="advanced-stub">
-            <strong>Advanced</strong><br />
-            Coming in Advanced task
+          <p class="cr-hint adv-lead">
+            Advanced keeps everything from Normal, and adds power-user tools. Defaults still apply until you change them (saved as preferences).
+          </p>
+          <div class="cols">
+            <!-- Col 1: Closed captions + Batch URLs -->
+            <section class="panel">
+              <span class="cr-label">Closed captions (CC)</span>
+              <p class="cr-hint">Downloaded in addition to subtitles. Default: none.</p>
+              <div id="cc-list" class="check-list compact">
+                <button type="button" class="cr-check is-on" data-cc="none" id="cc-none-default">
+                  <span class="cr-box" aria-hidden="true">
+                    <svg class="cr-tick" viewBox="0 0 12 12" fill="none">
+                      <path d="M2.2 6.2L4.8 8.8L9.8 3.2" stroke="#0c0a09" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                  </span>
+                  <span class="cr-check-label">No CC</span>
+                </button>
+              </div>
+
+              <span class="cr-label" style="margin-top: 14px">Batch URLs</span>
+              <p class="cr-hint">One URL per line, or pick a list file.</p>
+              <textarea
+                class="cr-input cr-textarea"
+                id="batch-urls"
+                rows="4"
+                spellcheck="false"
+                placeholder="https://www.crunchyroll.com/watch/…&#10;https://www.crunchyroll.com/series/…"
+              ></textarea>
+              <button type="button" class="cr-btn cr-btn-ghost" id="btn-batch-file" style="margin-top: 8px; width: 100%">Load .txt list…</button>
+            </section>
+
+            <!-- Col 2: Widevine paths + probe toggles -->
+            <section class="panel">
+              <span class="cr-label">Widevine device</span>
+              <p class="cr-hint">Paths only — secrets stay in files. Env vars also work.</p>
+              <div class="cr-field">
+                <span class="cr-label cr-label-sm">Device .wvd</span>
+                <div class="output-row">
+                  <input class="cr-input sm" type="text" id="wvd-path" placeholder="Optional single .wvd path" spellcheck="false" />
+                  <button type="button" class="cr-btn cr-btn-ghost" id="btn-wvd" title="Set .wvd path">…</button>
+                </div>
+              </div>
+              <div class="cr-field">
+                <span class="cr-label cr-label-sm">client_id.bin</span>
+                <div class="output-row">
+                  <input class="cr-input sm" type="text" id="client-id-path" placeholder="Optional client_id.bin path" spellcheck="false" />
+                  <button type="button" class="cr-btn cr-btn-ghost" id="btn-client-id" title="Set client_id.bin path">…</button>
+                </div>
+              </div>
+              <div class="cr-field">
+                <span class="cr-label cr-label-sm">private_key.pem</span>
+                <div class="output-row">
+                  <input class="cr-input sm" type="text" id="private-key-path" placeholder="Optional private_key.pem path" spellcheck="false" />
+                  <button type="button" class="cr-btn cr-btn-ghost" id="btn-private-key" title="Set private_key.pem path">…</button>
+                </div>
+              </div>
+
+              <span class="cr-label" style="margin-top: 6px">Probe &amp; languages</span>
+              <div class="cr-toggle-row">
+                <div>
+                  <div class="cr-toggle-title">Probe every selected episode</div>
+                  <div class="cr-hint" style="margin: 0">Slower · more accurate langs per ep</div>
+                </div>
+                <button type="button" class="cr-switch" id="sw-probe-every" aria-label="Probe every episode" aria-pressed="false"></button>
+              </div>
+              <div class="cr-toggle-row">
+                <div>
+                  <div class="cr-toggle-title">Debug manifest logging</div>
+                  <div class="cr-hint" style="margin: 0">Verbose playback / MPD logs</div>
+                </div>
+                <button type="button" class="cr-switch" id="sw-debug-manifest" aria-label="Debug manifest" aria-pressed="false"></button>
+              </div>
+              <div class="cr-toggle-row">
+                <div>
+                  <div class="cr-toggle-title">Strict languages</div>
+                  <div class="cr-hint" style="margin: 0">Stop queue on missing locales</div>
+                </div>
+                <button type="button" class="cr-switch" id="sw-strict-langs" aria-label="Strict languages" aria-pressed="false"></button>
+              </div>
+            </section>
+
+            <!-- Col 3: Retries + index tools + download -->
+            <section class="panel">
+              <span class="cr-label">Retries &amp; circuit</span>
+              <div class="cr-row">
+                <div class="cr-field">
+                  <span class="cr-label cr-label-sm">4294 retries</span>
+                  <input class="cr-num" type="number" id="num-4294-retries" value="2" min="0" max="5" />
+                </div>
+                <div class="cr-field">
+                  <span class="cr-label cr-label-sm">Backoff (sec)</span>
+                  <input class="cr-num" type="number" id="num-4294-backoff" value="8" min="1" max="60" />
+                </div>
+              </div>
+              <div class="cr-row">
+                <div class="cr-field">
+                  <span class="cr-label cr-label-sm">Circuit limit</span>
+                  <input class="cr-num" type="number" id="num-circuit-limit" value="3" min="1" max="10" />
+                </div>
+                <div class="cr-field">
+                  <span class="cr-label cr-label-sm">Index window</span>
+                  <input class="cr-num" type="number" id="num-index-window" value="25" min="1" max="100" />
+                </div>
+              </div>
+
+              <span class="cr-label" style="margin-top: 4px">Subtitle index tools</span>
+              <p class="cr-hint">Series URLs only. No video download.</p>
+              <div class="adv-btn-stack">
+                <button type="button" class="cr-btn cr-btn-ghost" id="btn-build-catalog" style="width: 100%">Build catalog (--index)</button>
+                <button type="button" class="cr-btn cr-btn-ghost" id="btn-index-subs" style="width: 100%">Index subtitles (--index-subs)</button>
+              </div>
+
+              <div class="spacer"></div>
+              <button type="button" class="cr-btn-download" id="btn-download-adv">Download selected</button>
+            </section>
           </div>
         </div>
       </div>

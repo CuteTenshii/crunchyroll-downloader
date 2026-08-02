@@ -1,6 +1,11 @@
-/* Normal mode UI + Inspect + Download job with live progress (Task 7). */
+/* Normal + Advanced mode UI, Inspect, Download, and index tools. */
 (function () {
   "use strict";
+
+  var DEFAULT_4294_RETRIES = 2;
+  var DEFAULT_4294_BACKOFF = 8;
+  var DEFAULT_CIRCUIT = 3;
+  var DEFAULT_INDEX_WINDOW = 25;
 
   var LANGUAGE_NAMES = {
     "ja-JP": "日本語",
@@ -48,16 +53,26 @@
     selectedAudio: {},
     noSubtitles: true,
     selectedSubs: {},
+    noCaptions: true,
+    selectedCaptions: {},
     videoQuality: "max",
     audioQuality: "max",
     inspecting: false,
     downloading: false,
+    indexing: false,
     lastSeason: 0,
     strictLanguages: false,
     captionLangs: [],
     wvdPath: "",
     clientIdPath: "",
     privateKeyPath: "",
+    batchUrls: "",
+    probeEveryEpisode: false,
+    debugManifest: false,
+    playback4294Retries: DEFAULT_4294_RETRIES,
+    playback4294BackoffSec: DEFAULT_4294_BACKOFF,
+    indexCircuitLimit: DEFAULT_CIRCUIT,
+    indexWindow: DEFAULT_INDEX_WINDOW,
     queueLabels: {}, // episodeId -> label for queue display
   };
 
@@ -75,12 +90,14 @@
       cookie: $("btn-cookie"),
       inspect: $("btn-inspect"),
       download: $("btn-download"),
+      downloadAdv: $("btn-download-adv"),
       output: $("output-dir"),
       outputBtn: $("btn-output"),
       seasons: $("season-chips"),
       episodes: $("episode-list"),
       audio: $("audio-list"),
       subs: $("sub-list"),
+      ccList: $("cc-list"),
       selectAll: $("select-all-eps"),
       ddVideo: $("dd-video"),
       ddAudio: $("dd-audio"),
@@ -98,6 +115,23 @@
       viewAdvanced: $("view-advanced"),
       modeNormal: $("mode-normal"),
       modeAdvanced: $("mode-advanced"),
+      batchUrls: $("batch-urls"),
+      batchFile: $("btn-batch-file"),
+      wvdPath: $("wvd-path"),
+      clientIdPath: $("client-id-path"),
+      privateKeyPath: $("private-key-path"),
+      btnWvd: $("btn-wvd"),
+      btnClientId: $("btn-client-id"),
+      btnPrivateKey: $("btn-private-key"),
+      swProbeEvery: $("sw-probe-every"),
+      swDebugManifest: $("sw-debug-manifest"),
+      swStrictLangs: $("sw-strict-langs"),
+      num4294Retries: $("num-4294-retries"),
+      num4294Backoff: $("num-4294-backoff"),
+      numCircuitLimit: $("num-circuit-limit"),
+      numIndexWindow: $("num-index-window"),
+      btnBuildCatalog: $("btn-build-catalog"),
+      btnIndexSubs: $("btn-index-subs"),
     };
   }
 
@@ -154,7 +188,7 @@
   }
 
   function formIsBusy() {
-    return !!(state.inspecting || state.downloading);
+    return !!(state.inspecting || state.downloading || state.indexing);
   }
 
   function refreshBusyChrome() {
@@ -165,6 +199,13 @@
     if (els.inspect) els.inspect.disabled = busy;
     if (els.cookie) els.cookie.disabled = busy;
     if (els.outputBtn) els.outputBtn.disabled = busy;
+    if (els.btnBuildCatalog) els.btnBuildCatalog.disabled = busy;
+    if (els.btnIndexSubs) els.btnIndexSubs.disabled = busy;
+  }
+
+  function forEachDownloadBtn(fn) {
+    if (els.download) fn(els.download);
+    if (els.downloadAdv) fn(els.downloadAdv);
   }
 
   function setBusy(busy) {
@@ -174,7 +215,7 @@
       if (els.progressBar) els.progressBar.classList.add("is-indet");
       if (els.progressLabel) els.progressLabel.textContent = "Inspect";
       if (els.progressValue) els.progressValue.textContent = "working…";
-    } else if (!state.downloading) {
+    } else if (!state.downloading && !state.indexing) {
       if (els.progressBar) els.progressBar.classList.remove("is-indet");
       if (els.progressLabel) els.progressLabel.textContent = "Progress";
       if (els.progressValue) els.progressValue.textContent = "—";
@@ -185,17 +226,17 @@
   function setDownloading(on) {
     state.downloading = !!on;
     refreshBusyChrome();
-    if (els.download) {
+    forEachDownloadBtn(function (btn) {
       if (on) {
-        els.download.textContent = "Cancel";
-        els.download.classList.add("is-cancel");
-        els.download.disabled = false;
+        btn.textContent = "Cancel";
+        btn.classList.add("is-cancel");
+        btn.disabled = false;
       } else {
-        els.download.textContent = "Download selected";
-        els.download.classList.remove("is-cancel");
-        els.download.disabled = false;
+        btn.textContent = "Download selected";
+        btn.classList.remove("is-cancel");
+        btn.disabled = false;
       }
-    }
+    });
     if (on) {
       if (els.progressBar) els.progressBar.classList.add("is-indet");
       if (els.progressLabel) els.progressLabel.textContent = "Download";
@@ -204,6 +245,97 @@
       if (els.progressBar) els.progressBar.classList.remove("is-indet");
       if (els.progressLabel) els.progressLabel.textContent = "Progress";
     }
+  }
+
+  function setIndexing(on, label) {
+    state.indexing = !!on;
+    refreshBusyChrome();
+    if (on) {
+      if (els.progressBar) els.progressBar.classList.add("is-indet");
+      if (els.progressLabel) els.progressLabel.textContent = label || "Index";
+      if (els.progressValue) els.progressValue.textContent = "working…";
+    } else if (!state.downloading && !state.inspecting) {
+      if (els.progressBar) els.progressBar.classList.remove("is-indet");
+      if (els.progressLabel) els.progressLabel.textContent = "Progress";
+      if (els.progressValue) els.progressValue.textContent = "—";
+      if (els.progressFill) els.progressFill.style.width = "0%";
+    }
+  }
+
+  function setSwitch(el, on) {
+    if (!el) return;
+    el.classList.toggle("is-on", !!on);
+    el.setAttribute("aria-pressed", on ? "true" : "false");
+  }
+
+  function readIntInput(el, fallback, min, max) {
+    if (!el) return fallback;
+    var n = parseInt(el.value, 10);
+    if (isNaN(n)) n = fallback;
+    if (typeof min === "number" && n < min) n = min;
+    if (typeof max === "number" && n > max) n = max;
+    return n;
+  }
+
+  function syncAdvancedInputsFromState() {
+    if (els.wvdPath) els.wvdPath.value = state.wvdPath || "";
+    if (els.clientIdPath) els.clientIdPath.value = state.clientIdPath || "";
+    if (els.privateKeyPath) els.privateKeyPath.value = state.privateKeyPath || "";
+    if (els.batchUrls) els.batchUrls.value = state.batchUrls || "";
+    if (els.num4294Retries) els.num4294Retries.value = String(state.playback4294Retries);
+    if (els.num4294Backoff) els.num4294Backoff.value = String(state.playback4294BackoffSec);
+    if (els.numCircuitLimit) els.numCircuitLimit.value = String(state.indexCircuitLimit);
+    if (els.numIndexWindow) els.numIndexWindow.value = String(state.indexWindow);
+    setSwitch(els.swProbeEvery, state.probeEveryEpisode);
+    setSwitch(els.swDebugManifest, state.debugManifest);
+    setSwitch(els.swStrictLangs, state.strictLanguages);
+  }
+
+  function pullAdvancedInputsToState() {
+    if (els.wvdPath) state.wvdPath = els.wvdPath.value.trim();
+    if (els.clientIdPath) state.clientIdPath = els.clientIdPath.value.trim();
+    if (els.privateKeyPath) state.privateKeyPath = els.privateKeyPath.value.trim();
+    if (els.batchUrls) state.batchUrls = els.batchUrls.value;
+    state.playback4294Retries = readIntInput(
+      els.num4294Retries,
+      DEFAULT_4294_RETRIES,
+      0,
+      5
+    );
+    state.playback4294BackoffSec = readIntInput(
+      els.num4294Backoff,
+      DEFAULT_4294_BACKOFF,
+      1,
+      60
+    );
+    state.indexCircuitLimit = readIntInput(
+      els.numCircuitLimit,
+      DEFAULT_CIRCUIT,
+      1,
+      10
+    );
+    state.indexWindow = readIntInput(
+      els.numIndexWindow,
+      DEFAULT_INDEX_WINDOW,
+      1,
+      100
+    );
+    state.probeEveryEpisode = !!(
+      els.swProbeEvery && els.swProbeEvery.classList.contains("is-on")
+    );
+    state.debugManifest = !!(
+      els.swDebugManifest && els.swDebugManifest.classList.contains("is-on")
+    );
+    state.strictLanguages = !!(
+      els.swStrictLangs && els.swStrictLangs.classList.contains("is-on")
+    );
+  }
+
+  function selectedCaptionLangs() {
+    if (state.noCaptions) return [];
+    return Object.keys(state.selectedCaptions).filter(function (k) {
+      return state.selectedCaptions[k];
+    });
   }
 
   /** Normalize ProgressEvent fields (json tags vs Go names). */
@@ -409,6 +541,7 @@
   /* ── Preferences ── */
 
   function collectPreferences() {
+    pullAdvancedInputsToState();
     var audioLangs = Object.keys(state.selectedAudio).filter(function (k) {
       return state.selectedAudio[k];
     });
@@ -418,6 +551,8 @@
         return state.selectedSubs[k];
       });
     }
+    var captionLangs = selectedCaptionLangs();
+    state.captionLangs = captionLangs;
     return {
       URL: (els.url && els.url.value.trim()) || state.url || "",
       CookieFile: state.cookieFile || "",
@@ -425,7 +560,7 @@
       Mode: state.mode || "normal",
       AudioLangs: audioLangs,
       SubtitleLangs: subtitleLangs,
-      CaptionLangs: state.captionLangs || [],
+      CaptionLangs: captionLangs,
       VideoQuality: state.videoQuality || "max",
       AudioQuality: state.audioQuality || "max",
       LastSeason: state.selectedSeason || state.lastSeason || 0,
@@ -433,6 +568,12 @@
       ClientIDPath: state.clientIdPath || "",
       PrivateKeyPath: state.privateKeyPath || "",
       StrictLanguages: !!state.strictLanguages,
+      Playback4294Retries: state.playback4294Retries,
+      Playback4294BackoffSec: state.playback4294BackoffSec,
+      IndexWindow: state.indexWindow,
+      IndexCircuitLimit: state.indexCircuitLimit,
+      DebugManifest: !!state.debugManifest,
+      ProbeEveryEpisode: !!state.probeEveryEpisode,
     };
   }
 
@@ -466,26 +607,73 @@
       setDropdownValue(els.ddAudio, aq, displayQuality(aq, false));
     }
     if (last) state.lastSeason = Number(last) || 0;
-    if (mode === "advanced" || mode === "normal") {
-      setMode(mode);
-    }
+
     var strict =
       p.StrictLanguages != null ? p.StrictLanguages : p.strictLanguages;
     if (strict != null) state.strictLanguages = !!strict;
+
     var caps = p.CaptionLangs != null ? p.CaptionLangs : p.captionLangs;
-    if (Array.isArray(caps)) state.captionLangs = caps.slice();
+    if (Array.isArray(caps)) {
+      state.captionLangs = caps.slice();
+      state.selectedCaptions = {};
+      state.noCaptions = true;
+      caps.forEach(function (code) {
+        if (!code) return;
+        state.selectedCaptions[code] = true;
+        state.noCaptions = false;
+      });
+    }
+
     var wvd = p.WVDPath != null ? p.WVDPath : p.wvdPath;
     if (wvd != null) state.wvdPath = wvd || "";
     var cid = p.ClientIDPath != null ? p.ClientIDPath : p.clientIdPath;
     if (cid != null) state.clientIdPath = cid || "";
     var pk = p.PrivateKeyPath != null ? p.PrivateKeyPath : p.privateKeyPath;
     if (pk != null) state.privateKeyPath = pk || "";
+
+    var probe =
+      p.ProbeEveryEpisode != null ? p.ProbeEveryEpisode : p.probeEveryEpisode;
+    if (probe != null) state.probeEveryEpisode = !!probe;
+    var dbg = p.DebugManifest != null ? p.DebugManifest : p.debugManifest;
+    if (dbg != null) state.debugManifest = !!dbg;
+
+    // Engine treats 0 / omitempty as "use default" for these numerics.
+    var r =
+      p.Playback4294Retries != null
+        ? p.Playback4294Retries
+        : p.playback4294Retries;
+    if (r != null && Number(r) > 0) {
+      state.playback4294Retries = Number(r);
+    }
+
+    var b =
+      p.Playback4294BackoffSec != null
+        ? p.Playback4294BackoffSec
+        : p.playback4294BackoffSec;
+    if (b != null && Number(b) > 0) {
+      state.playback4294BackoffSec = Number(b);
+    }
+
+    var iw = p.IndexWindow != null ? p.IndexWindow : p.indexWindow;
+    if (iw != null && Number(iw) > 0) state.indexWindow = Number(iw);
+
+    var ic =
+      p.IndexCircuitLimit != null ? p.IndexCircuitLimit : p.indexCircuitLimit;
+    if (ic != null && Number(ic) > 0) state.indexCircuitLimit = Number(ic);
+
+    syncAdvancedInputsFromState();
+    renderCaptions();
+
+    if (mode === "advanced" || mode === "normal") {
+      setMode(mode);
+    }
   }
 
   async function loadPreferences() {
     var app = goApp();
     if (!app || typeof app.GetPreferences !== "function") {
       logLine("Preferences: runtime not ready (browser preview)", "warn");
+      syncAdvancedInputsFromState();
       return;
     }
     try {
@@ -498,6 +686,7 @@
       }
     } catch (err) {
       logLine("Failed to load preferences: " + errMessage(err), "err");
+      syncAdvancedInputsFromState();
     }
   }
 
@@ -505,46 +694,6 @@
     var app = goApp();
     if (!app || typeof app.SavePreferences !== "function") return;
     var p = collectPreferences();
-    // Merge advanced numerics/toggles that Normal UI does not edit.
-    try {
-      var current = await app.GetPreferences();
-      if (current && typeof current === "object") {
-        if (!p.WVDPath) {
-          p.WVDPath = current.WVDPath || current.wvdPath || state.wvdPath || "";
-        }
-        if (!p.ClientIDPath) {
-          p.ClientIDPath =
-            current.ClientIDPath || current.clientIdPath || state.clientIdPath || "";
-        }
-        if (!p.PrivateKeyPath) {
-          p.PrivateKeyPath =
-            current.PrivateKeyPath ||
-            current.privateKeyPath ||
-            state.privateKeyPath ||
-            "";
-        }
-        if (!p.CaptionLangs || !p.CaptionLangs.length) {
-          p.CaptionLangs =
-            current.CaptionLangs || current.captionLangs || state.captionLangs || [];
-        }
-        if (current.Playback4294Retries != null) {
-          p.Playback4294Retries = current.Playback4294Retries;
-        }
-        if (current.Playback4294BackoffSec != null) {
-          p.Playback4294BackoffSec = current.Playback4294BackoffSec;
-        }
-        if (current.IndexWindow != null) p.IndexWindow = current.IndexWindow;
-        if (current.IndexCircuitLimit != null) {
-          p.IndexCircuitLimit = current.IndexCircuitLimit;
-        }
-        if (current.DebugManifest != null) p.DebugManifest = current.DebugManifest;
-        if (current.ProbeEveryEpisode != null) {
-          p.ProbeEveryEpisode = current.ProbeEveryEpisode;
-        }
-      }
-    } catch (e) {
-      /* first-run ok */
-    }
     try {
       await app.SavePreferences(p);
     } catch (err) {
@@ -630,6 +779,7 @@
     renderEpisodes();
     renderAudio();
     renderSubs();
+    renderCaptions();
     renderQualities();
   }
 
@@ -798,6 +948,71 @@
     });
   }
 
+  function renderCaptions() {
+    var root = els.ccList;
+    if (!root) return;
+    root.innerHTML = "";
+
+    var noneRow = renderCheckbox({
+      on: state.noCaptions,
+      dataset: { cc: "none" },
+      labelHtml: "No CC",
+      onClick: function () {
+        state.noCaptions = true;
+        state.selectedCaptions = {};
+        state.captionLangs = [];
+        root.querySelectorAll(".cr-check").forEach(function (r) {
+          r.classList.remove("is-on");
+        });
+        noneRow.classList.add("is-on");
+        schedulePersist();
+      },
+    });
+    root.appendChild(noneRow);
+
+    var locales = (state.catalog && state.catalog.CaptionLocales) || [];
+    // Also surface previously selected caption codes even if inspect had none.
+    var extra = Object.keys(state.selectedCaptions || {});
+    extra.forEach(function (code) {
+      if (locales.indexOf(code) < 0) locales = locales.concat([code]);
+    });
+
+    if (!locales.length && state.noCaptions) {
+      // Keep No CC only until Inspect discovers caption tracks.
+    }
+
+    locales.forEach(function (code) {
+      var on = !state.noCaptions && !!state.selectedCaptions[code];
+      var row = renderCheckbox({
+        on: on,
+        dataset: { cc: code },
+        labelHtml: escapeHtml(localeLabel(code)) + " [CC]",
+        onClick: function () {
+          var next = !row.classList.contains("is-on");
+          if (next) {
+            state.noCaptions = false;
+            state.selectedCaptions[code] = true;
+            noneRow.classList.remove("is-on");
+            row.classList.add("is-on");
+          } else {
+            delete state.selectedCaptions[code];
+            row.classList.remove("is-on");
+            var any = Object.keys(state.selectedCaptions).some(function (k) {
+              return state.selectedCaptions[k];
+            });
+            if (!any) {
+              state.noCaptions = true;
+              noneRow.classList.add("is-on");
+            }
+          }
+          state.captionLangs = selectedCaptionLangs();
+          schedulePersist();
+        },
+      });
+      root.appendChild(row);
+    });
+  }
+
   function displayQuality(val, isVideo) {
     if (!val || val === "max") return "max";
     return val;
@@ -947,6 +1162,23 @@
     state.noSubtitles = true;
     state.selectedSubs = {};
 
+    // Captions: keep prior selection if still available; else default none
+    var availableCC = result.CaptionLocales || [];
+    if (availableCC.length && !state.noCaptions) {
+      var nextCaps = {};
+      Object.keys(state.selectedCaptions).forEach(function (code) {
+        if (availableCC.indexOf(code) >= 0) nextCaps[code] = true;
+      });
+      state.selectedCaptions = nextCaps;
+      state.noCaptions = !Object.keys(nextCaps).length;
+      state.captionLangs = selectedCaptionLangs();
+    } else if (!availableCC.length) {
+      // Inspect found no CC — keep No CC exclusive default for UI
+      state.noCaptions = true;
+      state.selectedCaptions = {};
+      state.captionLangs = [];
+    }
+
     // Video/audio quality: first entry if non-empty (max first), else "max"
     if ((result.VideoQualities || []).length) {
       state.videoQuality = "max";
@@ -1027,28 +1259,53 @@
     setBusy(true);
     logLine("Inspecting " + url + "…", "info");
     state.url = url;
+    pullAdvancedInputsToState();
+
+    // Always probe playback once for subs/CC/qualities. Multi-episode probing
+    // (ProbeEveryEpisode) is stored in prefs for future multi-probe work;
+    // Task 8 still uses a single probe pass.
+    if (state.probeEveryEpisode) {
+      logLine(
+        "Probe every episode is enabled — Inspect still probes once for catalog qualities (per-ep probe deferred)",
+        "warn"
+      );
+    }
+
+    var audioHint = Object.keys(state.selectedAudio).filter(function (k) {
+      return state.selectedAudio[k];
+    })[0] || "";
+    var subsHint = "";
+    if (!state.noSubtitles) {
+      subsHint =
+        Object.keys(state.selectedSubs).filter(function (k) {
+          return state.selectedSubs[k];
+        })[0] || "";
+    }
 
     var req = {
       URL: url,
       ETPRTFile: state.cookieFile,
-      PrimaryAudioHint: "",
-      PrimarySubsHint: "",
+      PrimaryAudioHint: audioHint,
+      PrimarySubsHint: subsHint,
       ProbePlayback: true,
       ProbeContentID: "",
     };
 
     try {
+      await persistPrefs();
       var result = await app.Inspect(req);
       applyDefaults(result);
       await persistPrefs();
       var epCount = (result.Episodes || []).length;
       var seasonCount = (result.Seasons || []).length;
+      var ccCount = (result.CaptionLocales || []).length;
       logLine(
         "Inspect complete · " +
           epCount +
           " episode(s)" +
           (seasonCount ? ", " + seasonCount + " season(s)" : "") +
-          (result.OriginalAudio ? " · original " + result.OriginalAudio : ""),
+          (result.OriginalAudio ? " · original " + result.OriginalAudio : "") +
+          (ccCount ? " · " + ccCount + " CC locale(s)" : ""),
         "ok"
       );
       if ((result.VideoQualities || []).length) {
@@ -1144,6 +1401,7 @@
   }
 
   function buildDownloadJob() {
+    pullAdvancedInputsToState();
     var epIds = selectedEpisodeIdsInCatalogOrder();
     var audio = Object.keys(state.selectedAudio).filter(function (k) {
       return state.selectedAudio[k];
@@ -1154,9 +1412,8 @@
         return state.selectedSubs[k];
       });
     }
-    var captions = Array.isArray(state.captionLangs)
-      ? state.captionLangs.slice()
-      : [];
+    var captions = selectedCaptionLangs();
+    state.captionLangs = captions;
     var output =
       (els.output && els.output.value.trim()) || state.outputDir || "./Downloads";
     return {
@@ -1233,13 +1490,133 @@
         job.AudioLangs.join(",") +
         (job.SubtitleLangs.length
           ? " · subs " + job.SubtitleLangs.join(",")
-          : " · no subs"),
+          : " · no subs") +
+        (job.CaptionLangs.length
+          ? " · CC " + job.CaptionLangs.join(",")
+          : "") +
+        (job.StrictLangs ? " · strict langs" : ""),
       "ok"
     );
     if (els.queue) {
       els.queue.textContent =
         "Queued · " + job.EpisodeIDs.length + " episode(s)";
     }
+  }
+
+  function promptPath(title, current) {
+    var path = window.prompt(title, current || "");
+    if (path == null) return null;
+    return path.trim();
+  }
+
+  function wirePathField(inputEl, btnEl, title, apply) {
+    function commit(path) {
+      if (path == null) return;
+      apply(path);
+      if (inputEl) inputEl.value = path;
+      schedulePersist();
+    }
+    if (btnEl) {
+      btnEl.addEventListener("click", function () {
+        var cur = inputEl ? inputEl.value.trim() : "";
+        commit(promptPath(title, cur));
+      });
+    }
+    if (inputEl) {
+      inputEl.addEventListener("change", function () {
+        commit(inputEl.value.trim());
+      });
+    }
+  }
+
+  function wireSwitch(el, apply) {
+    if (!el) return;
+    el.addEventListener("click", function () {
+      var next = !el.classList.contains("is-on");
+      setSwitch(el, next);
+      apply(next);
+      schedulePersist();
+    });
+  }
+
+  function wireNumber(el, apply) {
+    if (!el) return;
+    var handler = function () {
+      pullAdvancedInputsToState();
+      apply();
+      schedulePersist();
+    };
+    el.addEventListener("change", handler);
+    el.addEventListener("blur", handler);
+  }
+
+  async function onBuildIndex(fetchSubs) {
+    clearBanner();
+    if (formIsBusy()) return;
+
+    var url = (els.url && els.url.value.trim()) || state.url || "";
+    if (!url) {
+      showBanner("Paste a series URL in the toolbar first.", "warn");
+      logLine("Index blocked: missing URL", "warn");
+      return;
+    }
+    if (!state.cookieFile) {
+      showBanner("Cookie file path required for index tools.", "err");
+      logLine("Index blocked: no cookie path", "err");
+      return;
+    }
+    if (url.indexOf("/series/") < 0) {
+      showBanner("Index tools require a /series/ URL.", "warn");
+      logLine("Index blocked: not a series URL", "warn");
+      return;
+    }
+
+    var app = goApp();
+    if (!app || typeof app.BuildIndex !== "function") {
+      showBanner("Go bindings unavailable. Run inside the Wails app.", "err");
+      logLine("Index failed: window.go.main.App.BuildIndex missing", "err");
+      return;
+    }
+
+    pullAdvancedInputsToState();
+    await persistPrefs();
+
+    var label = fetchSubs ? "Index subtitles" : "Build catalog";
+    setIndexing(true, label);
+    logLine(label + " · " + url + "…", "info");
+
+    try {
+      await app.BuildIndex(url, !!fetchSubs);
+      showBanner(label + " finished", "ok");
+      logLine(label + " complete", "ok");
+    } catch (err) {
+      var msg = errMessage(err);
+      showBanner(label + " failed: " + msg, "err");
+      logLine(label + " error: " + msg, "err");
+    } finally {
+      setIndexing(false);
+    }
+  }
+
+  function onLoadBatchFile() {
+    var path = promptPath(
+      "Path to a .txt file with one Crunchyroll URL per line:",
+      ""
+    );
+    if (path == null || !path) return;
+    // Browser sandbox cannot read arbitrary files; ask the user to paste if needed.
+    // When a native dialog lands (Task 9), this can load contents automatically.
+    logLine(
+      "Batch list path noted: " +
+        path +
+        " — paste file contents into Batch URLs (native open deferred)",
+      "warn"
+    );
+    if (els.batchUrls && !els.batchUrls.value.trim()) {
+      els.batchUrls.placeholder =
+        "Paste URLs from " + path + " (one per line)…";
+    }
+    schedulePersist();
   }
 
   function wireUI() {
@@ -1257,6 +1634,7 @@
     if (els.cookie) els.cookie.addEventListener("click", onCookie);
     if (els.outputBtn) els.outputBtn.addEventListener("click", onOutputBrowse);
     if (els.download) els.download.addEventListener("click", onDownload);
+    if (els.downloadAdv) els.downloadAdv.addEventListener("click", onDownload);
     if (els.selectAll) {
       els.selectAll.addEventListener("click", onSelectAllEpisodes);
     }
@@ -1279,6 +1657,65 @@
       });
     }
 
+    wirePathField(els.wvdPath, els.btnWvd, "Path to Widevine .wvd device file:", function (p) {
+      state.wvdPath = p;
+    });
+    wirePathField(
+      els.clientIdPath,
+      els.btnClientId,
+      "Path to client_id.bin:",
+      function (p) {
+        state.clientIdPath = p;
+      }
+    );
+    wirePathField(
+      els.privateKeyPath,
+      els.btnPrivateKey,
+      "Path to private_key.pem:",
+      function (p) {
+        state.privateKeyPath = p;
+      }
+    );
+
+    if (els.batchUrls) {
+      els.batchUrls.addEventListener("change", function () {
+        state.batchUrls = els.batchUrls.value;
+        schedulePersist();
+      });
+      els.batchUrls.addEventListener("input", function () {
+        state.batchUrls = els.batchUrls.value;
+      });
+    }
+    if (els.batchFile) {
+      els.batchFile.addEventListener("click", onLoadBatchFile);
+    }
+
+    wireSwitch(els.swProbeEvery, function (on) {
+      state.probeEveryEpisode = on;
+    });
+    wireSwitch(els.swDebugManifest, function (on) {
+      state.debugManifest = on;
+    });
+    wireSwitch(els.swStrictLangs, function (on) {
+      state.strictLanguages = on;
+    });
+
+    wireNumber(els.num4294Retries, function () {});
+    wireNumber(els.num4294Backoff, function () {});
+    wireNumber(els.numCircuitLimit, function () {});
+    wireNumber(els.numIndexWindow, function () {});
+
+    if (els.btnBuildCatalog) {
+      els.btnBuildCatalog.addEventListener("click", function () {
+        onBuildIndex(false);
+      });
+    }
+    if (els.btnIndexSubs) {
+      els.btnIndexSubs.addEventListener("click", function () {
+        onBuildIndex(true);
+      });
+    }
+
     document.querySelectorAll(".cr-dd").forEach(wireDropdown);
     document.addEventListener("click", function () {
       document.querySelectorAll(".cr-dd.is-open").forEach(closeDropdown);
@@ -1288,6 +1725,7 @@
   async function init() {
     cacheEls();
     wireUI();
+    syncAdvancedInputsFromState();
     setMode("normal");
     subscribeProgress();
     await loadPreferences();

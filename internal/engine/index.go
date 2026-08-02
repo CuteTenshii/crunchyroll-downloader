@@ -754,6 +754,27 @@ func writeIndex(seriesURL, contentID, primaryAudio, primarySubs string, fetchSub
 	return writeIndexWithLoaders(seriesURL, contentID, primaryAudio, primarySubs, fetchSubs, getSeasons, getSeasonEpisodes)
 }
 
+// BuildSeriesIndex applies cfg and builds a serial metadata index for a series
+// URL (optionally fetching raw ASS subtitles when fetchSubs is true). Equivalent
+// to CLI --index / --index-subs. primaryAudio/primarySubs default to ja-JP / en-US.
+func BuildSeriesIndex(seriesURL, primaryAudio, primarySubs string, fetchSubs bool, cfg RuntimeConfig) error {
+	SetRuntimeConfig(cfg)
+	contentType, contentID, err := parseInspectURL(seriesURL)
+	if err != nil {
+		return err
+	}
+	if contentType != "series" {
+		return errors.New("index requires a /series/ URL")
+	}
+	if strings.TrimSpace(primaryAudio) == "" {
+		primaryAudio = "ja-JP"
+	}
+	if strings.TrimSpace(primarySubs) == "" {
+		primarySubs = "en-US"
+	}
+	return writeIndex(seriesURL, contentID, primaryAudio, primarySubs, fetchSubs)
+}
+
 // writeIndexWithLoaders keeps metadata acquisition injectable for deterministic
 // error-path tests while the production path uses the provider-backed loaders.
 func writeIndexWithLoaders(seriesURL, contentID, primaryAudio, primarySubs string, fetchSubs bool, loadSeasons func(string, string, string) []Season, loadEpisodes func(string, string, string) []SeasonEpisode) (err error) {

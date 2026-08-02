@@ -166,6 +166,40 @@ func (a *App) CancelDownload() {
 	}
 }
 
+// BuildIndex runs the engine metadata/subtitle index for a series URL
+// (fetchSubs=false → catalog only; true → --index-subs). Uses the cookie path
+// and language hints from saved preferences. Index tooling is CDM-free.
+func (a *App) BuildIndex(url string, fetchSubs bool) error {
+	url = strings.TrimSpace(url)
+	if url == "" {
+		return fmt.Errorf("series URL is required")
+	}
+
+	a.mu.Lock()
+	prefs := a.prefs
+	a.mu.Unlock()
+
+	cookieFile := strings.TrimSpace(prefs.CookieFile)
+	if cookieFile == "" {
+		return fmt.Errorf("cookie file path is not configured")
+	}
+	if err := engine.AuthenticateFromCookieFile(cookieFile); err != nil {
+		return err
+	}
+
+	cfg := runtimeConfigFromPrefs(prefs)
+	primaryAudio := "ja-JP"
+	if len(prefs.AudioLangs) > 0 && strings.TrimSpace(prefs.AudioLangs[0]) != "" {
+		primaryAudio = prefs.AudioLangs[0]
+	}
+	primarySubs := "en-US"
+	if len(prefs.SubtitleLangs) > 0 && strings.TrimSpace(prefs.SubtitleLangs[0]) != "" {
+		primarySubs = prefs.SubtitleLangs[0]
+	}
+
+	return engine.BuildSeriesIndex(url, primaryAudio, primarySubs, fetchSubs, cfg)
+}
+
 // runtimeConfigFromPrefs maps advanced preference fields onto RuntimeConfig.
 func runtimeConfigFromPrefs(p engine.Preferences) engine.RuntimeConfig {
 	cfg := engine.DefaultRuntimeConfig()
