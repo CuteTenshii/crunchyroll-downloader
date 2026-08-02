@@ -73,7 +73,7 @@ button {
   width: 28px;
   height: 28px;
   border-radius: 8px;
-  background: linear-gradient(145deg, #fb923c, #ea580c);
+  background: var(--accent);
   display: grid;
   place-items: center;
   font-weight: 800;
@@ -638,7 +638,7 @@ textarea.cr-input {
 
 .cr-check.is-on .cr-box {
   border-color: var(--accent);
-  background: linear-gradient(180deg, #fb923c, var(--accent2));
+  background: var(--accent);
 }
 
 .cr-tick {
@@ -990,7 +990,7 @@ textarea.cr-input {
   display: block;
   height: 100%;
   width: 0%;
-  background: linear-gradient(90deg, #fb923c, #ea580c);
+  background: var(--accent);
   border-radius: 999px;
   transition: width 0.35s ease;
 }
@@ -1064,7 +1064,7 @@ textarea.cr-input {
 
 #btn-download.is-cancel,
 #btn-download-adv.is-cancel {
-  background: linear-gradient(180deg, #78716c 0%, #57534e 100%);
+  background: #57534e;
   border-color: #57534e;
 }
 
