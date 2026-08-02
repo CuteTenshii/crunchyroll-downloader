@@ -215,19 +215,37 @@ func downloadParts(baseUrl, representationId *string, set *mpd.AdaptationSet) (s
 
 	fmt.Println("\nFinished downloading!")
 
-	var parts []byte
-	parts = append(parts, initData...)
-	for _, data := range results {
-		parts = append(parts, data...)
+	filename := getFilename(set, "")
+
+	// Stream encrypted data to disk instead of hoarding the full media in RAM
+	// (movie-length assets previously spiked to 14GB+ and OOM'd).
+	encFile, err := os.Create(filename + ".enc")
+	if err != nil {
+		return "", err
+	}
+	defer os.Remove(filename + ".enc")
+	defer encFile.Close()
+
+	if _, err := encFile.Write(initData); err != nil {
+		return "", fmt.Errorf("write init segment: %w", err)
+	}
+	for i, data := range results {
+		if _, err := encFile.Write(data); err != nil {
+			return "", fmt.Errorf("write media segment %d: %w", i, err)
+		}
+		results[i] = nil // allow GC to reclaim each segment after it hits disk
+	}
+	if _, err := encFile.Seek(0, 0); err != nil {
+		return "", fmt.Errorf("rewind encrypted temp file: %w", err)
 	}
 
-	filename := getFilename(set, "")
 	file, err := os.Create(filename)
 	if err != nil {
 		return "", err
 	}
 	defer file.Close()
-	if err = widevine.DecryptMP4Auto(io.NopCloser(bytes.NewReader(parts)), keys, file); err != nil {
+
+	if err = widevine.DecryptMP4Auto(encFile, keys, file); err != nil {
 		return "", fmt.Errorf("widevine.DecryptMP4Auto: %w", err)
 	}
 
@@ -399,24 +417,10 @@ func downloadSubs(url, format string) (string, error) {
 	return filename, nil
 }
 
-// sanitize replaces characters that are illegal in filenames or break paths,
-// collapsing repeated underscores and trimming trailing dots/spaces. Shared
-// across the download and index code paths so output paths stay consistent.
+// sanitize is the shared filename sanitizer used by download and index paths.
+// Implementation lives in utils.go as sanitizeFilename (PR #30/#31).
 func sanitize(s string) string {
-	if s == "" {
-		return "Unknown"
-	}
-
-	// Characters that are illegal in Windows filenames or break the final path
-	illegal := []string{"\\", "/", ":", "*", "?", "\"", "<", ">", "|", "'", "’", "`", "“", "”"}
-	res := s
-	for _, char := range illegal {
-		res = strings.ReplaceAll(res, char, "_")
-	}
-	for strings.Contains(res, "__") {
-		res = strings.ReplaceAll(res, "__", "_")
-	}
-	return strings.TrimRight(res, " .")
+	return sanitizeFilename(s)
 }
 
 func panicAsError(recovered any) error {
@@ -441,8 +445,8 @@ func releaseDownloadPlayback(contentID, streamToken string) (released bool, err 
 }
 
 func downloadEpisode(baseContentId string, info EpisodeInfo, audioLangs, subsLangs, ccLangs []string, videoQuality, audioQuality *string) (err error) {
-	cleanSeriesTitle := sanitize(info.EpisodeMetadata.SeriesTitle)
-	cleanEpisodeTitle := sanitize(info.Title)
+	cleanSeriesTitle := sanitizeFilename(info.EpisodeMetadata.SeriesTitle)
+	cleanEpisodeTitle := sanitizeFilename(info.Title)
 
 	if err := os.MkdirAll(cleanSeriesTitle, 0777); err != nil {
 		return fmt.Errorf("create output directory %q: %w", cleanSeriesTitle, err)
