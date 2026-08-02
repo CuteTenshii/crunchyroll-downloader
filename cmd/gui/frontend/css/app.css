@@ -607,8 +607,35 @@ textarea.cr-input {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  margin-bottom: 14px;
+  margin-bottom: 10px;
   min-height: 32px;
+}
+
+/* Crunchyroll custom season name between season tabs and episode list */
+.season-heading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 12px 10px;
+  margin: 0 0 12px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--panel2);
+  min-height: 44px;
+}
+
+.season-heading[hidden] {
+  display: none !important;
+}
+
+.season-heading-text {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  line-height: 1.35;
+  color: var(--text);
+  max-width: 100%;
 }
 
 .cr-chip {

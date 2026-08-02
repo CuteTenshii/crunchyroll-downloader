@@ -98,6 +98,8 @@
       mediaKicker: $("media-kicker"),
       mediaTitle: $("media-title"),
       seasons: $("season-chips"),
+      seasonHeading: $("season-heading"),
+      seasonHeadingText: $("season-heading-text"),
       episodes: $("episode-list"),
       audio: $("audio-list"),
       subs: $("sub-list"),
@@ -857,6 +859,11 @@
         return {
           ID: field(s, "ID", "id") || "",
           SeasonNumber: field(s, "SeasonNumber", "seasonNumber") || 0,
+          Title: field(s, "Title", "title") || "",
+          DisplayNumber:
+            field(s, "DisplayNumber", "displayNumber") ||
+            field(s, "SeasonDisplayNumber", "seasonDisplayNumber") ||
+            "",
         };
       }),
       Episodes: episodes.map(function (ep) {
@@ -906,10 +913,10 @@
       var n = ep.SeasonNumber || 0;
       if (seen[n]) return;
       seen[n] = true;
-      out.push({ ID: "s" + n, SeasonNumber: n });
+      out.push({ ID: "s" + n, SeasonNumber: n, Title: "", DisplayNumber: "" });
     });
     if (!out.length && result && result.ContentType === "watch") {
-      out.push({ ID: "watch", SeasonNumber: 0 });
+      out.push({ ID: "watch", SeasonNumber: 0, Title: "", DisplayNumber: "" });
     }
     return out;
   }
@@ -1002,11 +1009,53 @@
     state.catalog = result || null;
     renderMediaHero(result);
     renderSeasons();
+    renderSeasonHeading();
     renderEpisodes();
     renderAudio();
     renderSubs();
     renderCaptions();
     renderQualities();
+  }
+
+  /** Crunchyroll custom season label for the selected season. */
+  function seasonDisplayTitle(season) {
+    if (!season) return "";
+    var custom = (season.Title || "").trim();
+    if (custom) return custom;
+    var disp = (season.DisplayNumber || "").trim();
+    if (disp) return "Season " + disp;
+    if (season.SeasonNumber === 0) return "Episodes";
+    return "Season " + season.SeasonNumber;
+  }
+
+  function findSeasonByNumber(seasonNumber) {
+    var seasons = seasonsFromCatalog(state.catalog);
+    for (var i = 0; i < seasons.length; i++) {
+      if (seasons[i].SeasonNumber === seasonNumber) return seasons[i];
+    }
+    return null;
+  }
+
+  function renderSeasonHeading() {
+    if (!els.seasonHeading || !els.seasonHeadingText) return;
+    if (!state.catalog || state.selectedSeason == null) {
+      els.seasonHeading.hidden = true;
+      els.seasonHeadingText.textContent = "";
+      return;
+    }
+    var season = findSeasonByNumber(state.selectedSeason);
+    // Synthesized watch-only season may only have a number.
+    if (!season) {
+      season = { SeasonNumber: state.selectedSeason, Title: "", DisplayNumber: "" };
+    }
+    var title = seasonDisplayTitle(season);
+    if (!title) {
+      els.seasonHeading.hidden = true;
+      els.seasonHeadingText.textContent = "";
+      return;
+    }
+    els.seasonHeading.hidden = false;
+    els.seasonHeadingText.textContent = title;
   }
 
   function renderSeasons() {
@@ -1016,6 +1065,7 @@
     var seasons = seasonsFromCatalog(state.catalog);
     if (!seasons.length) {
       root.innerHTML = '<span class="muted-hint">Inspect a series to load seasons</span>';
+      if (els.seasonHeading) els.seasonHeading.hidden = true;
       return;
     }
     seasons.forEach(function (s) {
@@ -1026,6 +1076,7 @@
       if (s.SeasonNumber === 0 && seasons.length === 1) {
         chip.textContent = "Episode";
       } else {
+        // Keep tabs compact — full CR season name is shown below the chips.
         chip.textContent = "Season " + s.SeasonNumber;
       }
       if (state.selectedSeason === s.SeasonNumber) {
@@ -1044,6 +1095,7 @@
         chip.classList.add("is-on");
         state.selectedSeason = s.SeasonNumber;
         state.lastSeason = s.SeasonNumber;
+        renderSeasonHeading();
         schedulePersist();
         // Inspect only preloads one season (usually S1). Lazily fetch others.
         ensureSeasonEpisodesLoaded(s).then(function () {

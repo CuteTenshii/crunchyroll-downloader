@@ -24,6 +24,10 @@ type InspectRequest struct {
 type CatalogSeason struct {
 	ID           string `json:"id"`
 	SeasonNumber int    `json:"seasonNumber"`
+	// Title is Crunchyroll's custom season display name when provided by CMS.
+	Title string `json:"title,omitempty"`
+	// DisplayNumber is season_display_number from CMS when set.
+	DisplayNumber string `json:"displayNumber,omitempty"`
 }
 
 // CatalogEpisode is a catalog row for one episode (metadata only).
@@ -430,8 +434,10 @@ func fillInspectSeries(result *InspectResult, contentID, primaryAudio, primarySu
 	result.Seasons = make([]CatalogSeason, 0, len(seasons))
 	for _, season := range seasons {
 		result.Seasons = append(result.Seasons, CatalogSeason{
-			ID:           season.ID,
-			SeasonNumber: season.SeasonNumber,
+			ID:            season.ID,
+			SeasonNumber:  season.SeasonNumber,
+			Title:         strings.TrimSpace(season.Title),
+			DisplayNumber: strings.TrimSpace(season.SeasonDisplayNumber),
 		})
 	}
 

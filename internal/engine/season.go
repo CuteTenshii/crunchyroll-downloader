@@ -64,6 +64,11 @@ type Seasons struct {
 type Season struct {
 	ID           string `json:"id"`
 	SeasonNumber int    `json:"season_number"`
+	// Title is Crunchyroll's display name for the season (often custom, e.g.
+	// "The Promised Neverland" or "Season 2 Part 2"), not just "Season N".
+	Title string `json:"title"`
+	// SeasonDisplayNumber is the human-facing season label when present (e.g. "1", "2.5").
+	SeasonDisplayNumber string `json:"season_display_number"`
 }
 
 func getSeasons(contentId string, audioLocale string, subLocale string) []Season {
