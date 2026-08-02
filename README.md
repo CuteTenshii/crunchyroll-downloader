@@ -140,15 +140,27 @@ go build -o crunchyroll-downloader ./cmd/cli
 
 ### GUI
 
-```shell
-# Windows (plain go build; requires WebView2)
-go build -o crunchyroll-downloader-gui.exe ./cmd/gui
+Wails apps **require build tags**. A plain `go build ./cmd/gui` without tags will show a dialog and refuse to run.
 
-# Or package with Wails from the GUI module
-cd cmd/gui && wails build
+```shell
+# Windows (recommended with Go only — note the tags)
+go build -tags "desktop,production" -ldflags "-w -s -H windowsgui" -o crunchyroll-downloader-gui.exe ./cmd/gui
+
+# Or use the Wails CLI (same tags under the hood)
+# go install github.com/wailsapp/wails/v2/cmd/wails@latest
+cd cmd/gui
+wails build
+
+# PowerShell helper from repo root
+# .\scripts\build-gui.ps1
 ```
 
-On macOS/Linux the same `go build -o crunchyroll-downloader-gui ./cmd/gui` pattern applies (platform webview dependencies apply).
+```shell
+# macOS / Linux
+go build -tags "desktop,production" -ldflags "-w -s" -o crunchyroll-downloader-gui ./cmd/gui
+```
+
+Windows needs [WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/) (usually already installed with Edge).
 
 ## GUI usage
 
