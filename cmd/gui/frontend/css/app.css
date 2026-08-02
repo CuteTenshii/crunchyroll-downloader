@@ -59,13 +59,12 @@ button {
   overflow: hidden;
 }
 
-/* Fixed top chrome: title, mode, URL, series hero — content scrolls below */
+/* Fixed top chrome: one integrated panel, split only by hairline dividers */
 .app-chrome {
   flex: 0 0 auto;
   z-index: 50;
-  background: var(--bg);
+  background: var(--panel);
   border-bottom: 1px solid var(--line);
-  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.35);
 }
 
 /* ── Header ── */
@@ -75,7 +74,7 @@ button {
   justify-content: space-between;
   gap: 16px;
   padding: 12px 18px;
-  background: var(--panel);
+  background: transparent;
   border-bottom: 1px solid var(--line);
   flex: 0 0 auto;
 }
@@ -225,8 +224,9 @@ button {
   display: flex;
   gap: 8px;
   align-items: center;
-  padding: 14px 18px 0;
+  padding: 14px 18px;
   flex: 0 0 auto;
+  background: transparent;
 }
 
 .cr-input {
@@ -322,11 +322,11 @@ button {
   align-items: center;
   gap: 14px;
   margin: 0;
-  padding: 10px 18px;
+  padding: 12px 18px;
   border-radius: 0;
   border: 0;
   border-top: 1px solid var(--line);
-  background: var(--panel);
+  background: transparent;
 }
 
 .media-hero[hidden] {
@@ -417,6 +417,10 @@ button {
   min-height: 0;
   padding: 12px 18px 10px;
   overflow: auto;
+  background: var(--bg);
+  /* Firefox: dark track + muted thumb (not orange, not system white) */
+  scrollbar-width: thin;
+  scrollbar-color: var(--line2) var(--bg);
 }
 
 .main-pane {
@@ -1032,11 +1036,13 @@ textarea.cr-input {
 .activity-dock {
   flex: 0 0 auto;
   border-top: 1px solid var(--line);
-  background: var(--side-bg);
+  background: var(--panel);
   display: flex;
   flex-direction: column;
   max-height: 42vh;
   transition: max-height 0.22s ease;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line2) var(--panel);
 }
 
 .activity-dock.is-collapsed {
@@ -1229,7 +1235,7 @@ textarea.cr-input {
   max-height: 22vh;
   border-radius: 10px;
   border: 1px solid var(--line);
-  background: var(--panel);
+  background: var(--panel2);
   padding: 10px 12px;
   /* Keep log slightly denser; still Lato for CR UI consistency */
   font-family: "Lato", ui-sans-serif, system-ui, sans-serif;
@@ -1238,6 +1244,8 @@ textarea.cr-input {
   line-height: 1.55;
   overflow: auto;
   color: var(--muted);
+  scrollbar-width: thin;
+  scrollbar-color: var(--line2) var(--panel2);
 }
 
 .activity-log .ok {
@@ -1277,11 +1285,45 @@ textarea.cr-input {
   border-color: #57534e;
 }
 
-/* ── Scrollbars (subtle) ── */
-.check-list::-webkit-scrollbar,
-.activity-log::-webkit-scrollbar,
-.cr-dd-menu::-webkit-scrollbar {
+/* ── Scrollbars ──
+   Global / workspace / logs: dark track + muted thumb
+   Language/episode lists only: orange thumb (accent) */
+
+/* Global (workspace page scroll, WebView default surfaces) */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--line2) var(--bg);
+}
+
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+  background: var(--bg);
+}
+
+*::-webkit-scrollbar-track {
+  background: var(--bg);
+  border-radius: 999px;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: var(--line2);
+  border-radius: 999px;
+  border: 2px solid var(--bg);
+}
+
+*::-webkit-scrollbar-corner {
+  background: var(--bg);
+}
+
+/* Episode / audio / subs lists — orange (keep as designed) */
+.check-list {
+  scrollbar-color: var(--accent) var(--panel2);
+}
+
+.check-list::-webkit-scrollbar {
   width: 8px;
+  background: var(--panel2);
 }
 
 .check-list::-webkit-scrollbar-track {
@@ -1295,14 +1337,44 @@ textarea.cr-input {
   border: 2px solid var(--panel2);
 }
 
+/* Activity log + menus — same muted system as global, dark track */
+.activity-log,
+.cr-dd-menu,
+.activity-dock-body {
+  scrollbar-color: var(--line2) var(--panel2);
+}
+
 .activity-log::-webkit-scrollbar,
 .cr-dd-menu::-webkit-scrollbar {
   width: 8px;
+  background: var(--panel2);
+}
+
+.activity-log::-webkit-scrollbar-track,
+.cr-dd-menu::-webkit-scrollbar-track {
+  background: var(--panel2);
+  border-radius: 999px;
 }
 
 .activity-log::-webkit-scrollbar-thumb,
 .cr-dd-menu::-webkit-scrollbar-thumb {
   background: var(--line2);
+  border-radius: 999px;
+  border: 2px solid var(--panel2);
+}
+
+.workspace::-webkit-scrollbar {
+  width: 10px;
+  background: var(--bg);
+}
+
+.workspace::-webkit-scrollbar-track {
+  background: var(--bg);
+}
+
+.workspace::-webkit-scrollbar-thumb {
+  background: var(--line2);
+  border: 2px solid var(--bg);
   border-radius: 999px;
 }
 
