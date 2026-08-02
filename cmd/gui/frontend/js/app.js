@@ -1,4 +1,4 @@
-/* Normal mode UI + Inspect wiring (Task 6). Download job lands in Task 7. */
+/* Normal mode UI + Inspect + Download job with live progress (Task 7). */
 (function () {
   "use strict";
 
@@ -51,10 +51,18 @@
     videoQuality: "max",
     audioQuality: "max",
     inspecting: false,
+    downloading: false,
     lastSeason: 0,
+    strictLanguages: false,
+    captionLangs: [],
+    wvdPath: "",
+    clientIdPath: "",
+    privateKeyPath: "",
+    queueLabels: {}, // episodeId -> label for queue display
   };
 
   var prefsTimer = null;
+  var progressUnsub = null;
   var els = {};
 
   function $(id) {
@@ -145,24 +153,235 @@
     els.bannerText.textContent = message;
   }
 
+  function formIsBusy() {
+    return !!(state.inspecting || state.downloading);
+  }
+
+  function refreshBusyChrome() {
+    var busy = formIsBusy();
+    if (els.mainPane) {
+      els.mainPane.classList.toggle("is-busy", busy);
+    }
+    if (els.inspect) els.inspect.disabled = busy;
+    if (els.cookie) els.cookie.disabled = busy;
+    if (els.outputBtn) els.outputBtn.disabled = busy;
+  }
+
   function setBusy(busy) {
     state.inspecting = !!busy;
-    if (els.mainPane) {
-      els.mainPane.classList.toggle("is-busy", !!busy);
+    refreshBusyChrome();
+    if (busy) {
+      if (els.progressBar) els.progressBar.classList.add("is-indet");
+      if (els.progressLabel) els.progressLabel.textContent = "Inspect";
+      if (els.progressValue) els.progressValue.textContent = "working…";
+    } else if (!state.downloading) {
+      if (els.progressBar) els.progressBar.classList.remove("is-indet");
+      if (els.progressLabel) els.progressLabel.textContent = "Progress";
+      if (els.progressValue) els.progressValue.textContent = "—";
+      if (els.progressFill) els.progressFill.style.width = "0%";
     }
-    if (els.inspect) els.inspect.disabled = !!busy;
-    if (els.progressBar) {
-      els.progressBar.classList.toggle("is-indet", !!busy);
+  }
+
+  function setDownloading(on) {
+    state.downloading = !!on;
+    refreshBusyChrome();
+    if (els.download) {
+      if (on) {
+        els.download.textContent = "Cancel";
+        els.download.classList.add("is-cancel");
+        els.download.disabled = false;
+      } else {
+        els.download.textContent = "Download selected";
+        els.download.classList.remove("is-cancel");
+        els.download.disabled = false;
+      }
     }
+    if (on) {
+      if (els.progressBar) els.progressBar.classList.add("is-indet");
+      if (els.progressLabel) els.progressLabel.textContent = "Download";
+      if (els.progressValue) els.progressValue.textContent = "starting…";
+    } else {
+      if (els.progressBar) els.progressBar.classList.remove("is-indet");
+      if (els.progressLabel) els.progressLabel.textContent = "Progress";
+    }
+  }
+
+  /** Normalize ProgressEvent fields (json tags vs Go names). */
+  function pe(ev, camel, pascal) {
+    if (!ev || typeof ev !== "object") return undefined;
+    if (ev[camel] !== undefined && ev[camel] !== null && ev[camel] !== "") {
+      return ev[camel];
+    }
+    if (ev[pascal] !== undefined) return ev[pascal];
+    return ev[camel];
+  }
+
+  function appendLog(ev) {
+    var msg = pe(ev, "message", "Message") || "";
+    var level = pe(ev, "level", "Level") || "info";
+    var phase = pe(ev, "phase", "Phase") || "";
+    var label = pe(ev, "episodeLabel", "EpisodeLabel") || "";
+    var cls = "info";
+    if (level === "ok") cls = "ok";
+    else if (level === "warn") cls = "warn";
+    else if (level === "error") cls = "err";
+    var line = msg;
+    if (phase && phase !== "download") {
+      line = "[" + phase + "] " + line;
+    }
+    if (label && msg.indexOf(label) < 0) {
+      line = label + " · " + line;
+    }
+    logLine(line, cls);
+  }
+
+  function updateQueue(ev) {
+    if (!els.queue) return;
+    var qi = pe(ev, "queueIndex", "QueueIndex");
+    var qt = pe(ev, "queueTotal", "QueueTotal");
+    var phase = pe(ev, "phase", "Phase") || "";
+    var level = pe(ev, "level", "Level") || "";
+    var label =
+      pe(ev, "episodeLabel", "EpisodeLabel") ||
+      pe(ev, "episodeId", "EpisodeID") ||
+      "";
+    var epId = pe(ev, "episodeId", "EpisodeID") || "";
+    if (epId && label) state.queueLabels[epId] = label;
+
+    if (phase === "done") {
+      if (level === "ok") {
+        els.queue.textContent =
+          qt != null && qt > 0
+            ? "Done · " + qt + " episode(s)"
+            : "Done";
+      } else if (level === "warn") {
+        els.queue.textContent = "Cancelled";
+      } else if (level === "error") {
+        els.queue.textContent =
+          qt != null && qt > 0
+            ? "Failed · " +
+              (typeof qi === "number" ? qi + 1 : "?") +
+              "/" +
+              qt
+            : "Failed";
+      }
+      return;
+    }
+
+    if (qt != null && qt > 0 && typeof qi === "number") {
+      var n = qi + 1;
+      if (n > qt) n = qt;
+      var head = n + " / " + qt;
+      if (label) {
+        els.queue.textContent = head + " · " + label;
+      } else {
+        els.queue.textContent = head + " active";
+      }
+    }
+  }
+
+  function updateProgressBar(ev) {
+    if (!els.progressFill) return;
+    var fraction = pe(ev, "fraction", "Fraction");
+    var phase = pe(ev, "phase", "Phase") || "";
+    var segDone = pe(ev, "segmentDone", "SegmentDone");
+    var segTotal = pe(ev, "segmentTotal", "SegmentTotal");
+    var msg = pe(ev, "message", "Message") || "";
+    var level = pe(ev, "level", "Level") || "";
+
     if (els.progressLabel) {
-      els.progressLabel.textContent = busy ? "Inspect" : "Progress";
+      els.progressLabel.textContent = phase || "Progress";
     }
-    if (els.progressValue) {
-      els.progressValue.textContent = busy ? "working…" : "—";
+
+    var known =
+      typeof fraction === "number" && fraction >= 0 && !isNaN(fraction);
+    if (known) {
+      if (els.progressBar) els.progressBar.classList.remove("is-indet");
+      var pct = Math.max(0, Math.min(100, Math.round(fraction * 100)));
+      els.progressFill.style.width = pct + "%";
+      if (els.progressValue) {
+        if (segTotal > 0) {
+          els.progressValue.textContent =
+            segDone + "/" + segTotal + " · " + pct + "%";
+        } else {
+          els.progressValue.textContent = pct + "%";
+        }
+      }
+    } else {
+      if (els.progressBar && phase !== "done") {
+        els.progressBar.classList.add("is-indet");
+      }
+      if (els.progressValue) {
+        if (segTotal > 0) {
+          els.progressValue.textContent = segDone + "/" + segTotal;
+        } else if (msg) {
+          els.progressValue.textContent =
+            msg.length > 40 ? msg.slice(0, 37) + "…" : msg;
+        } else {
+          els.progressValue.textContent = "working…";
+        }
+      }
     }
-    if (!busy && els.progressFill) {
-      els.progressFill.style.width = "0%";
+
+    if (phase === "done") {
+      if (els.progressBar) els.progressBar.classList.remove("is-indet");
+      if (level === "ok") {
+        els.progressFill.style.width = "100%";
+        if (els.progressValue) els.progressValue.textContent = "100%";
+      } else if (level === "warn") {
+        if (els.progressValue) els.progressValue.textContent = "cancelled";
+      } else if (level === "error") {
+        if (els.progressValue) els.progressValue.textContent = "error";
+      }
     }
+  }
+
+  function onProgressEvent(ev) {
+    if (!ev || typeof ev !== "object") return;
+    appendLog(ev);
+    updateQueue(ev);
+    updateProgressBar(ev);
+
+    var phase = pe(ev, "phase", "Phase") || "";
+    var level = pe(ev, "level", "Level") || "";
+    var msg = pe(ev, "message", "Message") || "";
+
+    if (level === "error") {
+      showBanner(msg || "Download error", "err");
+    } else if (level === "warn" && phase === "done") {
+      showBanner(msg || "Cancelled", "warn");
+    } else if (level === "ok" && phase === "done") {
+      showBanner(msg || "All done", "ok");
+    } else if (level === "warn" && /4294|backoff|rate/i.test(msg)) {
+      showBanner(msg, "warn");
+    }
+
+    if (phase === "done" && state.downloading) {
+      setDownloading(false);
+    }
+  }
+
+  function subscribeProgress() {
+    if (progressUnsub) return;
+    try {
+      if (window.runtime && typeof window.runtime.EventsOn === "function") {
+        progressUnsub = window.runtime.EventsOn("progress", onProgressEvent);
+        return;
+      }
+    } catch (e) {
+      /* ignore */
+    }
+    // Retry shortly — runtime may not be injected yet at first paint.
+    setTimeout(function () {
+      if (progressUnsub) return;
+      try {
+        if (window.runtime && typeof window.runtime.EventsOn === "function") {
+          progressUnsub = window.runtime.EventsOn("progress", onProgressEvent);
+        }
+      } catch (e2) {
+        /* browser preview: no events */
+      }
+    }, 200);
   }
 
   function setMode(mode) {
@@ -206,14 +425,14 @@
       Mode: state.mode || "normal",
       AudioLangs: audioLangs,
       SubtitleLangs: subtitleLangs,
-      CaptionLangs: [],
+      CaptionLangs: state.captionLangs || [],
       VideoQuality: state.videoQuality || "max",
       AudioQuality: state.audioQuality || "max",
       LastSeason: state.selectedSeason || state.lastSeason || 0,
-      WVDPath: "",
-      ClientIDPath: "",
-      PrivateKeyPath: "",
-      StrictLanguages: false,
+      WVDPath: state.wvdPath || "",
+      ClientIDPath: state.clientIdPath || "",
+      PrivateKeyPath: state.privateKeyPath || "",
+      StrictLanguages: !!state.strictLanguages,
     };
   }
 
@@ -250,6 +469,17 @@
     if (mode === "advanced" || mode === "normal") {
       setMode(mode);
     }
+    var strict =
+      p.StrictLanguages != null ? p.StrictLanguages : p.strictLanguages;
+    if (strict != null) state.strictLanguages = !!strict;
+    var caps = p.CaptionLangs != null ? p.CaptionLangs : p.captionLangs;
+    if (Array.isArray(caps)) state.captionLangs = caps.slice();
+    var wvd = p.WVDPath != null ? p.WVDPath : p.wvdPath;
+    if (wvd != null) state.wvdPath = wvd || "";
+    var cid = p.ClientIDPath != null ? p.ClientIDPath : p.clientIdPath;
+    if (cid != null) state.clientIdPath = cid || "";
+    var pk = p.PrivateKeyPath != null ? p.PrivateKeyPath : p.privateKeyPath;
+    if (pk != null) state.privateKeyPath = pk || "";
   }
 
   async function loadPreferences() {
@@ -275,18 +505,28 @@
     var app = goApp();
     if (!app || typeof app.SavePreferences !== "function") return;
     var p = collectPreferences();
-    // Preserve advanced fields already in memory via a merge-friendly full write.
+    // Merge advanced numerics/toggles that Normal UI does not edit.
     try {
       var current = await app.GetPreferences();
       if (current && typeof current === "object") {
-        p.WVDPath = current.WVDPath || current.wvdPath || "";
-        p.ClientIDPath = current.ClientIDPath || current.clientIdPath || "";
-        p.PrivateKeyPath = current.PrivateKeyPath || current.privateKeyPath || "";
-        p.StrictLanguages = !!(current.StrictLanguages != null
-          ? current.StrictLanguages
-          : current.strictLanguages);
-        p.CaptionLangs =
-          current.CaptionLangs || current.captionLangs || [];
+        if (!p.WVDPath) {
+          p.WVDPath = current.WVDPath || current.wvdPath || state.wvdPath || "";
+        }
+        if (!p.ClientIDPath) {
+          p.ClientIDPath =
+            current.ClientIDPath || current.clientIdPath || state.clientIdPath || "";
+        }
+        if (!p.PrivateKeyPath) {
+          p.PrivateKeyPath =
+            current.PrivateKeyPath ||
+            current.privateKeyPath ||
+            state.privateKeyPath ||
+            "";
+        }
+        if (!p.CaptionLangs || !p.CaptionLangs.length) {
+          p.CaptionLangs =
+            current.CaptionLangs || current.captionLangs || state.captionLangs || [];
+        }
         if (current.Playback4294Retries != null) {
           p.Playback4294Retries = current.Playback4294Retries;
         }
@@ -884,20 +1124,78 @@
     schedulePersist();
   }
 
-  function onDownload() {
-    clearBanner();
-    var epIds = Object.keys(state.selectedEpisodeIds).filter(function (id) {
-      return state.selectedEpisodeIds[id];
+  function selectedEpisodeIdsInCatalogOrder() {
+    var ids = [];
+    var seen = {};
+    var eps = (state.catalog && state.catalog.Episodes) || [];
+    eps.forEach(function (ep) {
+      var id = ep.ID || ep.id;
+      if (!id || !state.selectedEpisodeIds[id] || seen[id]) return;
+      seen[id] = true;
+      ids.push(id);
     });
-    if (!epIds.length) {
+    Object.keys(state.selectedEpisodeIds).forEach(function (id) {
+      if (state.selectedEpisodeIds[id] && !seen[id]) {
+        seen[id] = true;
+        ids.push(id);
+      }
+    });
+    return ids;
+  }
+
+  function buildDownloadJob() {
+    var epIds = selectedEpisodeIdsInCatalogOrder();
+    var audio = Object.keys(state.selectedAudio).filter(function (k) {
+      return state.selectedAudio[k];
+    });
+    var subs = [];
+    if (!state.noSubtitles) {
+      subs = Object.keys(state.selectedSubs).filter(function (k) {
+        return state.selectedSubs[k];
+      });
+    }
+    var captions = Array.isArray(state.captionLangs)
+      ? state.captionLangs.slice()
+      : [];
+    var output =
+      (els.output && els.output.value.trim()) || state.outputDir || "./Downloads";
+    return {
+      EpisodeIDs: epIds,
+      AudioLangs: audio,
+      SubtitleLangs: subs,
+      CaptionLangs: captions,
+      VideoQuality: state.videoQuality || "max",
+      AudioQuality: state.audioQuality || "max",
+      OutputDir: output,
+      StrictLangs: !!state.strictLanguages,
+    };
+  }
+
+  async function onDownload() {
+    clearBanner();
+
+    // While running, the download button becomes Cancel.
+    if (state.downloading) {
+      var appCancel = goApp();
+      if (appCancel && typeof appCancel.CancelDownload === "function") {
+        try {
+          await appCancel.CancelDownload();
+          logLine("Cancel requested…", "warn");
+          showBanner("Cancelling download…", "warn");
+        } catch (err) {
+          logLine("Cancel failed: " + errMessage(err), "err");
+        }
+      }
+      return;
+    }
+
+    var job = buildDownloadJob();
+    if (!job.EpisodeIDs.length) {
       showBanner("Select at least one episode before downloading.", "warn");
       logLine("Download blocked: no episodes selected", "warn");
       return;
     }
-    var audio = Object.keys(state.selectedAudio).filter(function (k) {
-      return state.selectedAudio[k];
-    });
-    if (!audio.length) {
+    if (!job.AudioLangs.length) {
       showBanner("Select at least one audio language.", "warn");
       logLine("Download blocked: no audio selected", "warn");
       return;
@@ -907,18 +1205,40 @@
       logLine("Download blocked: no cookie path", "err");
       return;
     }
-    // Task 7 will call StartDownload / job runner.
+
+    var app = goApp();
+    if (!app || typeof app.StartDownload !== "function") {
+      showBanner("Go bindings unavailable. Run inside the Wails app.", "err");
+      logLine("Download failed: window.go.main.App.StartDownload missing", "err");
+      return;
+    }
+
+    await persistPrefs();
+
+    try {
+      await app.StartDownload(job);
+    } catch (err) {
+      var msg = errMessage(err);
+      showBanner("Could not start download: " + msg, "err");
+      logLine("StartDownload error: " + msg, "err");
+      return;
+    }
+
+    setDownloading(true);
+    subscribeProgress();
     logLine(
-      "Download selected (" +
-        epIds.length +
-        " ep, audio " +
-        audio.join(",") +
-        ") — job runner lands in Task 7",
-      "info"
+      "Download started · " +
+        job.EpisodeIDs.length +
+        " episode(s) · audio " +
+        job.AudioLangs.join(",") +
+        (job.SubtitleLangs.length
+          ? " · subs " + job.SubtitleLangs.join(",")
+          : " · no subs"),
+      "ok"
     );
     if (els.queue) {
       els.queue.textContent =
-        epIds.length + " episode(s) ready · start in Task 7";
+        "Queued · " + job.EpisodeIDs.length + " episode(s)";
     }
   }
 
@@ -969,6 +1289,7 @@
     cacheEls();
     wireUI();
     setMode("normal");
+    subscribeProgress();
     await loadPreferences();
   }
 

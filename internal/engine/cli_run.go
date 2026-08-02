@@ -122,6 +122,21 @@ func loadETPRT(filePath string) (string, error) {
 	return readETPRTFile(filepath.Clean(filePath))
 }
 
+// AuthenticateFromCookieFile loads a private etp_rt credential file and refreshes
+// the access token. Used by the GUI before download jobs (and equivalent to the
+// auth setup performed by Inspect / CLI Run).
+func AuthenticateFromCookieFile(cookieFile string) error {
+	etpRT, err := loadETPRT(cookieFile)
+	if err != nil {
+		return fmt.Errorf("authentication setup failed: %w", err)
+	}
+	setETPRT(etpRT)
+	if err := refreshAccessToken(); err != nil {
+		return fmt.Errorf("authentication failed: %w", err)
+	}
+	return nil
+}
+
 func validatePlaybackRetryConfig(retries int, backoff time.Duration) error {
 	if retries < 0 || retries > maxPlayback4294Retries {
 		return fmt.Errorf("--playback-4294-retries must be between 0 and %d", maxPlayback4294Retries)

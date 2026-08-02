@@ -828,6 +828,19 @@ button {
   pointer-events: none;
 }
 
+/* Cancel stays clickable while the form is dimmed during download */
+.main-pane.is-busy #btn-download.is-cancel {
+  pointer-events: auto;
+  opacity: 1;
+  position: relative;
+  z-index: 2;
+}
+
+#btn-download.is-cancel {
+  background: linear-gradient(180deg, #78716c 0%, #57534e 100%);
+  border-color: #57534e;
+}
+
 /* ── Scrollbars (subtle) ── */
 .check-list::-webkit-scrollbar,
 .activity-log::-webkit-scrollbar,
