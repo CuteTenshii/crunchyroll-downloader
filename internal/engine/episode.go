@@ -225,6 +225,50 @@ type EpisodeInfo struct {
 	EpisodeMetadata EpisodeMetadata `json:"episode_metadata"`
 	// Episode title
 	Title string `json:"title"`
+	// Images on /cms/objects payloads (episode/movie thumbs & posters).
+	Images CRImages `json:"images"`
+}
+
+// SeriesInfo is a lightweight series CMS object (poster + title).
+type SeriesInfo struct {
+	ID     string   `json:"id"`
+	Title  string   `json:"title"`
+	Images CRImages `json:"images"`
+}
+
+type seriesInfoResponse struct {
+	Data []SeriesInfo `json:"data"`
+}
+
+// getSeriesInfo loads series metadata including poster images.
+// One CMS GET per series Inspect — no playback stream.
+func getSeriesInfo(seriesID string, locale string) (SeriesInfo, error) {
+	if locale == "" {
+		locale = "en-US"
+	}
+	req, err := http.NewRequest(http.MethodGet, fmt.Sprintf("https://www.crunchyroll.com/content/v2/cms/series/%s?locale=%s", seriesID, locale), nil)
+	if err != nil {
+		return SeriesInfo{}, err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("User-Agent", "Mozilla/5.0 (X11; Linux x86_64; rv:147.0) Gecko/20100101 Firefox/147.0")
+	resp, err := DoRequest(req)
+	if err != nil {
+		return SeriesInfo{}, err
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return SeriesInfo{}, err
+	}
+	var payload seriesInfoResponse
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return SeriesInfo{}, err
+	}
+	if len(payload.Data) == 0 {
+		return SeriesInfo{}, fmt.Errorf("series %s: empty response", seriesID)
+	}
+	return payload.Data[0], nil
 }
 
 type EpisodeMetadata struct {

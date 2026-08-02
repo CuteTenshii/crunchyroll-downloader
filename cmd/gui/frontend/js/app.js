@@ -93,6 +93,10 @@
       downloadAdv: $("btn-download-adv"),
       output: $("output-dir"),
       outputBtn: $("btn-output"),
+      mediaHero: $("media-hero"),
+      mediaPoster: $("media-poster"),
+      mediaKicker: $("media-kicker"),
+      mediaTitle: $("media-title"),
       seasons: $("season-chips"),
       episodes: $("episode-list"),
       audio: $("audio-list"),
@@ -286,11 +290,11 @@
     refreshBusyChrome();
     forEachDownloadBtn(function (btn) {
       if (on) {
-        btn.textContent = "Cancel";
+        btn.textContent = "CANCEL";
         btn.classList.add("is-cancel");
         btn.disabled = false;
       } else {
-        btn.textContent = "Download selected";
+        btn.textContent = "DOWNLOAD SELECTED";
         btn.classList.remove("is-cancel");
         btn.disabled = false;
       }
@@ -863,6 +867,10 @@
           Title: field(ep, "Title", "title") || "",
           SeriesTitle: field(ep, "SeriesTitle", "seriesTitle") || "",
           AudioLocales: field(ep, "AudioLocales", "audioLocales") || [],
+          ThumbnailURL:
+            field(ep, "ThumbnailURL", "thumbnailUrl") ||
+            field(ep, "ThumbnailURL", "thumbnailURL") ||
+            "",
         };
       }),
       AudioLocales: field(raw, "AudioLocales", "audioLocales") || [],
@@ -875,6 +883,13 @@
         field(raw, "DefaultEpisodeID", "defaultEpisodeId") ||
         "",
       OriginalAudio: field(raw, "OriginalAudio", "originalAudio") || "",
+      PosterURL:
+        field(raw, "PosterURL", "posterUrl") ||
+        field(raw, "PosterURL", "posterURL") ||
+        "",
+      DisplayTitle:
+        field(raw, "DisplayTitle", "displayTitle") ||
+        "",
     };
   }
 
@@ -914,7 +929,10 @@
   function renderCheckbox(opts) {
     var btn = document.createElement("button");
     btn.type = "button";
-    btn.className = "cr-check" + (opts.on ? " is-on" : "");
+    btn.className =
+      "cr-check" +
+      (opts.on ? " is-on" : "") +
+      (opts.thumbHtml ? " has-thumb" : "");
     if (opts.dataset) {
       Object.keys(opts.dataset).forEach(function (k) {
         btn.dataset[k] = opts.dataset[k];
@@ -924,6 +942,7 @@
       '<span class="cr-box" aria-hidden="true">' +
       TICK_SVG +
       "</span>" +
+      (opts.thumbHtml || "") +
       '<span class="cr-check-label">' +
       opts.labelHtml +
       "</span>";
@@ -931,8 +950,57 @@
     return btn;
   }
 
+  function renderMediaHero(result) {
+    if (!els.mediaHero) return;
+    if (!result) {
+      els.mediaHero.hidden = true;
+      return;
+    }
+    var title =
+      result.DisplayTitle ||
+      (result.Episodes && result.Episodes[0] && result.Episodes[0].SeriesTitle) ||
+      (result.Episodes && result.Episodes[0] && result.Episodes[0].Title) ||
+      "";
+    var poster = result.PosterURL || "";
+    // Fall back to first episode thumb if no series poster.
+    if (!poster && result.Episodes && result.Episodes.length) {
+      for (var i = 0; i < result.Episodes.length; i++) {
+        if (result.Episodes[i].ThumbnailURL) {
+          poster = result.Episodes[i].ThumbnailURL;
+          break;
+        }
+      }
+    }
+    if (!title && !poster) {
+      els.mediaHero.hidden = true;
+      return;
+    }
+    els.mediaHero.hidden = false;
+    if (els.mediaTitle) els.mediaTitle.textContent = title || "Untitled";
+    if (els.mediaKicker) {
+      els.mediaKicker.textContent =
+        result.ContentType === "watch" ? "Episode / Movie" : "Series";
+    }
+    if (els.mediaPoster) {
+      if (poster) {
+        els.mediaPoster.hidden = false;
+        els.mediaPoster.alt = title || "";
+        els.mediaPoster.loading = "lazy";
+        els.mediaPoster.referrerPolicy = "no-referrer";
+        els.mediaPoster.src = poster;
+        els.mediaPoster.onerror = function () {
+          els.mediaPoster.hidden = true;
+        };
+      } else {
+        els.mediaPoster.removeAttribute("src");
+        els.mediaPoster.hidden = true;
+      }
+    }
+  }
+
   function renderCatalog(result) {
     state.catalog = result || null;
+    renderMediaHero(result);
     renderSeasons();
     renderEpisodes();
     renderAudio();
@@ -1004,10 +1072,20 @@
         escapeHtml(epCode(ep)) +
         "</strong> · " +
         escapeHtml(ep.Title || "Untitled");
+      var thumbHtml = "";
+      if (ep.ThumbnailURL) {
+        thumbHtml =
+          '<img class="ep-thumb" alt="" loading="lazy" referrerpolicy="no-referrer" src="' +
+          escapeHtml(ep.ThumbnailURL) +
+          '" onerror="this.replaceWith(Object.assign(document.createElement(\'span\'),{className:\'ep-thumb-fallback\'}))" />';
+      } else {
+        thumbHtml = '<span class="ep-thumb-fallback" aria-hidden="true"></span>';
+      }
       var row = renderCheckbox({
         on: on,
         dataset: { ep: ep.ID },
         labelHtml: label,
+        thumbHtml: thumbHtml,
         onClick: function () {
           var next = !row.classList.contains("is-on");
           row.classList.toggle("is-on", next);

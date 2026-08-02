@@ -21,6 +21,8 @@ type SeasonEpisode struct {
 	Title              string        `json:"title"`
 	Description        string        `json:"description"`
 	AvailabilityStarts string        `json:"availability_starts"`
+	// Images is present on CMS episode list payloads; used for UI thumbnails only.
+	Images CRImages `json:"images"`
 }
 
 func getSeasonEpisodes(contentId string, audio_locale string, sub_locale string) []SeasonEpisode {

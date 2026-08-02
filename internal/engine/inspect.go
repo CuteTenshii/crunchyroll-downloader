@@ -34,6 +34,9 @@ type CatalogEpisode struct {
 	Title         string   `json:"title"`
 	SeriesTitle   string   `json:"seriesTitle"`
 	AudioLocales  []string `json:"audioLocales"` // from versions + primary
+	// ThumbnailURL is a small CDN image URL already present in CMS JSON.
+	// The WebView loads it from static CDN — not an extra playback/API call.
+	ThumbnailURL string `json:"thumbnailUrl,omitempty"`
 }
 
 // InspectResult is the GUI/catalog snapshot for one URL.
@@ -49,6 +52,10 @@ type InspectResult struct {
 	AudioQualities   []string         `json:"audioQualities"` // e.g. 192k
 	DefaultEpisodeID string           `json:"defaultEpisodeID"`
 	OriginalAudio    string           `json:"originalAudio"`
+	// PosterURL is the series/movie hero image (CDN). Series Inspect does one
+	// extra CMS series GET for this; watch uses the object images already loaded.
+	PosterURL   string `json:"posterUrl,omitempty"`
+	DisplayTitle string `json:"displayTitle,omitempty"`
 }
 
 // Test seams so Inspect unit tests do not hit live Crunchyroll.
@@ -57,6 +64,7 @@ var (
 	inspectGetSeasons         = getSeasons
 	inspectGetSeasonEpisodes  = getSeasonEpisodes
 	inspectGetEpisodeInfo     = getEpisodeInfo
+	inspectGetSeriesInfo      = getSeriesInfo
 )
 
 // ListVideoQualities returns unique video heights as "Np" labels, highest first.
@@ -336,6 +344,7 @@ func parseInspectURL(raw string) (contentType, contentID string, err error) {
 func fillInspectWatch(result *InspectResult, contentID string) error {
 	info := inspectGetEpisodeInfo(contentID)
 	locales := audioLocalesFromEpisodeInfo(info)
+	thumb := thumbnailFromImages(info.Images)
 	result.Episodes = []CatalogEpisode{{
 		ID:            contentID,
 		SeasonNumber:  info.EpisodeMetadata.SeasonNumber,
@@ -343,14 +352,30 @@ func fillInspectWatch(result *InspectResult, contentID string) error {
 		Title:         info.Title,
 		SeriesTitle:   info.EpisodeMetadata.SeriesTitle,
 		AudioLocales:  locales,
+		ThumbnailURL:  thumb,
 	}}
 	result.AudioLocales = locales
 	result.DefaultEpisodeID = contentID
 	result.OriginalAudio = info.EpisodeMetadata.AudioLocale
+	result.PosterURL = posterFromImages(info.Images)
+	if result.PosterURL == "" {
+		result.PosterURL = thumb
+	}
+	if info.EpisodeMetadata.SeriesTitle != "" {
+		result.DisplayTitle = info.EpisodeMetadata.SeriesTitle
+	} else {
+		result.DisplayTitle = info.Title
+	}
 	return nil
 }
 
 func fillInspectSeries(result *InspectResult, contentID, primaryAudio, primarySubs string) error {
+	// Optional series poster/title — one extra CMS GET, no playback.
+	if series, err := inspectGetSeriesInfo(contentID, primarySubs); err == nil {
+		result.PosterURL = posterFromImages(series.Images)
+		result.DisplayTitle = series.Title
+	}
+
 	seasons := inspectGetSeasons(contentID, primaryAudio, primarySubs)
 	if len(seasons) == 0 {
 		return fmt.Errorf("no seasons found")
@@ -386,6 +411,9 @@ func fillInspectSeries(result *InspectResult, contentID, primaryAudio, primarySu
 		for _, locale := range locales {
 			addAudio(locale)
 		}
+		if result.DisplayTitle == "" && ep.SeriesTitle != "" {
+			result.DisplayTitle = ep.SeriesTitle
+		}
 		result.Episodes = append(result.Episodes, CatalogEpisode{
 			ID:            ep.ID,
 			SeasonNumber:  ep.SeasonNumber,
@@ -393,6 +421,7 @@ func fillInspectSeries(result *InspectResult, contentID, primaryAudio, primarySu
 			Title:         ep.Title,
 			SeriesTitle:   ep.SeriesTitle,
 			AudioLocales:  locales,
+			ThumbnailURL:  thumbnailFromImages(ep.Images),
 		})
 	}
 	sort.Strings(audioLocales)
