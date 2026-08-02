@@ -1,0 +1,54 @@
+/* Dark cinema tokens — full Normal mode styles land in Task 6. */
+:root {
+  --bg: #0c0a09;
+  --panel: #141210;
+  --panel2: #1c1917;
+  --line: #292524;
+  --line2: #44403c;
+  --text: #fafaf9;
+  --muted: #a8a29e;
+  --faint: #78716c;
+  --accent: #f97316;
+  --accent2: #ea580c;
+  --accent-soft: #fdba74;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  min-height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+.shell {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 2rem;
+}
+
+.brand {
+  text-align: center;
+}
+
+.brand h1 {
+  margin: 0 0 0.5rem;
+  font-size: 1.5rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.muted {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.95rem;
+}
