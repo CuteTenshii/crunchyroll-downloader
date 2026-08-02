@@ -52,22 +52,22 @@ Usage of ./crunchyroll-downloader:
 
 Ex: to download the first season of *Hell's Paradise*:
 ```shell
-./crunchyroll-downloader --url https://www.crunchyroll.com/series/GJ0H7Q5ZJ/hells-paradise --season 1 --etp-rt-file ~/.config/crunchyroll/etp_rt.txt
+./crunchyroll-downloader --url https://www.crunchyroll.com/series/GJ0H7Q5ZJ/hells-paradise --season 1 --etp-rt-file ~/.config/crunchyroll-downloader/etp_rt.txt
 ```
 
 To download a specific episode:
 ```shell
-./crunchyroll-downloader --url https://www.crunchyroll.com/watch/GE00198973JAJP/dawn-and-confusion --etp-rt-file ~/.config/crunchyroll/etp_rt.txt
+./crunchyroll-downloader --url https://www.crunchyroll.com/watch/GE00198973JAJP/dawn-and-confusion --etp-rt-file ~/.config/crunchyroll-downloader/etp_rt.txt
 ```
 
 To batch download from a file (one URL per line):
 ```shell
-./crunchyroll-downloader --urls list.txt --etp-rt-file ~/.config/crunchyroll/etp_rt.txt --subs-lang pt-BR
+./crunchyroll-downloader --file list.txt --etp-rt-file ~/.config/crunchyroll-downloader/etp_rt.txt --subs-lang pt-BR
 ```
 
 To download multiple audio tracks and subtitles into a single file (the first of each is set as the default track). If any requested language is missing for an episode, that episode is skipped:
 ```shell
-./crunchyroll-downloader --url https://www.crunchyroll.com/watch/GE00198973JAJP/dawn-and-confusion --etp-rt-file ~/.config/crunchyroll/etp_rt.txt --audio-lang ja-JP,en-US --subs-lang en-US,es-419,de-DE
+./crunchyroll-downloader --url https://www.crunchyroll.com/watch/GE00198973JAJP/dawn-and-confusion --etp-rt-file ~/.config/crunchyroll-downloader/etp_rt.txt --audio-lang ja-JP,en-US --subs-lang en-US,es-419,de-DE
 ```
 
 ## Resumable subtitle indexing
@@ -84,7 +84,7 @@ file; do not put a cookie in an environment variable or command-line value.
   --subs-lang en-US \
   --index-window 25 \
   --index-terminal-recheck-window 3 \
-  --etp-rt-file ~/.config/crunchyroll/etp_rt.txt
+  --etp-rt-file ~/.config/crunchyroll-downloader/etp_rt.txt
 ```
 
 Every attempted provider identity is checkpointed atomically before the next
@@ -123,13 +123,54 @@ instead of being overwritten.
 
 ### Requirements
 
-- [Go](https://go.dev/dl/)
+- [Go](https://go.dev/dl/) 1.25+
+- [FFmpeg](https://www.ffmpeg.org/download.html#get-packages) on `PATH` (for downloads)
+- **GUI on Windows:** [WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/) (preinstalled on most Windows 10/11 systems)
+- Optional for packaged GUI builds: [Wails CLI](https://wails.io/docs/gettingstarted/installation) (`go install github.com/wailsapp/wails/v2/cmd/wails@latest`)
 
-### Guide
+### CLI
 
-- Clone this repository
-- Open a Terminal/Command prompt, and go to the folder where you cloned the repo
-- Run `go build .`
+```shell
+# Windows
+go build -o crunchyroll-downloader.exe ./cmd/cli
+
+# macOS / Linux
+go build -o crunchyroll-downloader ./cmd/cli
+```
+
+### GUI
+
+```shell
+# Windows (plain go build; requires WebView2)
+go build -o crunchyroll-downloader-gui.exe ./cmd/gui
+
+# Or package with Wails from the GUI module
+cd cmd/gui && wails build
+```
+
+On macOS/Linux the same `go build -o crunchyroll-downloader-gui ./cmd/gui` pattern applies (platform webview dependencies apply).
+
+## GUI usage
+
+1. Paste a series or episode **URL**
+2. Choose your **cookie file** (`etp_rt` path; the raw value is never stored)
+3. Press **Inspect** to load seasons, episodes, and language options
+4. **Select** what you want (episodes, audio, subs, quality)
+5. Press **Download**
+
+### GUI defaults (first run / after Inspect)
+
+| Setting | Default |
+|---------|---------|
+| Episodes | **S1E1** only (or the single `/watch/…` title) |
+| Audio | **Original** (usually `ja-JP`) |
+| Subtitles | **None** |
+| Video / audio quality | **Max available** after probe |
+
+Preferences (URL, cookie path, output folder, last selections — never raw secrets) are saved under:
+
+- Windows: `%AppData%\crunchyroll-downloader\preferences.json`
+- macOS/Linux: `~/.config/crunchyroll-downloader/preferences.json`
 
 ## Help
 

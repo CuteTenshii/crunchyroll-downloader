@@ -13,7 +13,13 @@ etp_rt.txt
 .env
 crunchyroll-downloader
 crunchyroll-downloader.exe
+crunchyroll-downloader-gui.exe
 *_index.json
+
+# Built binaries / Wails output
+*.exe
+cmd/gui/build/
+gui.exe
 
 crunchyroll-downloader.m*
 crunchyroll-downloader.media*
