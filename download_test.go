@@ -135,7 +135,7 @@ func TestDownloadEpisodeReturnsRecoveredPanicAndReleasesActiveStream(t *testing.
 	err = downloadEpisode("GY19Q77GR", EpisodeInfo{
 		EpisodeMetadata: EpisodeMetadata{SeriesTitle: "One Piece", AudioLocale: "ja-JP"},
 		Title:           "Episode 31",
-	}, []string{"ja-JP"}, nil, strPtr("1080p"), strPtr("192k"))
+	}, []string{"ja-JP"}, nil, nil, strPtr("1080p"), strPtr("192k"))
 	if err == nil {
 		t.Fatal("downloadEpisode swallowed the recovered panic")
 	}
@@ -228,7 +228,7 @@ func TestDownloadEpisodeRetries4294ThenUsesSuccessfulPlayback(t *testing.T) {
 	err = downloadEpisode("GY19Q77GR", EpisodeInfo{
 		EpisodeMetadata: EpisodeMetadata{SeriesTitle: "One Piece", AudioLocale: "ja-JP"},
 		Title:           "Episode 31",
-	}, []string{"ja-JP"}, nil, strPtr("1080p"), strPtr("192k"))
+	}, []string{"ja-JP"}, nil, nil, strPtr("1080p"), strPtr("192k"))
 	if err == nil || !strings.Contains(err.Error(), "stop after playback") {
 		t.Fatalf("downloadEpisode() error = %v", err)
 	}
@@ -270,7 +270,7 @@ func TestDownloadEpisodeExhausted4294ReturnsError(t *testing.T) {
 	err = downloadEpisode("GY19Q77GR", EpisodeInfo{
 		EpisodeMetadata: EpisodeMetadata{SeriesTitle: "One Piece", AudioLocale: "ja-JP"},
 		Title:           "Episode 31",
-	}, []string{"ja-JP"}, nil, strPtr("1080p"), strPtr("192k"))
+	}, []string{"ja-JP"}, nil, nil, strPtr("1080p"), strPtr("192k"))
 	if err == nil || !strings.Contains(err.Error(), "code 4294") || calls != 2 {
 		t.Fatalf("downloadEpisode() error=%v calls=%d", err, calls)
 	}

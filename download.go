@@ -143,9 +143,12 @@ func downloadPart(url string) ([]byte, error) {
 	return nil, fmt.Errorf("failed after %d retries", maxRetries)
 }
 
-func getFilename(set *mpd.AdaptationSet) string {
+func getFilename(set *mpd.AdaptationSet, subExt string) string {
 	if set == nil {
-		f, _ := os.CreateTemp("", "crdl-subs-*.ass")
+		if subExt == "" {
+			subExt = "ass"
+		}
+		f, _ := os.CreateTemp("", "crdl-subs-*."+subExt)
 		return f.Name()
 	}
 	for _, representation := range set.Representations {
@@ -218,7 +221,7 @@ func downloadParts(baseUrl, representationId *string, set *mpd.AdaptationSet) (s
 		parts = append(parts, data...)
 	}
 
-	filename := getFilename(set)
+	filename := getFilename(set, "")
 	file, err := os.Create(filename)
 	if err != nil {
 		return "", err
@@ -314,13 +317,71 @@ func isASS(body []byte) bool {
 	return firstSection != "" && seenEvents && seenFormat
 }
 
-func downloadSubs(url string) (string, error) {
-	body, err := fetchSubtitleASS(url)
+// fetchSubtitleBytes downloads a subtitle/caption payload with size limits and
+// no format-specific validation. Used for non-ASS formats such as WebVTT closed
+// captions. ASS transcripts continue to use fetchSubtitleASS so the index cache
+// only ever stores verified ASS documents.
+func fetchSubtitleBytes(url string) ([]byte, error) {
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return nil, &SubtitleTransportError{Operation: "request construction"}
+	}
+	req.Header.Set("Origin", "https://static.crunchyroll.com")
+	req.Header.Set("Referer", "https://static.crunchyroll.com/")
+	req.Header.Set("User-Agent", "Mozilla/5.0 (X11; Linux x86_64; rv:147.0) Gecko/20100101 Firefox/147.0")
+	recordProviderCall(req)
+	resp, err := subtitleHTTPClient.Do(req)
+	if err != nil {
+		return nil, &SubtitleTransportError{Operation: "transport"}
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, &HTTPStatusError{
+			URL: redactURL(url), StatusCode: resp.StatusCode,
+			RetryAfter: safeHeaderScalar(resp.Header.Get("Retry-After")),
+			RateLimit:  providerRateLimitHeaders(resp.Header),
+		}
+	}
+	if resp.ContentLength == 0 {
+		return nil, &SubtitleBodyError{URL: redactURL(url), Problem: "empty body"}
+	}
+	if resp.ContentLength > maxSubtitleBytes {
+		return nil, &SubtitleBodyError{URL: redactURL(url), Problem: "body exceeds size limit"}
+	}
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxSubtitleBytes+1))
+	if err != nil {
+		return nil, &SubtitleBodyError{URL: redactURL(url), Problem: "unable to read body"}
+	}
+	if len(body) == 0 {
+		return nil, &SubtitleBodyError{URL: redactURL(url), Problem: "empty body"}
+	}
+	if int64(len(body)) > maxSubtitleBytes {
+		return nil, &SubtitleBodyError{URL: redactURL(url), Problem: "body exceeds size limit"}
+	}
+	if resp.ContentLength >= 0 && int64(len(body)) != resp.ContentLength {
+		return nil, &SubtitleBodyError{URL: redactURL(url), Problem: "body does not match declared Content-Length"}
+	}
+	return body, nil
+}
+
+func downloadSubs(url, format string) (string, error) {
+	if format == "" {
+		format = "ass"
+	}
+
+	var body []byte
+	var err error
+	if format == "ass" {
+		body, err = fetchSubtitleASS(url)
+	} else {
+		body, err = fetchSubtitleBytes(url)
+	}
 	if err != nil {
 		return "", err
 	}
 
-	filename := getFilename(nil)
+	filename := getFilename(nil, format)
 	file, err := os.Create(filename)
 	if err != nil {
 		return "", fmt.Errorf("create subtitle temp file: %w", err)
@@ -379,7 +440,7 @@ func releaseDownloadPlayback(contentID, streamToken string) (released bool, err 
 	return closeDownloadPlayback(contentID, streamToken), nil
 }
 
-func downloadEpisode(baseContentId string, info EpisodeInfo, audioLangs, subsLangs []string, videoQuality, audioQuality *string) (err error) {
+func downloadEpisode(baseContentId string, info EpisodeInfo, audioLangs, subsLangs, ccLangs []string, videoQuality, audioQuality *string) (err error) {
 	cleanSeriesTitle := sanitize(info.EpisodeMetadata.SeriesTitle)
 	cleanEpisodeTitle := sanitize(info.Title)
 
@@ -479,7 +540,7 @@ func downloadEpisode(baseContentId string, info EpisodeInfo, audioLangs, subsLan
 	}()
 
 	// Fetch the first version's playback first so we can validate subtitle
-	// availability before downloading anything heavy.
+	// and caption availability before downloading anything heavy.
 	firstEpisode := openPlaybackWithRetry(versions[0].contentId, openDownloadPlayback, *playback4294Retries, *playback4294Backoff, sleepPlaybackRetry)
 	activeStreams[versions[0].contentId] = firstEpisode.Token
 
@@ -492,23 +553,65 @@ func downloadEpisode(baseContentId string, info EpisodeInfo, audioLangs, subsLan
 		}
 		sort.Strings(subsLangs)
 	}
+	if len(ccLangs) == 1 && ccLangs[0] == "all" {
+		ccLangs = make([]string, 0, len(firstEpisode.Captions))
+		for locale, cc := range firstEpisode.Captions {
+			if cc != nil && cc.URL != "" {
+				ccLangs = append(ccLangs, locale)
+			}
+		}
+		sort.Strings(ccLangs)
+	}
 
-	fmt.Printf("Audio locales: %s | Subtitle locales: %s\n", strings.Join(audioLangs, ", "), strings.Join(subsLangs, ", "))
+	fmt.Printf("Audio locales: %s | Subtitle locales: %s | CC locales: %s\n",
+		strings.Join(audioLangs, ", "), strings.Join(subsLangs, ", "), strings.Join(ccLangs, ", "))
 
 	for _, locale := range subsLangs {
 		if firstEpisode.Subtitles[locale] == nil {
 			return fmt.Errorf("subtitle locale %s is not available for episode %v", locale, info.EpisodeMetadata.EpisodeNumber)
 		}
 	}
+	for _, locale := range ccLangs {
+		if firstEpisode.Captions[locale] == nil {
+			return fmt.Errorf("closed caption locale %s is not available for episode %v", locale, info.EpisodeMetadata.EpisodeNumber)
+		}
+	}
 
 	var subTracks []mediaTrack
 	for _, locale := range subsLangs {
 		fmt.Printf("Downloading subtitles for %s...\n", trackTitle(locale))
-		subtitleFile, err := downloadSubs(firstEpisode.Subtitles[locale].URL)
+		sub := firstEpisode.Subtitles[locale]
+		format := sub.Format
+		if format == "" {
+			format = "ass"
+		}
+		subtitleFile, err := downloadSubs(sub.URL, format)
 		if err != nil {
 			return fmt.Errorf("download subtitles for %s: %w", locale, err)
 		}
-		subTracks = append(subTracks, mediaTrack{file: subtitleFile, locale: locale})
+		subTracks = append(subTracks, mediaTrack{
+			file:   subtitleFile,
+			locale: locale,
+			format: format,
+		})
+	}
+	for _, locale := range ccLangs {
+		fmt.Printf("Downloading closed captions for %s...\n", trackTitle(locale))
+		cc := firstEpisode.Captions[locale]
+		format := cc.Format
+		if format == "" {
+			format = "vtt"
+		}
+		ccFile, err := downloadSubs(cc.URL, format)
+		if err != nil {
+			return fmt.Errorf("download closed captions for %s: %w", locale, err)
+		}
+		subTracks = append(subTracks, mediaTrack{
+			file:   ccFile,
+			locale: locale,
+			format: format,
+			isCC:   true,
+		})
 	}
 	if len(subTracks) > 0 {
 		fmt.Println("Downloaded subtitles!")
@@ -576,7 +679,7 @@ func downloadEpisode(baseContentId string, info EpisodeInfo, audioLangs, subsLan
 	return nil
 }
 
-func downloadSeason(videoQuality, audioQuality *string, audioLangs, subsLangs []string, episodes []SeasonEpisode) error {
+func downloadSeason(videoQuality, audioQuality *string, audioLangs, subsLangs, ccLangs []string, episodes []SeasonEpisode) error {
 	if len(episodes) == 0 {
 		return errors.New("season has no episodes")
 	}
@@ -596,7 +699,7 @@ func downloadSeason(videoQuality, audioQuality *string, audioLangs, subsLangs []
 			Title: episode.Title,
 		}
 
-		if err := downloadEpisode(episode.ID, info, audioLangs, subsLangs, videoQuality, audioQuality); err != nil {
+		if err := downloadEpisode(episode.ID, info, audioLangs, subsLangs, ccLangs, videoQuality, audioQuality); err != nil {
 			return fmt.Errorf("download season %d episode %d: %w", episode.SeasonNumber, episode.EpisodeNumber, err)
 		}
 	}

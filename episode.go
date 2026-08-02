@@ -143,8 +143,10 @@ func openPlaybackWithRetry(id string, open playbackOpener, retries int, backoff 
 type Episode struct {
 	// Dash manifest file URL
 	ManifestURL string `json:"url"`
-	// List of .ass files
+	// List of .ass files (translation-style subtitles)
 	Subtitles map[string]*Subtitle `json:"subtitles"`
+	// List of .vtt files (closed captions, transcribing the dub audio)
+	Captions map[string]*Subtitle `json:"captions"`
 	// Token to give to the Widevine CDM challenge
 	Token string `json:"token"`
 	// Error, `nil` if there's no error. Crunchyroll returns this as a string
@@ -155,7 +157,9 @@ type Episode struct {
 type Subtitle struct {
 	// Language represents a subtitle language in the "en-US" format
 	Language string `json:"language"`
-	// Direct URL to the .ass file
+	// Format of the file, e.g. "ass" or "vtt"
+	Format string `json:"format"`
+	// Direct URL to the subtitle/caption file
 	URL string `json:"url"`
 }
 
