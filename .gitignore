@@ -12,6 +12,7 @@ private_key.pem
 etp_rt.txt
 .env
 crunchyroll-downloader
+crunchyroll-downloader.exe
 *_index.json
 
 crunchyroll-downloader.m*

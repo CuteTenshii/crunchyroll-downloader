@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 )
@@ -19,6 +20,10 @@ func TestReadETPRTFileRequiresPrivateRegularFile(t *testing.T) {
 	}
 	if got != "secret" {
 		t.Fatalf("got %q", got)
+	}
+	if runtime.GOOS == "windows" {
+		// NTFS does not surface Unix 0600/0644 distinctions; mode rejection is Unix-only.
+		return
 	}
 	if err := os.Chmod(path, 0644); err != nil {
 		t.Fatal(err)

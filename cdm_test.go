@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/iyear/gowidevine"
@@ -20,11 +21,14 @@ func TestOpenPrivateRegularFileRejectsBroadModeAndSymlink(t *testing.T) {
 		t.Fatalf("mode-0600 regular file rejected: %v", err)
 	}
 	file.Close()
-	if err := os.Chmod(credential, 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := openPrivateRegularFile(credential); err == nil {
-		t.Fatal("mode-0644 credential was accepted")
+	if runtime.GOOS != "windows" {
+		// Windows does not honor Unix permission bits; skip the 0644 rejection.
+		if err := os.Chmod(credential, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := openPrivateRegularFile(credential); err == nil {
+			t.Fatal("mode-0644 credential was accepted")
+		}
 	}
 	link := filepath.Join(dir, "device-link.wvd")
 	if err := os.Symlink(credential, link); err != nil {

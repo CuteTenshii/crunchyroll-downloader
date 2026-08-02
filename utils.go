@@ -1,9 +1,22 @@
 package main
 
 import (
-    "regexp"
-    "strings"
+	"os"
+	"regexp"
+	"runtime"
+	"strings"
 )
+
+// isPrivateCredentialMode reports whether permission bits are acceptable for
+// credential material. On Windows the Go os package does not preserve Unix
+// mode bits (a 0600 write commonly stats as 0666), so only the regular-file
+// and non-symlink checks apply there. On Unix we require exactly 0600.
+func isPrivateCredentialMode(mode os.FileMode) bool {
+	if runtime.GOOS == "windows" {
+		return true
+	}
+	return mode.Perm() == 0o600
+}
 
 var languageNames = map[string]string{
 	"ja-JP":  "日本語",
@@ -73,10 +86,10 @@ func sanitizeFilename(name string) string {
 	// Replace illegal characters and quotes with an underscore
 	re := regexp.MustCompile(`[\\/:*?"<>|'’\x60“”]`)
 	res := re.ReplaceAllString(name, "_")
-	
+
 	// Collapse multiple consecutive underscores into a single one
 	reCollapse := regexp.MustCompile(`_+`)
 	res = reCollapse.ReplaceAllString(res, "_")
-	
+
 	return strings.TrimRight(res, " .")
 }

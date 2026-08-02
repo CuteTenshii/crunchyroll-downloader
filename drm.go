@@ -127,7 +127,7 @@ func openPrivateRegularFile(path string) (*os.File, error) {
 	if !info.Mode().IsRegular() {
 		return nil, fmt.Errorf("credential path must be a regular file")
 	}
-	if info.Mode().Perm() != 0o600 {
+	if !isPrivateCredentialMode(info.Mode()) {
 		return nil, fmt.Errorf("credential file mode must be 0600")
 	}
 	file, err := os.Open(path)

@@ -101,7 +101,7 @@ func validateCredentialFileInfo(path string, info os.FileInfo) error {
 	if !info.Mode().IsRegular() {
 		return &CredentialFileError{Path: path, Problem: "must be a regular file"}
 	}
-	if info.Mode().Perm() != 0600 {
+	if !isPrivateCredentialMode(info.Mode()) {
 		return &CredentialFileError{Path: path, Problem: "permissions must be 0600"}
 	}
 	if info.Size() <= 0 || info.Size() > maxETPRTBytes {
