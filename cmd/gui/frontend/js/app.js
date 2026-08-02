@@ -107,6 +107,12 @@
       progressFill: $("progress-fill"),
       progressLabel: $("progress-label"),
       progressValue: $("progress-value"),
+      activityDock: $("activity-dock"),
+      activityDockBody: $("activity-dock-body"),
+      btnToggleActivity: $("btn-toggle-activity"),
+      activityHint: $("activity-hint"),
+      queueSummary: $("queue-summary"),
+      progressSummary: $("progress-summary"),
       banner: $("banner"),
       bannerText: $("banner-text"),
       bannerClose: $("banner-close"),
@@ -162,6 +168,52 @@
     return "S" + pad2(ep.SeasonNumber) + "E" + pad2(ep.EpisodeNumber);
   }
 
+  function isActivityCollapsed() {
+    return !els.activityDock || els.activityDock.classList.contains("is-collapsed");
+  }
+
+  function setActivityCollapsed(collapsed) {
+    if (!els.activityDock) return;
+    if (collapsed) {
+      els.activityDock.classList.add("is-collapsed");
+      if (els.activityDockBody) els.activityDockBody.hidden = true;
+      if (els.btnToggleActivity) {
+        els.btnToggleActivity.setAttribute("aria-expanded", "false");
+      }
+      if (els.activityHint) els.activityHint.textContent = "Show logs";
+    } else {
+      els.activityDock.classList.remove("is-collapsed");
+      if (els.activityDockBody) els.activityDockBody.hidden = false;
+      if (els.btnToggleActivity) {
+        els.btnToggleActivity.setAttribute("aria-expanded", "true");
+      }
+      if (els.activityHint) els.activityHint.textContent = "Hide";
+    }
+    try {
+      localStorage.setItem("crdl.activityCollapsed", collapsed ? "1" : "0");
+    } catch (e) {
+      /* ignore */
+    }
+  }
+
+  function expandActivityForWork() {
+    // Auto-open when something useful is happening so the user sees logs.
+    if (isActivityCollapsed()) setActivityCollapsed(false);
+  }
+
+  function updateDockSummary() {
+    if (els.queueSummary && els.queue) {
+      var q = (els.queue.textContent || "").trim() || "No jobs";
+      if (q.length > 48) q = q.slice(0, 45) + "…";
+      els.queueSummary.textContent = q;
+    }
+    if (els.progressSummary) {
+      var label = (els.progressLabel && els.progressLabel.textContent) || "Progress";
+      var value = (els.progressValue && els.progressValue.textContent) || "—";
+      els.progressSummary.textContent = label + " " + value;
+    }
+  }
+
   function logLine(text, cls) {
     if (!els.activity) return;
     var div = document.createElement("div");
@@ -169,6 +221,10 @@
     div.textContent = text;
     els.activity.appendChild(div);
     els.activity.scrollTop = els.activity.scrollHeight;
+    if (cls === "err" || cls === "warn") {
+      expandActivityForWork();
+    }
+    updateDockSummary();
   }
 
   function clearBanner() {
@@ -212,6 +268,7 @@
     state.inspecting = !!busy;
     refreshBusyChrome();
     if (busy) {
+      expandActivityForWork();
       if (els.progressBar) els.progressBar.classList.add("is-indet");
       if (els.progressLabel) els.progressLabel.textContent = "Inspect";
       if (els.progressValue) els.progressValue.textContent = "working…";
@@ -221,6 +278,7 @@
       if (els.progressValue) els.progressValue.textContent = "—";
       if (els.progressFill) els.progressFill.style.width = "0%";
     }
+    updateDockSummary();
   }
 
   function setDownloading(on) {
@@ -238,6 +296,7 @@
       }
     });
     if (on) {
+      expandActivityForWork();
       if (els.progressBar) els.progressBar.classList.add("is-indet");
       if (els.progressLabel) els.progressLabel.textContent = "Download";
       if (els.progressValue) els.progressValue.textContent = "starting…";
@@ -245,12 +304,14 @@
       if (els.progressBar) els.progressBar.classList.remove("is-indet");
       if (els.progressLabel) els.progressLabel.textContent = "Progress";
     }
+    updateDockSummary();
   }
 
   function setIndexing(on, label) {
     state.indexing = !!on;
     refreshBusyChrome();
     if (on) {
+      expandActivityForWork();
       if (els.progressBar) els.progressBar.classList.add("is-indet");
       if (els.progressLabel) els.progressLabel.textContent = label || "Index";
       if (els.progressValue) els.progressValue.textContent = "working…";
@@ -260,6 +321,7 @@
       if (els.progressValue) els.progressValue.textContent = "—";
       if (els.progressFill) els.progressFill.style.width = "0%";
     }
+    updateDockSummary();
   }
 
   function setSwitch(el, on) {
@@ -410,6 +472,7 @@
         els.queue.textContent = head + " active";
       }
     }
+    updateDockSummary();
   }
 
   function updateProgressBar(ev) {
@@ -466,6 +529,7 @@
         if (els.progressValue) els.progressValue.textContent = "error";
       }
     }
+    updateDockSummary();
   }
 
   function onProgressEvent(ev) {
@@ -1775,6 +1839,11 @@
         setMode("advanced");
       });
     }
+    if (els.btnToggleActivity) {
+      els.btnToggleActivity.addEventListener("click", function () {
+        setActivityCollapsed(!isActivityCollapsed());
+      });
+    }
     if (els.inspect) els.inspect.addEventListener("click", onInspect);
     if (els.cookie) els.cookie.addEventListener("click", onCookie);
     if (els.outputBtn) els.outputBtn.addEventListener("click", onOutputBrowse);
@@ -1870,6 +1939,17 @@
   async function init() {
     cacheEls();
     wireUI();
+    // Default collapsed; remember user preference in localStorage.
+    var collapsed = true;
+    try {
+      var saved = localStorage.getItem("crdl.activityCollapsed");
+      if (saved === "0") collapsed = false;
+      if (saved === "1") collapsed = true;
+    } catch (e) {
+      /* ignore */
+    }
+    setActivityCollapsed(collapsed);
+    updateDockSummary();
     syncAdvancedInputsFromState();
     setMode("normal");
     subscribeProgress();

@@ -237,29 +237,54 @@
         </div>
       </div>
 
-      <aside class="side-pane">
-        <div>
-          <div class="side-label">Queue</div>
-          <div id="queue" class="queue-box">No jobs yet</div>
-        </div>
+    </div>
 
-        <div class="progress-wrap">
-          <div class="progress-meta">
-            <span id="progress-label">Progress</span>
-            <span id="progress-value">—</span>
+    <!-- Bottom activity dock (collapsible) -->
+    <footer class="activity-dock is-collapsed" id="activity-dock">
+      <button
+        type="button"
+        class="activity-dock-toggle"
+        id="btn-toggle-activity"
+        aria-expanded="false"
+        aria-controls="activity-dock-body"
+      >
+        <span class="activity-dock-title">
+          <span class="activity-dock-chevron" aria-hidden="true"></span>
+          Activity
+        </span>
+        <span class="activity-dock-summary" id="activity-summary">
+          <span id="queue-summary">No jobs</span>
+          <span class="activity-dock-sep" aria-hidden="true">·</span>
+          <span id="progress-summary">Idle</span>
+        </span>
+        <span class="activity-dock-hint" id="activity-hint">Show logs</span>
+      </button>
+
+      <div class="activity-dock-body" id="activity-dock-body" hidden>
+        <div class="activity-dock-meta">
+          <div class="activity-meta-block">
+            <div class="side-label">Queue</div>
+            <div id="queue" class="queue-box">No jobs yet</div>
           </div>
-          <div class="progress-bar" id="progress-bar"><i id="progress-fill"></i></div>
+          <div class="activity-meta-block progress-block">
+            <div class="progress-wrap">
+              <div class="progress-meta">
+                <span id="progress-label">Progress</span>
+                <span id="progress-value">—</span>
+              </div>
+              <div class="progress-bar" id="progress-bar"><i id="progress-fill"></i></div>
+            </div>
+          </div>
         </div>
-
         <div class="activity-wrap">
-          <div class="side-label">Activity</div>
+          <div class="side-label">Log</div>
           <div id="activity" class="activity-log" aria-live="polite">
             <div class="ok">● Ready</div>
             <div>Waiting for URL + cookie file…</div>
           </div>
         </div>
-      </aside>
-    </div>
+      </div>
+    </footer>
   </div>
 
   <script src="js/app.js"></script>

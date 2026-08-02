@@ -305,30 +305,19 @@ button {
   cursor: not-allowed;
 }
 
-/* ── Workspace ── */
+/* ── Workspace (full-width main form) ── */
 .workspace {
-  flex: 1;
-  display: grid;
-  grid-template-columns: 1.15fr 0.85fr;
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
   min-height: 0;
-  padding: 14px 18px 18px;
-  gap: 0;
+  padding: 14px 18px 10px;
+  overflow: auto;
 }
 
 .main-pane {
   min-width: 0;
-  padding-right: 14px;
-  border-right: 1px solid var(--line);
-}
-
-.side-pane {
-  min-width: 0;
-  min-height: 0;
-  padding-left: 14px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  background: transparent;
+  flex: 1 1 auto;
 }
 
 .view {
@@ -363,7 +352,7 @@ button {
   border: 1px solid var(--line);
   background: var(--panel);
   padding: 14px;
-  min-height: 280px;
+  min-height: 320px;
   display: flex;
   flex-direction: column;
 }
@@ -586,13 +575,15 @@ textarea.cr-input {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  max-height: 220px;
+  max-height: min(42vh, 360px);
   overflow: auto;
   min-height: 0;
+  flex: 1 1 auto;
 }
 
 .check-list.compact {
-  max-height: 140px;
+  max-height: min(28vh, 200px);
+  flex: 0 1 auto;
 }
 
 .cr-check {
@@ -830,7 +821,133 @@ textarea.cr-input {
   min-width: 0;
 }
 
-/* ── Side: queue / progress / activity ── */
+/* ── Bottom activity dock (collapsible) ── */
+.activity-dock {
+  flex: 0 0 auto;
+  border-top: 1px solid var(--line);
+  background: var(--side-bg);
+  display: flex;
+  flex-direction: column;
+  max-height: 42vh;
+  transition: max-height 0.22s ease;
+}
+
+.activity-dock.is-collapsed {
+  max-height: 44px;
+}
+
+.activity-dock-toggle {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  border: 0;
+  background: var(--panel);
+  color: var(--text);
+  text-align: left;
+  border-bottom: 1px solid transparent;
+  transition: background-color 0.18s ease;
+}
+
+.activity-dock:not(.is-collapsed) .activity-dock-toggle {
+  border-bottom-color: var(--line);
+}
+
+.activity-dock-toggle:hover {
+  background: var(--panel2);
+}
+
+.activity-dock-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+  flex: 0 0 auto;
+}
+
+.activity-dock-chevron {
+  width: 8px;
+  height: 8px;
+  border-right: 1.5px solid var(--muted);
+  border-bottom: 1.5px solid var(--muted);
+  transform: rotate(45deg);
+  margin-top: -3px;
+  transition: transform 0.18s ease;
+}
+
+.activity-dock:not(.is-collapsed) .activity-dock-chevron {
+  transform: rotate(225deg);
+  margin-top: 2px;
+}
+
+.activity-dock-summary {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.activity-dock-sep {
+  margin: 0 6px;
+  color: var(--line2);
+}
+
+.activity-dock-hint {
+  flex: 0 0 auto;
+  font-size: 11px;
+  color: var(--accent-soft);
+  font-weight: 600;
+}
+
+.activity-dock:not(.is-collapsed) .activity-dock-hint {
+  color: var(--muted);
+}
+
+.activity-dock-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 16px 14px;
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  animation: dock-body-in 0.2s ease;
+}
+
+.activity-dock.is-collapsed .activity-dock-body {
+  display: none;
+}
+
+@keyframes dock-body-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.activity-dock-meta {
+  display: grid;
+  grid-template-columns: 1.2fr 1fr;
+  gap: 12px;
+  flex: 0 0 auto;
+}
+
+.activity-meta-block {
+  min-width: 0;
+}
+
 .side-label {
   font-size: 10px;
   text-transform: uppercase;
@@ -840,17 +957,17 @@ textarea.cr-input {
 }
 
 .queue-box {
-  border-radius: 12px;
+  border-radius: 10px;
   border: 1px solid var(--line);
   background: var(--panel);
-  padding: 10px 12px;
-  min-height: 52px;
+  padding: 8px 12px;
+  min-height: 40px;
   color: var(--faint);
   font-size: 12px;
 }
 
 .progress-wrap {
-  margin-top: 2px;
+  margin-top: 0;
 }
 
 .progress-meta {
@@ -893,17 +1010,17 @@ textarea.cr-input {
 }
 
 .activity-wrap {
-  flex: 1;
+  flex: 1 1 auto;
   display: flex;
   flex-direction: column;
   min-height: 0;
 }
 
 .activity-log {
-  flex: 1;
-  min-height: 160px;
-  max-height: none;
-  border-radius: 12px;
+  flex: 1 1 auto;
+  min-height: 100px;
+  max-height: 22vh;
+  border-radius: 10px;
   border: 1px solid var(--line);
   background: var(--panel);
   padding: 10px 12px;
@@ -967,23 +1084,15 @@ textarea.cr-input {
 
 /* ── Responsive stack ── */
 @media (max-width: 980px) {
-  .workspace {
-    grid-template-columns: 1fr;
-  }
-
-  .main-pane {
-    padding-right: 0;
-    border-right: 0;
-    padding-bottom: 14px;
-    border-bottom: 1px solid var(--line);
-  }
-
-  .side-pane {
-    padding-left: 0;
-    padding-top: 14px;
-  }
-
   .cols {
     grid-template-columns: 1fr;
+  }
+
+  .activity-dock-meta {
+    grid-template-columns: 1fr;
+  }
+
+  .activity-dock:not(.is-collapsed) {
+    max-height: 50vh;
   }
 }
