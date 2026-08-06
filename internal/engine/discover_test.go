@@ -95,6 +95,36 @@ func TestPreferEpisodeLandscapeArt(t *testing.T) {
 	}
 }
 
+func TestDedupeCardsBySeriesKeepFirst(t *testing.T) {
+	in := []DiscoverCard{
+		{ID: "ep1", SeriesID: "S1", Title: "Show", Subtitle: "S01E03", EpisodeTitle: "Latest"},
+		{ID: "ep2", SeriesID: "S1", Title: "Show", Subtitle: "S01E02"},
+		{ID: "ep3", SeriesID: "S2", Title: "Other", Subtitle: "S01E01"},
+	}
+	out := dedupeCardsBySeriesKeepFirst(in)
+	if len(out) != 2 {
+		t.Fatalf("len %d", len(out))
+	}
+	if out[0].ID != "ep1" || out[0].EpisodeTitle != "Latest" {
+		t.Fatalf("first %+v", out[0])
+	}
+	if out[1].SeriesID != "S2" {
+		t.Fatalf("second %+v", out[1])
+	}
+}
+
+func TestAttachRemainingLabels(t *testing.T) {
+	p := 0.1
+	in := []DiscoverCard{{
+		Progress:   &p,
+		DurationMS: 21 * 60 * 1000,
+	}}
+	out := attachRemainingLabels(in, "pt-BR")
+	if out[0].RemainingLabel == "" || !strings.Contains(out[0].RemainingLabel, "restantes") {
+		t.Fatalf("label %q", out[0].RemainingLabel)
+	}
+}
+
 func TestPromoteEpisodesToSeriesCards(t *testing.T) {
 	fake := &fakeFeedHydrator{
 		objects: map[string]DiscoverCard{

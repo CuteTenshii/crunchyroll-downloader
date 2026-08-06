@@ -365,6 +365,23 @@ func cardFromHistoryItem(raw json.RawMessage, locale string) (DiscoverCard, stri
 	}
 	_ = json.Unmarshal(raw, &wrap)
 
+	// Episode display name (panel title) before cardFromCMSObject rewrites Title → series.
+	episodeName := ""
+	if len(wrap.Panel) > 0 {
+		var pt struct {
+			Title string `json:"title"`
+		}
+		_ = json.Unmarshal(wrap.Panel, &pt)
+		episodeName = strings.TrimSpace(pt.Title)
+	}
+	if episodeName == "" {
+		var rt struct {
+			Title string `json:"title"`
+		}
+		_ = json.Unmarshal(raw, &rt)
+		episodeName = strings.TrimSpace(rt.Title)
+	}
+
 	var card DiscoverCard
 	var ok bool
 	if len(wrap.Panel) > 0 {
@@ -389,6 +406,7 @@ func cardFromHistoryItem(raw json.RawMessage, locale string) (DiscoverCard, stri
 	if meta == nil && metaHolder.Panel != nil {
 		meta = metaHolder.Panel.EpisodeMetadata
 	}
+
 	if meta != nil {
 		if sid := strings.TrimSpace(meta.SeriesID); sid != "" {
 			card.SeriesID = sid
@@ -404,19 +422,53 @@ func cardFromHistoryItem(raw json.RawMessage, locale string) (DiscoverCard, stri
 		// Some history payloads put series id on parent_id.
 		card.SeriesID = strings.TrimSpace(wrap.ParentID)
 	}
+	if episodeName != "" && episodeName != card.Title {
+		card.EpisodeTitle = episodeName
+	} else if card.EpisodeTitle == "" && card.Subtitle != "" {
+		// Fall back: subtitle only; UI can still show series title.
+	}
 
 	contentID := firstNonEmpty(wrap.ID, card.ID)
 	var durationMS int64
 	if meta != nil {
 		durationMS = meta.DurationMS
 	}
+	card.DurationMS = durationMS
 	// Inline playhead on history item if present.
 	if wrap.FullyWatched {
 		card.Progress = progressPtr(1)
 	} else if wrap.Playhead > 0 && durationMS > 0 {
 		card.Progress = progressPtr(wrap.Playhead / (float64(durationMS) / 1000.0))
 	}
+	// Prefer episode still for landscape (thumbnail over tall poster).
+	if th := thumbnailFromImages(imagesFromHistoryPanel(raw, wrap.Panel)); th != "" {
+		card.WideURL = th
+		if card.PosterURL == "" {
+			card.PosterURL = th
+		}
+	}
 	return card, contentID, durationMS, true
+}
+
+func imagesFromHistoryPanel(raw, panel json.RawMessage) CRImages {
+	var holder struct {
+		Images CRImages `json:"images"`
+		Panel  *struct {
+			Images CRImages `json:"images"`
+		} `json:"panel"`
+	}
+	_ = json.Unmarshal(raw, &holder)
+	if holder.Panel != nil {
+		return holder.Panel.Images
+	}
+	if len(panel) > 0 {
+		var p struct {
+			Images CRImages `json:"images"`
+		}
+		_ = json.Unmarshal(panel, &p)
+		return p.Images
+	}
+	return holder.Images
 }
 
 func applyPlayheadProgress(cards []DiscoverCard, ph map[string]playheadInfo, durations map[string]int64) {

@@ -811,6 +811,10 @@
       progress: progress,
       rank: rank,
       subtitle: fHome(raw, "subtitle", "Subtitle") || "",
+      seriesId: fHome(raw, "seriesId", "SeriesID") || "",
+      episodeTitle: fHome(raw, "episodeTitle", "EpisodeTitle") || "",
+      remainingLabel: fHome(raw, "remainingLabel", "RemainingLabel") || "",
+      durationMs: Number(fHome(raw, "durationMs", "DurationMS") || 0) || 0,
     };
   }
 
@@ -906,42 +910,49 @@
     var btn = document.createElement("button");
     btn.type = "button";
     btn.className = "home-cw-card";
-    btn.title = card.title || card.id || "Open";
+    var seriesName = card.title || card.id || "Untitled";
+    var epLabel = "";
+    if (card.episodeTitle) {
+      epLabel = card.subtitle
+        ? card.subtitle + " - " + card.episodeTitle
+        : card.episodeTitle;
+    } else if (card.subtitle) {
+      epLabel = card.subtitle;
+    }
+    btn.title = seriesName + (epLabel ? " · " + epLabel : "");
     btn.dataset.openUrl = card.openUrl || "";
     btn.dataset.id = card.id || "";
+    btn.dataset.seriesId = card.seriesId || "";
 
     var artUrl = card.wideUrl || card.posterUrl || "";
     var art = makeArtEl("home-cw-art", artUrl, "No art");
-    if (card.progress != null && card.progress > 0) {
+    if (card.progress != null && card.progress >= 0) {
       var bar = document.createElement("div");
       bar.className = "home-cw-progress";
       bar.setAttribute("aria-hidden", "true");
       var fill = document.createElement("i");
-      fill.style.width = Math.round(card.progress * 100) + "%";
+      fill.style.width = Math.round(Math.min(1, Math.max(0, card.progress)) * 100) + "%";
       bar.appendChild(fill);
       art.appendChild(bar);
     }
+    if (card.remainingLabel) {
+      var rem = document.createElement("span");
+      rem.className = "home-cw-remaining";
+      rem.textContent = card.remainingLabel;
+      art.appendChild(rem);
+    }
     btn.appendChild(art);
 
-    var meta = document.createElement("div");
-    meta.className = "home-cw-meta";
-    var metaText = card.title || card.id || "Untitled";
-    if (card.subtitle) metaText = card.title + " — " + card.subtitle;
-    meta.textContent = metaText;
-    btn.appendChild(meta);
+    // CR layout: series name UPPERCASE (small) + episode title (larger).
+    var showTitle = document.createElement("div");
+    showTitle.className = "home-cw-show";
+    showTitle.textContent = seriesName;
+    btn.appendChild(showTitle);
 
-    var subParts = [];
-    if (card.progress != null && card.progress > 0) {
-      subParts.push(Math.round(card.progress * 100) + "%");
-    }
-    if (card.subtitle && !card.title) subParts.push(card.subtitle);
-    else if (card.type) subParts.push(card.type);
-    if (subParts.length) {
-      var sub = document.createElement("div");
-      sub.className = "home-cw-sub";
-      sub.textContent = subParts.join(" · ");
-      btn.appendChild(sub);
-    }
+    var epTitle = document.createElement("div");
+    epTitle.className = "home-cw-ep";
+    epTitle.textContent = epLabel || seriesName;
+    btn.appendChild(epTitle);
 
     btn.addEventListener("click", function () {
       openDiscoverCard(card);
@@ -1768,7 +1779,25 @@
   }
 
   function openDiscoverCard(card) {
-    var url = (card && card.openUrl) || "";
+    var rawUrl = (card && card.openUrl) || "";
+    var seriesId =
+      (card && (card.seriesId || card.SeriesID || "")) || "";
+    seriesId = String(seriesId).trim();
+    // Prefer explicit episode id on card, else parse /watch/{id}/.
+    var epId = "";
+    if (card && card.id && /episode/i.test(String(card.type || ""))) {
+      epId = String(card.id);
+    }
+    if (!epId) epId = episodeIdFromOpenUrl(rawUrl);
+    // Full series catalog + select clicked episode (do NOT inspect bare /watch/ only).
+    var url = rawUrl;
+    if (seriesId) {
+      url = "https://www.crunchyroll.com/series/" + encodeURIComponent(seriesId);
+    } else if (epId) {
+      // Fallback: still try series-style if openUrl was watch-only without seriesId.
+      // Inspect of /watch/ returns a single-episode catalog — avoid that when possible.
+      url = rawUrl;
+    }
     if (!url) {
       showBanner("This title has no openable URL.", "warn");
       logLine("Open card blocked: missing openUrl", "warn");
@@ -1776,14 +1805,14 @@
     }
     if (els.url) els.url.value = url;
     state.url = url;
-    // Prefer explicit episode id on card, else parse /watch/{id}/.
-    var epId = "";
-    if (card && card.id && /episode/i.test(String(card.type || ""))) {
-      epId = String(card.id);
-    }
-    if (!epId) epId = episodeIdFromOpenUrl(url);
     state.pendingSelectEpisodeId = epId || "";
-    logLine("Open · " + ((card && card.title) || url), "info", { quiet: true });
+    logLine(
+      "Open · " +
+        ((card && card.title) || url) +
+        (epId ? " (select " + epId + ")" : ""),
+      "info",
+      { quiet: true }
+    );
     setAppView("download");
     schedulePersist();
     // Auto-Inspect when cookie is ready.

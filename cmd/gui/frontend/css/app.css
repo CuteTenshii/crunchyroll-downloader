@@ -700,7 +700,7 @@ button {
 .home-block-hero {
   position: relative;
   height: 320px;
-  margin: 0 0 22px;
+  margin: 0 0 32px;
   border-radius: 0 0 16px 16px;
   overflow: hidden;
   background:
@@ -886,7 +886,7 @@ button {
 .home-rail {
   min-width: 0;
   padding: 0 18px;
-  margin-bottom: 22px;
+  margin-bottom: 32px; /* more vertical space between sections */
 }
 
 .home-rail-title,
@@ -911,7 +911,7 @@ button {
 
 .home-rail-scroller {
   display: flex;
-  gap: 12px;
+  gap: 18px; /* 1.5× previous 12px */
   overflow-x: auto;
   padding-bottom: 6px;
   scroll-snap-type: x proximity;
@@ -974,10 +974,10 @@ button {
   font-weight: 600;
 }
 
-/* Title under poster: +75% vs 11.5px → ~20px */
+/* Title under poster (was 20px; reduced by 15px → 5px is unusable, use 15px) */
 .home-card-title {
   margin-top: 8px;
-  font-size: 20px;
+  font-size: 15px;
   font-weight: 700;
   line-height: 1.25;
   display: -webkit-box;
@@ -1025,7 +1025,7 @@ button {
   text-stroke-color: var(--accent);
 }
 
-/* Landscape Continue Watching cards ~264×149 (+20%) */
+/* Landscape Continue Watching cards ~264×149 (+20%) — CR playable-card layout */
 .home-cw-card {
   flex: 0 0 264px;
   width: 264px;
@@ -1051,6 +1051,52 @@ button {
 .home-cw-card:hover .home-cw-art {
   border-color: var(--accent);
   box-shadow: 0 0 0 1px rgba(249, 115, 22, 0.35);
+}
+
+/* Overlay: “21m restantes” bottom-right on thumb */
+.home-cw-remaining {
+  position: absolute;
+  right: 6px;
+  bottom: 10px;
+  z-index: 2;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(12, 10, 9, 0.78);
+  color: #fafaf9;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.2;
+  pointer-events: none;
+}
+
+.home-cw-progress {
+  z-index: 2;
+}
+
+/* Series name (UPPERCASE, small, muted) */
+.home-cw-show {
+  margin-top: 8px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Episode title (larger than series name) */
+.home-cw-ep {
+  margin-top: 3px;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.25;
+  color: var(--text);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
 .home-cw-meta {
@@ -1127,7 +1173,7 @@ button {
 
 /* In-feed banner strip */
 .home-banner {
-  margin: 8px 18px 22px;
+  margin: 8px 18px 32px;
   height: 88px;
   border-radius: 12px;
   border: 1px solid var(--line);

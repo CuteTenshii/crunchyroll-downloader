@@ -37,9 +37,15 @@ type DiscoverCard struct {
 	OpenURL  string   `json:"openUrl"`
 	Progress *float64 `json:"progress,omitempty"` // 0..1 Continue Watching
 	Rank     int      `json:"rank,omitempty"`     // 1..10 Top 10 chrome
-	Subtitle string   `json:"subtitle,omitempty"` // e.g. S01E12
+	Subtitle string   `json:"subtitle,omitempty"` // e.g. S01E12 / E3
 	// SeriesID is set for episode-like cards so rails can promote to series posters.
 	SeriesID string `json:"seriesId,omitempty"`
+	// EpisodeTitle is the episode name (CW layout); Title is the series name.
+	EpisodeTitle string `json:"episodeTitle,omitempty"`
+	// RemainingLabel is overlay text like "21m remaining" / "21m restantes".
+	RemainingLabel string `json:"remainingLabel,omitempty"`
+	// DurationMS is the episode duration when known (for remaining-time label).
+	DurationMS int64 `json:"durationMs,omitempty"`
 }
 
 // DiscoverRail is a horizontal home-feed section (backward-compat view of a rail block).
@@ -481,13 +487,17 @@ func buildHomeBlocks(data []json.RawMessage, accountID, locale string, h feedHyd
 				if err != nil || len(cards) == 0 {
 					return
 				}
-				// Continue Watching: keep episode rows + episode thumbs (do not promote).
+				// Continue Watching: episode thumbs, one card per series (most recent first).
 				// My List / New Releases / recs / similar: promote episodes → series posters.
-				if j.hydrate != hydrateHistory {
-					cards = promoteEpisodesToSeriesCards(cards, locale, h)
-				} else {
-					// Prefer episode landscape art for CW cards.
+				if j.hydrate == hydrateHistory {
 					cards = preferEpisodeLandscapeArt(cards)
+					cards = attachRemainingLabels(cards, locale)
+					// History API is newest-first → keep first card per series.
+					cards = dedupeCardsBySeriesKeepFirst(cards)
+				} else {
+					cards = promoteEpisodesToSeriesCards(cards, locale, h)
+					// Browse/new releases can repeat the same series/episode.
+					cards = dedupeCards(cards)
 				}
 				j.cards = cards
 				j.ok = len(cards) > 0
@@ -637,6 +647,80 @@ func preferEpisodeLandscapeArt(cards []DiscoverCard) []DiscoverCard {
 		// series art, keep whatever we have. History parser already prefers thumbs.
 		if c.WideURL == "" && c.PosterURL != "" {
 			c.WideURL = c.PosterURL
+		}
+	}
+	return cards
+}
+
+// dedupeCardsBySeriesKeepFirst keeps the first card per series (or id).
+// Watch-history is newest-first, so this is the most recently watched episode per show.
+func dedupeCardsBySeriesKeepFirst(cards []DiscoverCard) []DiscoverCard {
+	if len(cards) == 0 {
+		return cards
+	}
+	seen := map[string]struct{}{}
+	out := make([]DiscoverCard, 0, len(cards))
+	for _, c := range cards {
+		key := strings.TrimSpace(c.SeriesID)
+		if key == "" {
+			key = strings.TrimSpace(c.ID)
+		}
+		if key == "" {
+			key = strings.ToLower(strings.TrimSpace(c.Title))
+		}
+		if key == "" {
+			continue
+		}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, c)
+	}
+	return out
+}
+
+// attachRemainingLabels fills RemainingLabel from progress + duration when possible.
+func attachRemainingLabels(cards []DiscoverCard, locale string) []DiscoverCard {
+	locale = strings.ToLower(normalizeDiscoverLocale(locale))
+	pt := strings.HasPrefix(locale, "pt")
+	for i := range cards {
+		c := &cards[i]
+		if c.RemainingLabel != "" {
+			continue
+		}
+		if c.Progress == nil || c.DurationMS <= 0 {
+			continue
+		}
+		p := *c.Progress
+		if p < 0 {
+			p = 0
+		}
+		if p > 1 {
+			p = 1
+		}
+		if p >= 0.98 {
+			if pt {
+				c.RemainingLabel = "Concluído"
+			} else {
+				c.RemainingLabel = "Completed"
+			}
+			continue
+		}
+		remainSec := int((float64(c.DurationMS) / 1000.0) * (1.0 - p))
+		if remainSec < 60 {
+			if pt {
+				c.RemainingLabel = "<1m restante"
+			} else {
+				c.RemainingLabel = "<1m left"
+			}
+			continue
+		}
+		mins := remainSec / 60
+		if pt {
+			c.RemainingLabel = fmt.Sprintf("%dm restantes", mins)
+		} else {
+			c.RemainingLabel = fmt.Sprintf("%dm left", mins)
 		}
 	}
 	return cards
@@ -962,9 +1046,20 @@ func mapOneHeroItem(raw json.RawMessage, locale string) DiscoverHero {
 				h.Description = card.Description
 			}
 		}
+		// Last resort: walk the whole panel JSON for any image URL (imgsrv, etc.).
+		if h.WideURL == "" {
+			h.WideURL = scrapeAnyImageURL(it.Panel)
+		}
+	}
+	if h.WideURL == "" && len(it.Images) > 0 {
+		h.WideURL = scrapeAnyImageURL(it.Images)
 	}
 	if h.WideURL == "" {
 		h.WideURL = h.PosterURL
+	}
+	// Last resort: walk the entire hero item.
+	if h.WideURL == "" {
+		h.WideURL = scrapeAnyImageURL(raw)
 	}
 	return h
 }
@@ -1055,9 +1150,72 @@ func absoluteAssetURL(u string) string {
 		return "https:" + u
 	}
 	if strings.HasPrefix(u, "/") {
+		// Crunchyroll static CDN paths sometimes appear root-relative under imgsrv.
+		if strings.Contains(u, "catalog/") || strings.Contains(u, "cdn-cgi/") {
+			return "https://imgsrv.crunchyroll.com" + u
+		}
 		return "https://www.crunchyroll.com" + u
 	}
 	return u
+}
+
+// scrapeAnyImageURL walks arbitrary JSON for the first usable image URL
+// (source fields, imgsrv hosts, common extensions). Last-resort for hero art.
+func scrapeAnyImageURL(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var s string
+	if json.Unmarshal(raw, &s) == nil {
+		s = strings.TrimSpace(s)
+		if looksLikeImageURL(s) {
+			return absoluteAssetURL(s)
+		}
+		return ""
+	}
+	var arr []json.RawMessage
+	if json.Unmarshal(raw, &arr) == nil {
+		for _, el := range arr {
+			if u := scrapeAnyImageURL(el); u != "" {
+				return u
+			}
+		}
+		return ""
+	}
+	var obj map[string]json.RawMessage
+	if json.Unmarshal(raw, &obj) != nil {
+		return ""
+	}
+	// Prefer explicit source keys first.
+	for _, key := range []string{"source", "url", "src", "image", "image_url", "poster_wide", "landscape_large", "desktop_large"} {
+		if v, ok := obj[key]; ok {
+			if u := scrapeAnyImageURL(v); u != "" {
+				return u
+			}
+		}
+	}
+	for _, v := range obj {
+		if u := scrapeAnyImageURL(v); u != "" {
+			return u
+		}
+	}
+	return ""
+}
+
+func looksLikeImageURL(s string) bool {
+	s = strings.ToLower(strings.TrimSpace(s))
+	if s == "" {
+		return false
+	}
+	if strings.Contains(s, "imgsrv.crunchyroll.com") || strings.Contains(s, "img1.ak.crunchyroll.com") {
+		return true
+	}
+	if strings.HasPrefix(s, "http://") || strings.HasPrefix(s, "https://") || strings.HasPrefix(s, "//") {
+		return strings.Contains(s, ".jpg") || strings.Contains(s, ".png") ||
+			strings.Contains(s, ".webp") || strings.Contains(s, ".jpeg") ||
+			strings.Contains(s, "cdn-cgi/image") || strings.Contains(s, "/catalog/")
+	}
+	return false
 }
 
 // mapInFeedBanner extracts a banner only when the open URL is series/watch catalog content.
