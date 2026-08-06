@@ -346,10 +346,11 @@ func TestMapInFeedBannerOnlyCatalogURLs(t *testing.T) {
 func TestLooksLikeTop10(t *testing.T) {
 	positives := []struct{ title, id string }{
 		{"Top 10 Series", "x"},
+		{"Top 10 Anime", "x"},
 		{"Top10 da Semana", "x"},
 		{"CR Top-10", "x"},
-		{"Mais Populares", "rail-1"},
-		{"Most Popular Anime", ""},
+		{"Os 10 mais assistidos", "rail-1"},
+		{"10 mais populares da semana", ""},
 		{"Ranking semanal", "top10-rail"},
 		{"", "home_top_10_series"},
 	}
@@ -362,12 +363,95 @@ func TestLooksLikeTop10(t *testing.T) {
 		{"Continue Watching", "history"},
 		{"New Episodes", "recent"},
 		{"Because you watched X", "byw"},
+		// Series titles / generic popularity must not trip Top 10 chrome.
+		{"Because you watched Ranking of Kings", "byw"},
+		{"Ranking of Kings", "series-GY"},
+		{"Mais Populares", "rail-1"},
+		{"Most Popular Anime", ""},
+		{"Ranking semanal", "weekly-rank"},
 		{"", ""},
 	}
 	for _, n := range negatives {
 		if looksLikeTop10(n.title, n.id) {
 			t.Fatalf("unexpected top10 for title=%q id=%q", n.title, n.id)
 		}
+	}
+}
+
+func TestMediaIDFromSimilarToLink(t *testing.T) {
+	cases := []struct {
+		link string
+		want string
+	}{
+		{"/similar_to/GYZJ43JMR", "GYZJ43JMR"},
+		{"/content/v2/discover/similar_to/GYZJ43JMR", "GYZJ43JMR"},
+		{"/content/v2/discover/acct/similar_to/ABC123?n=20&locale=pt-BR", "ABC123"},
+		{"https://www.crunchyroll.com/content/v2/discover/similar_to/XYZ99", "XYZ99"},
+		{"/content/v2/discover/browse?sort_by=popularity", ""},
+		{"", ""},
+		{"/similar_to/", ""},
+	}
+	for _, tc := range cases {
+		if got := mediaIDFromSimilarToLink(tc.link); got != tc.want {
+			t.Fatalf("link %q: got %q want %q", tc.link, got, tc.want)
+		}
+	}
+}
+
+func TestMapHomeFeedEntrySimilarToFromLink(t *testing.T) {
+	// response_type similar_to with id only in link path (no source_media_id field).
+	raw := json.RawMessage(`{
+		"resource_type": "dynamic_collection",
+		"response_type": "similar_to",
+		"title": "Because you watched Slime",
+		"link": "/content/v2/discover/similar_to/GYZJ43JMR"
+	}`)
+	got := mapHomeFeedEntry(raw, 0, "pt-BR")
+	if got.Skip {
+		t.Fatal("unexpected skip")
+	}
+	if got.Hydrate != hydrateBecauseYouWatched {
+		t.Fatalf("hydrate %q", got.Hydrate)
+	}
+	if got.SourceMediaID != "GYZJ43JMR" {
+		t.Fatalf("source %q", got.SourceMediaID)
+	}
+
+	// Unknown response_type but link contains similar_to/{id}.
+	raw2 := json.RawMessage(`{
+		"resource_type": "dynamic_collection",
+		"response_type": "custom_row",
+		"title": "More like this",
+		"link": "/content/v2/discover/abc/similar_to/SERIES99"
+	}`)
+	got2 := mapHomeFeedEntry(raw2, 1, "pt-BR")
+	if got2.Skip {
+		t.Fatal("unexpected skip for link-only similar_to")
+	}
+	if got2.Hydrate != hydrateBecauseYouWatched {
+		t.Fatalf("hydrate %q", got2.Hydrate)
+	}
+	if got2.SourceMediaID != "SERIES99" {
+		t.Fatalf("source %q", got2.SourceMediaID)
+	}
+}
+
+func TestApplyPlayheadProgressOmitsWhenDurationUnknown(t *testing.T) {
+	cards := []DiscoverCard{{ID: "GWDU82Z05", Title: "Ep"}}
+	ph := map[string]playheadInfo{
+		"GWDU82Z05": {Playhead: 120, FullyWatched: false},
+	}
+	// No duration for this content id.
+	applyPlayheadProgress(cards, ph, map[string]int64{})
+	if cards[0].Progress != nil {
+		t.Fatalf("expected nil progress when duration unknown, got %v", *cards[0].Progress)
+	}
+
+	// Fully watched still sets progress without duration.
+	ph["GWDU82Z05"] = playheadInfo{Playhead: 120, FullyWatched: true}
+	applyPlayheadProgress(cards, ph, map[string]int64{})
+	if cards[0].Progress == nil || *cards[0].Progress != 1 {
+		t.Fatalf("fully watched should set progress=1, got %v", cards[0].Progress)
 	}
 }
 

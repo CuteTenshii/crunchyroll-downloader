@@ -629,6 +629,10 @@ func mapDynamicCollection(raw json.RawMessage, head feedItemHead, id, title, res
 	_ = json.Unmarshal(raw, &extra)
 	sourceID := firstNonEmpty(head.SourceMediaID, extra.SourceMediaID, extra.SourceMedia.ID)
 	link := firstNonEmpty(head.Link, extra.Link)
+	// similar_to / because_you_watched often only carry the media id in the link path.
+	if sourceID == "" {
+		sourceID = mediaIDFromSimilarToLink(link)
+	}
 
 	switch respType {
 	case "history", "continue_watching", "watch_history":
@@ -722,6 +726,38 @@ func mapDynamicCollection(raw json.RawMessage, head feedItemHead, id, title, res
 		}
 		return feedMapResult{Skip: true}
 	}
+}
+
+// mediaIDFromSimilarToLink extracts a media id from a path containing similar_to/{id}.
+// Examples: /similar_to/GYZJ43JMR, /content/v2/discover/similar_to/ID?n=20
+// Returns empty when the segment is missing or unparseable.
+func mediaIDFromSimilarToLink(link string) string {
+	link = strings.TrimSpace(link)
+	if link == "" {
+		return ""
+	}
+	if i := strings.IndexAny(link, "?#"); i >= 0 {
+		link = link[:i]
+	}
+	// Prefer path-only when an absolute URL is provided.
+	if u, err := url.Parse(link); err == nil && u.Path != "" {
+		link = u.Path
+	}
+	parts := strings.Split(strings.Trim(link, "/"), "/")
+	for i, p := range parts {
+		if !strings.EqualFold(p, "similar_to") {
+			continue
+		}
+		if i+1 >= len(parts) {
+			return ""
+		}
+		id := strings.TrimSpace(parts[i+1])
+		if id == "" || strings.EqualFold(id, "similar_to") {
+			return ""
+		}
+		return id
+	}
+	return ""
 }
 
 func mapHeroItems(raw json.RawMessage, locale string) []DiscoverHero {
@@ -831,31 +867,27 @@ func isCatalogOpenURL(open string) bool {
 }
 
 // looksLikeTop10 uses title/id heuristics (locale-aware) for Top 10 chrome.
+// Only explicit top-10 rank-list phrases match — bare "ranking" / "most popular"
+// false-positive on series titles like "Ranking of Kings".
 func looksLikeTop10(title, id string) bool {
 	s := strings.ToLower(strings.TrimSpace(title + " " + id))
 	if s == "" {
 		return false
 	}
-	// Normalize separators for matching.
+	// Normalize separators so top-10 / top_10 become "top 10".
 	compact := strings.NewReplacer("-", " ", "_", " ", ".", " ").Replace(s)
 	compact = strings.Join(strings.Fields(compact), " ")
 	needles := []string{
 		"top 10",
 		"top10",
 		"top ten",
-		"top-10",
-		"mais populares",
-		"most popular",
-		"ranking",
+		"os 10 mais",
+		"10 mais",
 	}
 	for _, n := range needles {
 		if strings.Contains(s, n) || strings.Contains(compact, n) {
 			return true
 		}
-	}
-	// top10 without space already covered; also "top_10" via compact.
-	if strings.Contains(compact, "top 10") {
-		return true
 	}
 	return false
 }

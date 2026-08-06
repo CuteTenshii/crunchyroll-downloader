@@ -429,11 +429,7 @@ func applyPlayheadProgress(cards []DiscoverCard, ph map[string]playheadInfo, dur
 		// Skip if history already set progress and playhead is zero.
 		dur := durations[cards[i].ID]
 		if dur <= 0 {
-			// Unknown duration: approximate mid-watch if playhead > 0.
-			if info.Playhead > 0 && cards[i].Progress == nil {
-				// Soft progress so UI can show a bar without claiming exact %.
-				cards[i].Progress = progressPtr(0.5)
-			}
+			// Unknown duration: leave progress unset rather than inventing a value.
 			continue
 		}
 		cards[i].Progress = progressPtr(info.Playhead / (float64(dur) / 1000.0))
