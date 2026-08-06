@@ -40,21 +40,149 @@ func (a *App) startup(ctx context.Context) {
 	if err != nil {
 		return
 	}
+	prefs.EnsureCookieProfiles()
 	a.prefs = prefs
 }
 
 // GetPreferences returns the in-memory preferences snapshot.
+// Migrates legacy CookieFile-only prefs into a default cookie profile when needed.
 func (a *App) GetPreferences() engine.Preferences {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	a.prefs.EnsureCookieProfiles()
 	return a.prefs
 }
 
 // SavePreferences persists p to the default preferences path and updates memory.
 func (a *App) SavePreferences(p engine.Preferences) error {
+	p.EnsureCookieProfiles()
 	a.mu.Lock()
 	a.prefs = p
 	a.mu.Unlock()
+	path, err := engine.DefaultPreferencesPath()
+	if err != nil {
+		return err
+	}
+	return engine.SavePreferences(path, p)
+}
+
+// ListCookieProfiles returns configured cookie-file profiles (paths only).
+func (a *App) ListCookieProfiles() []engine.CookieProfile {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.prefs.ListCookieProfiles()
+}
+
+// UpsertCookieProfile creates or updates a cookie profile by id (empty id generates).
+func (a *App) UpsertCookieProfile(p engine.CookieProfile) error {
+	a.mu.Lock()
+	_, err := a.prefs.UpsertCookieProfile(p)
+	prefs := a.prefs
+	a.mu.Unlock()
+	if err != nil {
+		return err
+	}
+	return a.persistPrefs(prefs)
+}
+
+// DeleteCookieProfile removes a cookie profile by id.
+func (a *App) DeleteCookieProfile(id string) error {
+	a.mu.Lock()
+	err := a.prefs.DeleteCookieProfile(id)
+	prefs := a.prefs
+	a.mu.Unlock()
+	if err != nil {
+		return err
+	}
+	return a.persistPrefs(prefs)
+}
+
+// SwitchCookieProfile sets the active cookie profile, persists, and re-authenticates.
+// The frontend should clear Home cache after a successful switch.
+func (a *App) SwitchCookieProfile(id string) error {
+	a.mu.Lock()
+	err := a.prefs.SwitchCookieProfile(id)
+	prefs := a.prefs
+	a.mu.Unlock()
+	if err != nil {
+		return err
+	}
+	if err := a.persistPrefs(prefs); err != nil {
+		return err
+	}
+	engine.ClearAuthState()
+	cookie := strings.TrimSpace(prefs.CookieFile)
+	if cookie == "" {
+		return fmt.Errorf("active cookie profile has no cookie file path")
+	}
+	return engine.AuthenticateFromCookieFile(cookie)
+}
+
+// ListCRProfiles returns Crunchyroll multiprofile entries when available.
+// Empty list on API unavailability — never fails Home solely for multiprofile.
+func (a *App) ListCRProfiles() ([]engine.CRProfile, error) {
+	a.mu.Lock()
+	prefs := a.prefs
+	a.mu.Unlock()
+
+	cookie := strings.TrimSpace(prefs.CookieFile)
+	if cookie == "" {
+		return []engine.CRProfile{}, nil
+	}
+	if err := engine.AuthenticateFromCookieFile(cookie); err != nil {
+		// Soft-fail: multiprofile is optional.
+		return []engine.CRProfile{}, nil
+	}
+	profiles, err := engine.ListCRProfiles()
+	if err != nil {
+		return []engine.CRProfile{}, nil
+	}
+	if profiles == nil {
+		return []engine.CRProfile{}, nil
+	}
+	// Mark selected from prefs when API omits isSelected.
+	active := strings.TrimSpace(prefs.ActiveCRProfileID)
+	if active != "" {
+		for i := range profiles {
+			if profiles[i].ID == active {
+				profiles[i].IsSelected = true
+			}
+		}
+	}
+	return profiles, nil
+}
+
+// SwitchCRProfile stores the preferred multiprofile id and best-effort activates it.
+func (a *App) SwitchCRProfile(profileID string) error {
+	profileID = strings.TrimSpace(profileID)
+	if profileID == "" {
+		return fmt.Errorf("profile id is required")
+	}
+
+	a.mu.Lock()
+	a.prefs.ActiveCRProfileID = profileID
+	prefs := a.prefs
+	a.mu.Unlock()
+
+	if err := a.persistPrefs(prefs); err != nil {
+		return err
+	}
+
+	cookie := strings.TrimSpace(prefs.CookieFile)
+	if cookie == "" {
+		return nil
+	}
+	if err := engine.AuthenticateFromCookieFile(cookie); err != nil {
+		// Prefs already saved; surface soft failure as nil so UI can still reload.
+		return nil
+	}
+	_ = engine.SwitchCRProfile(profileID)
+	// Re-auth after activate attempt so subsequent Home uses the new context if any.
+	_ = engine.AuthenticateFromCookieFile(cookie)
+	return nil
+}
+
+func (a *App) persistPrefs(p engine.Preferences) error {
 	path, err := engine.DefaultPreferencesPath()
 	if err != nil {
 		return err

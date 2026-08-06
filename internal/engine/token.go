@@ -60,7 +60,22 @@ func (e *AccountIdentityMismatchError) Error() string {
 func setETPRT(secret string) {
 	authState.Lock()
 	defer authState.Unlock()
+	// Switching cookie profiles must not pin the previous account identity.
+	if authState.etpRT != secret {
+		authState.accountID = ""
+		token = ""
+	}
 	authState.etpRT = secret
+}
+
+// ClearAuthState drops the in-memory credential and account pin. Used when
+// switching cookie profiles so the next refresh can adopt a new identity.
+func ClearAuthState() {
+	authState.Lock()
+	defer authState.Unlock()
+	authState.etpRT = ""
+	authState.accountID = ""
+	token = ""
 }
 
 func getETPRT() string {
