@@ -481,11 +481,13 @@ func buildHomeBlocks(data []json.RawMessage, accountID, locale string, h feedHyd
 				if err != nil || len(cards) == 0 {
 					return
 				}
-				// Episode rows → series posters/titles (My List, New Releases, CW, etc.).
-				cards = promoteEpisodesToSeriesCards(cards, locale, h)
-				if j.hydrate == hydrateHistory {
-					// One card per series: most recent history entry wins (API order).
-					cards = dedupeCardsBySeriesKeepFirst(cards)
+				// Continue Watching: keep episode rows + episode thumbs (do not promote).
+				// My List / New Releases / recs / similar: promote episodes → series posters.
+				if j.hydrate != hydrateHistory {
+					cards = promoteEpisodesToSeriesCards(cards, locale, h)
+				} else {
+					// Prefer episode landscape art for CW cards.
+					cards = preferEpisodeLandscapeArt(cards)
 				}
 				j.cards = cards
 				j.ok = len(cards) > 0
@@ -623,32 +625,21 @@ func isEpisodeLikeCard(c DiscoverCard) bool {
 	return false
 }
 
-// dedupeCardsBySeriesKeepFirst keeps the first card per series (or id).
-// Watch-history is newest-first, so this yields one Continue Watching card per anime.
-func dedupeCardsBySeriesKeepFirst(cards []DiscoverCard) []DiscoverCard {
-	if len(cards) == 0 {
-		return cards
-	}
-	seen := map[string]struct{}{}
-	out := make([]DiscoverCard, 0, len(cards))
-	for _, c := range cards {
-		key := strings.TrimSpace(c.SeriesID)
-		if key == "" {
-			key = strings.TrimSpace(c.ID)
-		}
-		if key == "" {
-			key = strings.ToLower(strings.TrimSpace(c.Title))
-		}
-		if key == "" {
+// preferEpisodeLandscapeArt ensures CW landscape cards use episode stills
+// (thumbnail/wide) rather than tall series posters when both exist.
+func preferEpisodeLandscapeArt(cards []DiscoverCard) []DiscoverCard {
+	for i := range cards {
+		c := &cards[i]
+		if !isEpisodeLikeCard(*c) {
 			continue
 		}
-		if _, ok := seen[key]; ok {
-			continue
+		// Landscape rail uses wide first; if wide is empty but poster is a tall
+		// series art, keep whatever we have. History parser already prefers thumbs.
+		if c.WideURL == "" && c.PosterURL != "" {
+			c.WideURL = c.PosterURL
 		}
-		seen[key] = struct{}{}
-		out = append(out, c)
 	}
-	return out
+	return cards
 }
 
 // mapHomeFeedEntry is a pure mapper from one home_feed item to a block skeleton + hydrate hint.
@@ -902,82 +893,120 @@ func mediaIDFromSimilarToLink(link string) string {
 
 func mapHeroItems(raw json.RawMessage, locale string) []DiscoverHero {
 	var hero struct {
-		Items []struct {
-			Title       string          `json:"title"`
-			Description string          `json:"description"`
-			Link        string          `json:"link"`
-			ButtonText  string          `json:"button_text"`
-			Slug        string          `json:"slug"`
-			Images      json.RawMessage `json:"images"`
-			Panel       json.RawMessage `json:"panel"`
-		} `json:"items"`
+		Items []json.RawMessage `json:"items"`
 	}
 	if err := json.Unmarshal(raw, &hero); err != nil {
 		return nil
 	}
 	var out []DiscoverHero
-	for _, it := range hero.Items {
-		wide, poster := heroImageURLs(it.Images)
-		h := DiscoverHero{
-			Title:       it.Title,
-			Description: it.Description,
-			WideURL:     wide,
-			PosterURL:   poster,
-			ButtonText:  it.ButtonText,
-			OpenURL:     normalizeOpenURL(it.Link, locale),
-		}
-		// Always merge panel CMS art when present (CR often only puts art on panel).
-		if len(it.Panel) > 0 {
-			if card, ok := cardFromCMSObject(it.Panel, locale); ok {
-				if h.OpenURL == "" {
-					h.OpenURL = card.OpenURL
-				}
-				if h.PosterURL == "" {
-					h.PosterURL = card.PosterURL
-				}
-				if h.WideURL == "" {
-					h.WideURL = firstNonEmpty(card.WideURL, card.PosterURL)
-				}
-				if h.Title == "" {
-					h.Title = card.Title
-				}
-				if h.Description == "" {
-					h.Description = card.Description
-				}
-			}
-		}
-		if h.WideURL == "" {
-			h.WideURL = h.PosterURL
-		}
-		if h.Title != "" || h.OpenURL != "" {
+	for _, itemRaw := range hero.Items {
+		h := mapOneHeroItem(itemRaw, locale)
+		if h.Title != "" || h.OpenURL != "" || h.WideURL != "" || h.PosterURL != "" {
 			out = append(out, h)
 		}
 	}
 	return out
 }
 
+func mapOneHeroItem(raw json.RawMessage, locale string) DiscoverHero {
+	var it struct {
+		Title       string          `json:"title"`
+		Description string          `json:"description"`
+		Link        string          `json:"link"`
+		URL         string          `json:"url"`
+		ButtonText  string          `json:"button_text"`
+		Slug        string          `json:"slug"`
+		ImageURL    string          `json:"image_url"`
+		Images      json.RawMessage `json:"images"`
+		Panel       json.RawMessage `json:"panel"`
+	}
+	_ = json.Unmarshal(raw, &it)
+
+	wide, poster := heroImageURLs(it.Images)
+	if wide == "" {
+		wide = strings.TrimSpace(it.ImageURL)
+	}
+	h := DiscoverHero{
+		Title:       it.Title,
+		Description: it.Description,
+		WideURL:     absoluteAssetURL(wide),
+		PosterURL:   absoluteAssetURL(poster),
+		ButtonText:  it.ButtonText,
+		OpenURL:     normalizeOpenURL(firstNonEmpty(it.Link, it.URL), locale),
+	}
+
+	// Always merge panel CMS art when present (CR often only puts art on panel).
+	if len(it.Panel) > 0 {
+		// Flexible panel image scrape (not only typed CRImages).
+		pw, pp := heroImagesFromPanelRaw(it.Panel)
+		if h.WideURL == "" {
+			h.WideURL = absoluteAssetURL(pw)
+		}
+		if h.PosterURL == "" {
+			h.PosterURL = absoluteAssetURL(pp)
+		}
+		if card, ok := cardFromCMSObject(it.Panel, locale); ok {
+			if h.OpenURL == "" {
+				h.OpenURL = card.OpenURL
+			}
+			if h.PosterURL == "" {
+				h.PosterURL = absoluteAssetURL(card.PosterURL)
+			}
+			if h.WideURL == "" {
+				h.WideURL = absoluteAssetURL(firstNonEmpty(card.WideURL, card.PosterURL))
+			}
+			if h.Title == "" {
+				h.Title = card.Title
+			}
+			if h.Description == "" {
+				h.Description = card.Description
+			}
+		}
+	}
+	if h.WideURL == "" {
+		h.WideURL = h.PosterURL
+	}
+	return h
+}
+
 // heroImageURLs extracts wide/poster URLs from CR hero image objects that may be
-// flat string maps or nested CMS image groups.
+// flat string maps, single URL strings, or nested CMS image groups.
 func heroImageURLs(raw json.RawMessage) (wide, poster string) {
 	if len(raw) == 0 {
 		return "", ""
 	}
+	// Single string URL
+	var single string
+	if err := json.Unmarshal(raw, &single); err == nil && strings.TrimSpace(single) != "" {
+		return strings.TrimSpace(single), ""
+	}
 	// Flat string map (common on hero_carousel items).
-	var flat map[string]string
+	var flat map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &flat); err == nil && len(flat) > 0 {
-		wide = firstNonEmpty(
-			flat["landscape_large"],
-			flat["desktop_large"],
-			flat["desktop_wide"],
-			flat["poster_wide"],
-			flat["wide"],
-			flat["banner"],
+		pickStr := func(keys ...string) string {
+			for _, k := range keys {
+				v, ok := flat[k]
+				if !ok || len(v) == 0 {
+					continue
+				}
+				var s string
+				if json.Unmarshal(v, &s) == nil && strings.TrimSpace(s) != "" {
+					return strings.TrimSpace(s)
+				}
+				// Nested groups under this key
+				if u := pickImageURLFromRawGroups(v, 1280); u != "" {
+					return u
+				}
+			}
+			return ""
+		}
+		wide = pickStr(
+			"landscape_large", "desktop_large", "desktop_wide", "desktop_hero_wide",
+			"poster_wide", "wide", "banner", "background", "background_image",
+			"image", "src", "url",
 		)
-		poster = firstNonEmpty(
-			flat["portrait_large"],
-			flat["poster_tall"],
-			flat["tall"],
-			flat["poster"],
+		poster = pickStr(
+			"portrait_large", "poster_tall", "tall", "poster", "mobile_poster",
 		)
 		if wide != "" || poster != "" {
 			return wide, poster
@@ -988,12 +1017,47 @@ func heroImageURLs(raw json.RawMessage) (wide, poster string) {
 	if err := json.Unmarshal(raw, &imgs); err == nil {
 		wide = firstNonEmpty(
 			pickImageURLFromGroups(imgs.PosterWide, 1280),
-			pickImageURLFromGroups(imgs.Thumbnail, 640),
+			pickImageURLFromGroups(imgs.Thumbnail, 960),
 		)
 		poster = pickImageURLFromGroups(imgs.PosterTall, 480)
 		return wide, poster
 	}
 	return "", ""
+}
+
+func heroImagesFromPanelRaw(panel json.RawMessage) (wide, poster string) {
+	var obj struct {
+		Images json.RawMessage `json:"images"`
+	}
+	if json.Unmarshal(panel, &obj) != nil {
+		return "", ""
+	}
+	return heroImageURLs(obj.Images)
+}
+
+func pickImageURLFromRawGroups(raw json.RawMessage, maxWidth int) string {
+	var groups [][]CRImage
+	if json.Unmarshal(raw, &groups) != nil {
+		return ""
+	}
+	return pickImageURLFromGroups(groups, maxWidth)
+}
+
+func absoluteAssetURL(u string) string {
+	u = strings.TrimSpace(u)
+	if u == "" {
+		return ""
+	}
+	if strings.HasPrefix(u, "http://") || strings.HasPrefix(u, "https://") {
+		return u
+	}
+	if strings.HasPrefix(u, "//") {
+		return "https:" + u
+	}
+	if strings.HasPrefix(u, "/") {
+		return "https://www.crunchyroll.com" + u
+	}
+	return u
 }
 
 // mapInFeedBanner extracts a banner only when the open URL is series/watch catalog content.

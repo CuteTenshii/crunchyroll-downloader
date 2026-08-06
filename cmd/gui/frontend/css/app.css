@@ -930,10 +930,10 @@ button {
   border: 2px solid var(--bg);
 }
 
-/* Dense tall posters ~128×184 */
+/* Dense tall posters ~192×276 (+50% vs 128×184) */
 .home-card {
-  flex: 0 0 128px;
-  width: 128px;
+  flex: 0 0 192px;
+  width: 192px;
   border: 0;
   padding: 0;
   background: transparent;
@@ -950,9 +950,9 @@ button {
 
 .home-card-art {
   position: relative;
-  width: 128px;
-  height: 184px;
-  border-radius: 10px;
+  width: 192px;
+  height: 276px;
+  border-radius: 12px;
   overflow: hidden;
   background: var(--panel2);
   border: 1px solid var(--line);
@@ -970,15 +970,16 @@ button {
   display: grid;
   place-items: center;
   color: var(--faint);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
 }
 
+/* Title under poster: +75% vs 11.5px → ~20px */
 .home-card-title {
-  margin-top: 6px;
-  font-size: 11.5px;
-  font-weight: 600;
-  line-height: 1.3;
+  margin-top: 8px;
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1.25;
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
@@ -997,10 +998,10 @@ button {
 
 .home-card-rank {
   flex: 0 0 auto;
-  width: 52px;
-  margin-right: -10px;
-  margin-bottom: 28px;
-  font-size: 72px;
+  width: 72px;
+  margin-right: -12px;
+  margin-bottom: 40px;
+  font-size: 96px;
   font-weight: 900;
   line-height: 0.85;
   letter-spacing: -0.04em;
@@ -1016,7 +1017,7 @@ button {
 .home-card.is-ranked .home-card-body {
   position: relative;
   z-index: 1;
-  width: 128px;
+  width: 192px;
 }
 
 .home-card-rank.is-top {
@@ -1024,10 +1025,10 @@ button {
   text-stroke-color: var(--accent);
 }
 
-/* Landscape Continue Watching cards ~220×124 */
+/* Landscape Continue Watching cards ~264×149 (+20%) */
 .home-cw-card {
-  flex: 0 0 220px;
-  width: 220px;
+  flex: 0 0 264px;
+  width: 264px;
   border: 0;
   padding: 0;
   background: transparent;
@@ -1039,7 +1040,7 @@ button {
 
 .home-cw-art {
   position: relative;
-  height: 124px;
+  height: 149px;
   border-radius: 10px;
   overflow: hidden;
   border: 1px solid var(--line);
@@ -1050,6 +1051,29 @@ button {
 .home-cw-card:hover .home-cw-art {
   border-color: var(--accent);
   box-shadow: 0 0 0 1px rgba(249, 115, 22, 0.35);
+}
+
+.home-cw-meta {
+  margin-top: 8px;
+  font-size: 14px;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.home-cw-sub {
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--faint);
+}
+
+/* Flash selected episode after Home → Download open */
+.cr-check.is-flash {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  background: rgba(249, 115, 22, 0.12);
+  transition: outline-color 0.3s ease, background-color 0.3s ease;
 }
 
 .home-cw-art img {

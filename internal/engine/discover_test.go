@@ -85,21 +85,13 @@ func TestDedupeCards(t *testing.T) {
 	}
 }
 
-func TestDedupeCardsBySeriesKeepFirst(t *testing.T) {
+func TestPreferEpisodeLandscapeArt(t *testing.T) {
 	in := []DiscoverCard{
-		{ID: "ep1", SeriesID: "S1", Title: "Show", Subtitle: "S01E03"},
-		{ID: "ep2", SeriesID: "S1", Title: "Show", Subtitle: "S01E02"},
-		{ID: "ep3", SeriesID: "S2", Title: "Other", Subtitle: "S01E01"},
+		{ID: "ep1", Type: "episode", SeriesID: "S1", PosterURL: "https://cdn.example/ep.jpg"},
 	}
-	out := dedupeCardsBySeriesKeepFirst(in)
-	if len(out) != 2 {
-		t.Fatalf("len %d", len(out))
-	}
-	if out[0].Subtitle != "S01E03" || out[0].SeriesID != "S1" {
-		t.Fatalf("first %+v", out[0])
-	}
-	if out[1].SeriesID != "S2" {
-		t.Fatalf("second %+v", out[1])
+	out := preferEpisodeLandscapeArt(in)
+	if out[0].WideURL != "https://cdn.example/ep.jpg" {
+		t.Fatalf("wide %q", out[0].WideURL)
 	}
 }
 

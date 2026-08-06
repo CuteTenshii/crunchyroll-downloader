@@ -83,6 +83,8 @@
     activeCRProfileID: "",
     activeProfileName: "",
     activeCRProfileName: "",
+    // After Home card open + Inspect: select this episode id and scroll to it.
+    pendingSelectEpisodeId: "",
   };
 
   var prefsTimer = null;
@@ -252,14 +254,16 @@
     }
   }
 
-  function logLine(text, cls) {
+  function logLine(text, cls, opts) {
     if (!els.activity) return;
+    opts = opts || {};
     var div = document.createElement("div");
     if (cls) div.className = cls;
     div.textContent = text;
     els.activity.appendChild(div);
     els.activity.scrollTop = els.activity.scrollHeight;
-    if (cls === "err" || cls === "warn") {
+    // Do not auto-expand on Home↔Download navigation chatter; only real work/errors.
+    if (!opts.quiet && (cls === "err" || cls === "warn")) {
       expandActivityForWork();
     }
     updateDockSummary();
@@ -687,6 +691,8 @@
   function setAppView(view) {
     state.view = view === "download" ? "download" : "home";
     var isHome = state.view === "home";
+    // Preserve activity collapsed/expanded — never force-open the dock on tab switch.
+    var wasCollapsed = isActivityCollapsed();
     if (els.navHome) {
       els.navHome.classList.toggle("is-on", isHome);
       els.navHome.setAttribute("aria-selected", isHome ? "true" : "false");
@@ -712,9 +718,45 @@
       // Normal/Advanced only applies to Download workspace.
       els.modeToggle.style.visibility = isHome ? "hidden" : "visible";
     }
+    // Re-apply collapsed state after layout swap (prevents accidental expand on reflow).
+    if (wasCollapsed) setActivityCollapsed(true);
     if (isHome && !state.homeLoaded && !state.homeLoading && state.cookieFile) {
       loadHomeFeed(false);
     }
+  }
+
+  /** Extract episode content id from a /watch/{id}/… URL. */
+  function episodeIdFromOpenUrl(url) {
+    url = String(url || "");
+    var m = url.match(/\/watch\/([^/?#]+)/i);
+    return m && m[1] ? m[1] : "";
+  }
+
+  function scrollEpisodeIntoView(episodeId) {
+    if (!episodeId || !els.episodes) return;
+    var row = els.episodes.querySelector(
+      '.cr-check[data-ep="' + CSS.escape(episodeId) + '"]'
+    );
+    if (!row) {
+      // Fallback without CSS.escape for older WebViews
+      var rows = els.episodes.querySelectorAll(".cr-check[data-ep]");
+      for (var i = 0; i < rows.length; i++) {
+        if (rows[i].getAttribute("data-ep") === episodeId) {
+          row = rows[i];
+          break;
+        }
+      }
+    }
+    if (!row) return;
+    try {
+      row.scrollIntoView({ block: "center", behavior: "smooth" });
+    } catch (e) {
+      row.scrollIntoView(true);
+    }
+    row.classList.add("is-flash");
+    setTimeout(function () {
+      row.classList.remove("is-flash");
+    }, 1200);
   }
 
   function setHomeStatus(text, kind) {
@@ -912,6 +954,7 @@
   function clearHeroCarousels() {
     heroCarouselTimers.forEach(function (id) {
       clearInterval(id);
+      clearTimeout(id);
     });
     heroCarouselTimers = [];
   }
@@ -1044,6 +1087,7 @@
     var autoplayId = null;
     function stopAutoplay() {
       if (autoplayId != null) {
+        clearTimeout(autoplayId);
         clearInterval(autoplayId);
         var ix = heroCarouselTimers.indexOf(autoplayId);
         if (ix >= 0) heroCarouselTimers.splice(ix, 1);
@@ -1052,11 +1096,20 @@
     }
     function restartAutoplay() {
       stopAutoplay();
-      if (slides.length < 2 || paused) return;
-      autoplayId = setInterval(function () {
-        if (!paused) next(false);
-      }, 5500);
-      heroCarouselTimers.push(autoplayId);
+      if (slides.length < 2) return;
+      // setTimeout chain is more reliable than setInterval in some WebViews.
+      function tick() {
+        autoplayId = setTimeout(function () {
+          // Keep the global list in sync for clearHeroCarousels on re-render.
+          next(false);
+          tick();
+        }, 5500);
+        heroCarouselTimers = heroCarouselTimers.filter(function (id) {
+          return id !== autoplayId;
+        });
+        heroCarouselTimers.push(autoplayId);
+      }
+      tick();
     }
 
     if (slides.length > 1) {
@@ -1101,19 +1154,7 @@
       });
       section.appendChild(dots);
 
-      section.addEventListener("mouseenter", function () {
-        paused = true;
-      });
-      section.addEventListener("mouseleave", function () {
-        paused = false;
-      });
-      section.addEventListener("focusin", function () {
-        paused = true;
-      });
-      section.addEventListener("focusout", function () {
-        paused = false;
-      });
-
+      // Do NOT pause autoplay on hover — looking at the hero should still advance.
       restartAutoplay();
     }
     return section;
@@ -1735,7 +1776,14 @@
     }
     if (els.url) els.url.value = url;
     state.url = url;
-    logLine("Open · " + ((card && card.title) || url), "info");
+    // Prefer explicit episode id on card, else parse /watch/{id}/.
+    var epId = "";
+    if (card && card.id && /episode/i.test(String(card.type || ""))) {
+      epId = String(card.id);
+    }
+    if (!epId) epId = episodeIdFromOpenUrl(url);
+    state.pendingSelectEpisodeId = epId || "";
+    logLine("Open · " + ((card && card.title) || url), "info", { quiet: true });
     setAppView("download");
     schedulePersist();
     // Auto-Inspect when cookie is ready.
@@ -2698,10 +2746,28 @@
     }
     state.selectedSeason = seasonPick;
 
-    // Episodes: only S1E1 if present; watch-only → that single episode; else DefaultEpisodeID.
+    // Episodes: prefer pending Home click (Continue Watching /watch id), else defaults.
     state.selectedEpisodeIds = {};
     var eps = result.Episodes || [];
-    if (result.ContentType === "watch" && eps.length === 1) {
+    var pendingEp = String(state.pendingSelectEpisodeId || "").trim();
+    state.pendingSelectEpisodeId = "";
+    var pendingMatch = null;
+    if (pendingEp) {
+      pendingMatch = eps.find(function (ep) {
+        return ep.ID === pendingEp;
+      });
+      // Some catalogs use slightly different casing or nested ids.
+      if (!pendingMatch) {
+        pendingMatch = eps.find(function (ep) {
+          return String(ep.ID || "").toUpperCase() === pendingEp.toUpperCase();
+        });
+      }
+    }
+    if (pendingMatch) {
+      state.selectedEpisodeIds[pendingMatch.ID] = true;
+      state.selectedSeason = pendingMatch.SeasonNumber;
+      seasonPick = pendingMatch.SeasonNumber;
+    } else if (result.ContentType === "watch" && eps.length === 1) {
       state.selectedEpisodeIds[eps[0].ID] = true;
     } else if (result.DefaultEpisodeID) {
       state.selectedEpisodeIds[result.DefaultEpisodeID] = true;
@@ -2759,6 +2825,13 @@
     }
 
     renderCatalog(result);
+    // After catalog paints, focus the Continue Watching (or other) episode we opened.
+    if (pendingMatch) {
+      var focusId = pendingMatch.ID;
+      setTimeout(function () {
+        scrollEpisodeIntoView(focusId);
+      }, 80);
+    }
   }
 
   /* ── Dropdown open/close ── */
