@@ -79,6 +79,10 @@
     homeNextStart: 0,
     homeLoaded: false,
     homeLoading: false,
+    activeProfileID: "",
+    activeCRProfileID: "",
+    activeProfileName: "",
+    activeCRProfileName: "",
   };
 
   var prefsTimer = null;
@@ -146,10 +150,15 @@
       btnHomeMore: $("btn-home-more"),
       homeMoreWrap: $("home-more-wrap"),
       homeStatus: $("home-status"),
-      homeHero: $("home-hero"),
-      homeRails: $("home-rails"),
+      homeFeed: $("home-feed"),
       homeSearchResults: $("home-search-results"),
       homeSearchGrid: $("home-search-grid"),
+      btnAccount: $("btn-account"),
+      accountWrap: $("account-wrap"),
+      accountMenu: $("account-menu"),
+      accountName: $("account-name"),
+      accountSub: $("account-sub"),
+      accountAvatar: $("account-avatar"),
       batchUrls: $("batch-urls"),
       batchFile: $("btn-batch-file"),
       wvdPath: $("wvd-path"),
@@ -722,11 +731,13 @@
 
   function normalizeHomePage(raw) {
     if (!raw || typeof raw !== "object") {
-      return { heroes: [], rails: [], nextStart: 0, pageSize: 0 };
+      return { blocks: [], heroes: [], rails: [], nextStart: 0, pageSize: 0 };
     }
+    var blocks = fHome(raw, "blocks", "Blocks") || [];
     var heroes = fHome(raw, "heroes", "Heroes") || [];
     var rails = fHome(raw, "rails", "Rails") || [];
     return {
+      blocks: Array.isArray(blocks) ? blocks : [],
       heroes: Array.isArray(heroes) ? heroes : [],
       rails: Array.isArray(rails) ? rails : [],
       nextStart: Number(fHome(raw, "nextStart", "NextStart") || 0),
@@ -741,6 +752,12 @@
     var openUrl = fHome(raw, "openUrl", "OpenURL") || "";
     var title = fHome(raw, "title", "Title") || "";
     if (!id && !openUrl) return null;
+    var progressRaw = fHome(raw, "progress", "Progress");
+    var progress = null;
+    if (progressRaw != null && progressRaw !== "" && !isNaN(Number(progressRaw))) {
+      progress = Math.max(0, Math.min(1, Number(progressRaw)));
+    }
+    var rank = Number(fHome(raw, "rank", "Rank") || 0) || 0;
     return {
       id: id,
       type: fHome(raw, "type", "Type") || "",
@@ -749,35 +766,93 @@
       posterUrl: fHome(raw, "posterUrl", "PosterURL") || "",
       wideUrl: fHome(raw, "wideUrl", "WideURL") || "",
       openUrl: openUrl,
+      progress: progress,
+      rank: rank,
+      subtitle: fHome(raw, "subtitle", "Subtitle") || "",
     };
   }
 
-  function cardButton(card, extraClass) {
-    var btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "home-card" + (extraClass ? " " + extraClass : "");
-    btn.title = card.title || card.id || "Open";
-    btn.dataset.openUrl = card.openUrl || "";
-    btn.dataset.id = card.id || "";
+  function normalizeBlock(raw) {
+    if (!raw || typeof raw !== "object") return null;
+    var kind = String(fHome(raw, "kind", "Kind") || "").toLowerCase();
+    if (!kind) return null;
+    var cardsRaw = fHome(raw, "cards", "Cards") || [];
+    var cards = [];
+    (cardsRaw || []).forEach(function (c) {
+      var card = normalizeCard(c);
+      if (card) cards.push(card);
+    });
+    var heroesRaw = fHome(raw, "heroes", "Heroes") || [];
+    var heroes = Array.isArray(heroesRaw) ? heroesRaw : [];
+    var bannerRaw = fHome(raw, "banner", "Banner");
+    var banner = null;
+    if (bannerRaw && typeof bannerRaw === "object") {
+      banner = {
+        id: fHome(bannerRaw, "id", "ID") || "",
+        title: fHome(bannerRaw, "title", "Title") || "",
+        wideUrl: fHome(bannerRaw, "wideUrl", "WideURL") || "",
+        openUrl: fHome(bannerRaw, "openUrl", "OpenURL") || "",
+      };
+    }
+    return {
+      id: fHome(raw, "id", "ID") || "",
+      kind: kind,
+      title: fHome(raw, "title", "Title") || "",
+      rankStyle: String(fHome(raw, "rankStyle", "RankStyle") || "none").toLowerCase(),
+      cards: cards,
+      heroes: heroes,
+      banner: banner,
+    };
+  }
 
+  function makeArtEl(className, url, emptyLabel) {
     var art = document.createElement("div");
-    art.className = "home-card-art" + (card.posterUrl ? "" : " is-empty");
-    if (card.posterUrl) {
+    art.className = className + (url ? "" : " is-empty");
+    if (url) {
       var img = document.createElement("img");
-      img.src = card.posterUrl;
+      img.src = url;
       img.alt = "";
       img.loading = "lazy";
       img.referrerPolicy = "no-referrer";
       art.appendChild(img);
     } else {
-      art.textContent = "No art";
+      art.textContent = emptyLabel || "No art";
     }
-    btn.appendChild(art);
+    return art;
+  }
+
+  function posterCardButton(card, rankStyle) {
+    var ranked = rankStyle === "top10" && card.rank > 0;
+    var btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "home-card" + (ranked ? " is-ranked" : "");
+    btn.title = card.title || card.id || "Open";
+    btn.dataset.openUrl = card.openUrl || "";
+    btn.dataset.id = card.id || "";
+
+    if (ranked) {
+      var rankEl = document.createElement("span");
+      rankEl.className = "home-card-rank" + (card.rank <= 3 ? " is-top" : "");
+      rankEl.textContent = String(card.rank);
+      rankEl.setAttribute("aria-hidden", "true");
+      btn.appendChild(rankEl);
+    }
+
+    var host = btn;
+    if (ranked) {
+      host = document.createElement("div");
+      host.className = "home-card-body";
+      btn.appendChild(host);
+    }
+
+    host.appendChild(
+      makeArtEl("home-card-art", card.posterUrl || card.wideUrl, "No art")
+    );
 
     var title = document.createElement("div");
     title.className = "home-card-title";
     title.textContent = card.title || card.id || "Untitled";
-    btn.appendChild(title);
+    host.appendChild(title);
 
     btn.addEventListener("click", function () {
       openDiscoverCard(card);
@@ -785,33 +860,95 @@
     return btn;
   }
 
-  function renderHomeHeroes(heroes, append) {
-    if (!els.homeHero) return;
-    if (!append) els.homeHero.innerHTML = "";
-    var list = Array.isArray(heroes) ? heroes : [];
-    if (!list.length && !append) {
-      els.homeHero.hidden = true;
-      return;
+  function landscapeCardButton(card) {
+    var btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "home-cw-card";
+    btn.title = card.title || card.id || "Open";
+    btn.dataset.openUrl = card.openUrl || "";
+    btn.dataset.id = card.id || "";
+
+    var artUrl = card.wideUrl || card.posterUrl || "";
+    var art = makeArtEl("home-cw-art", artUrl, "No art");
+    if (card.progress != null && card.progress > 0) {
+      var bar = document.createElement("div");
+      bar.className = "home-cw-progress";
+      bar.setAttribute("aria-hidden", "true");
+      var fill = document.createElement("i");
+      fill.style.width = Math.round(card.progress * 100) + "%";
+      bar.appendChild(fill);
+      art.appendChild(bar);
     }
-    list.forEach(function (h) {
-      var title = fHome(h, "title", "Title") || "";
-      var openUrl = fHome(h, "openUrl", "OpenURL") || "";
-      var wide = fHome(h, "wideUrl", "WideURL") || "";
-      var poster = fHome(h, "posterUrl", "PosterURL") || "";
-      var desc = fHome(h, "description", "Description") || "";
-      var btnText = fHome(h, "buttonText", "ButtonText") || "Open";
+    btn.appendChild(art);
+
+    var meta = document.createElement("div");
+    meta.className = "home-cw-meta";
+    var metaText = card.title || card.id || "Untitled";
+    if (card.subtitle) metaText = card.title + " — " + card.subtitle;
+    meta.textContent = metaText;
+    btn.appendChild(meta);
+
+    var subParts = [];
+    if (card.progress != null && card.progress > 0) {
+      subParts.push(Math.round(card.progress * 100) + "%");
+    }
+    if (card.subtitle && !card.title) subParts.push(card.subtitle);
+    else if (card.type) subParts.push(card.type);
+    if (subParts.length) {
+      var sub = document.createElement("div");
+      sub.className = "home-cw-sub";
+      sub.textContent = subParts.join(" · ");
+      btn.appendChild(sub);
+    }
+
+    btn.addEventListener("click", function () {
+      openDiscoverCard(card);
+    });
+    return btn;
+  }
+
+  function renderHeroBlock(block) {
+    var section = document.createElement("section");
+    section.className = "home-block home-block-hero";
+    section.setAttribute("aria-label", block.title || "Featured");
+
+    var heroes = block.heroes || [];
+    if (!heroes.length && block.cards && block.cards.length) {
+      // Tolerate cards-shaped hero payloads.
+      heroes = block.cards.map(function (c) {
+        return {
+          title: c.title,
+          description: c.description,
+          wideUrl: c.wideUrl,
+          posterUrl: c.posterUrl,
+          openUrl: c.openUrl,
+          buttonText: "Open title",
+        };
+      });
+    }
+    if (!heroes.length) return null;
+
+    var slides = [];
+    heroes.forEach(function (h, idx) {
+      var title = fHome(h, "title", "Title") || h.title || "";
+      var openUrl = fHome(h, "openUrl", "OpenURL") || h.openUrl || "";
+      var wide = fHome(h, "wideUrl", "WideURL") || h.wideUrl || "";
+      var poster = fHome(h, "posterUrl", "PosterURL") || h.posterUrl || "";
+      var desc = fHome(h, "description", "Description") || h.description || "";
+      var btnText =
+        fHome(h, "buttonText", "ButtonText") || h.buttonText || "Open title";
       if (!title && !openUrl) return;
 
       var slide = document.createElement("button");
       slide.type = "button";
-      slide.className = "home-hero-slide";
+      slide.className = "home-hero-slide" + (idx === 0 ? " is-on" : "");
       slide.title = title;
 
       if (wide || poster) {
         var img = document.createElement("img");
         img.src = wide || poster;
         img.alt = "";
-        img.loading = "lazy";
+        img.loading = idx === 0 ? "eager" : "lazy";
         img.referrerPolicy = "no-referrer";
         slide.appendChild(img);
       }
@@ -821,17 +958,24 @@
 
       var meta = document.createElement("div");
       meta.className = "home-hero-meta";
-      meta.innerHTML =
-        '<div class="kicker">' +
-        escapeHtml(btnText) +
-        '</div><div class="title"></div>';
-      meta.querySelector(".title").textContent = title || "Featured";
+      var kicker = document.createElement("div");
+      kicker.className = "kicker";
+      kicker.textContent = "Featured";
+      meta.appendChild(kicker);
+      var t = document.createElement("div");
+      t.className = "title";
+      t.textContent = title || "Featured";
+      meta.appendChild(t);
       if (desc) {
         var d = document.createElement("div");
         d.className = "desc";
         d.textContent = desc;
         meta.appendChild(d);
       }
+      var cta = document.createElement("span");
+      cta.className = "home-hero-cta";
+      cta.textContent = btnText || "Open title";
+      meta.appendChild(cta);
       slide.appendChild(meta);
 
       slide.addEventListener("click", function () {
@@ -842,39 +986,148 @@
           wideUrl: wide,
         });
       });
-      els.homeHero.appendChild(slide);
+      section.appendChild(slide);
+      slides.push(slide);
     });
-    els.homeHero.hidden = !els.homeHero.childElementCount;
+
+    if (!slides.length) return null;
+
+    if (slides.length > 1) {
+      var dots = document.createElement("div");
+      dots.className = "home-hero-dots";
+      slides.forEach(function (slide, i) {
+        var dot = document.createElement("button");
+        dot.type = "button";
+        dot.className = i === 0 ? "is-on" : "";
+        dot.setAttribute("aria-label", "Hero slide " + (i + 1));
+        dot.addEventListener("click", function (e) {
+          e.stopPropagation();
+          slides.forEach(function (s, j) {
+            s.classList.toggle("is-on", j === i);
+          });
+          Array.prototype.forEach.call(dots.children, function (d, j) {
+            d.classList.toggle("is-on", j === i);
+          });
+        });
+        dots.appendChild(dot);
+      });
+      section.appendChild(dots);
+    }
+    return section;
   }
 
-  function renderHomeRails(rails, append) {
-    if (!els.homeRails) return;
-    if (!append) els.homeRails.innerHTML = "";
-    (rails || []).forEach(function (rail) {
-      var title = fHome(rail, "title", "Title") || "Collection";
-      var cardsRaw = fHome(rail, "cards", "Cards") || [];
-      var cards = [];
-      (cardsRaw || []).forEach(function (c) {
-        var card = normalizeCard(c);
-        if (card) cards.push(card);
-      });
-      if (!cards.length) return;
+  function railShell(title) {
+    var section = document.createElement("section");
+    section.className = "home-block home-rail";
+    var h = document.createElement("div");
+    h.className = "home-rail-title";
+    h.textContent = title || "Collection";
+    section.appendChild(h);
+    var scroller = document.createElement("div");
+    scroller.className = "home-rail-scroller";
+    section.appendChild(scroller);
+    return { section: section, scroller: scroller };
+  }
 
-      var section = document.createElement("section");
-      section.className = "home-rail";
-      var h = document.createElement("div");
-      h.className = "home-rail-title";
-      h.textContent = title;
-      section.appendChild(h);
-
-      var scroller = document.createElement("div");
-      scroller.className = "home-rail-scroller";
-      cards.forEach(function (card) {
-        scroller.appendChild(cardButton(card));
-      });
-      section.appendChild(scroller);
-      els.homeRails.appendChild(section);
+  function renderPosterRail(block) {
+    if (!block.cards || !block.cards.length) return null;
+    var shell = railShell(block.title || "Collection");
+    var rankStyle = block.rankStyle || "none";
+    block.cards.forEach(function (card) {
+      shell.scroller.appendChild(posterCardButton(card, rankStyle));
     });
+    return shell.section;
+  }
+
+  function renderLandscapeRail(block) {
+    if (!block.cards || !block.cards.length) return null;
+    var shell = railShell(block.title || "Continue Watching");
+    block.cards.forEach(function (card) {
+      shell.scroller.appendChild(landscapeCardButton(card));
+    });
+    return shell.section;
+  }
+
+  function renderBannerBlock(block) {
+    var banner = block.banner;
+    if (!banner && block.title) {
+      banner = {
+        title: block.title,
+        wideUrl: "",
+        openUrl: (block.cards && block.cards[0] && block.cards[0].openUrl) || "",
+      };
+    }
+    if (!banner) return null;
+    var openUrl = banner.openUrl || "";
+    var el = document.createElement(openUrl ? "button" : "div");
+    if (openUrl) el.type = "button";
+    el.className = "home-block home-banner" + (openUrl ? " has-link" : "");
+    if (banner.wideUrl) {
+      var img = document.createElement("img");
+      img.src = banner.wideUrl;
+      img.alt = "";
+      img.loading = "lazy";
+      img.referrerPolicy = "no-referrer";
+      el.appendChild(img);
+    }
+    var fade = document.createElement("div");
+    fade.className = "home-banner-fade";
+    el.appendChild(fade);
+    var title = document.createElement("span");
+    title.className = "home-banner-title";
+    title.textContent = banner.title || block.title || "Featured";
+    el.appendChild(title);
+    var tag = document.createElement("em");
+    tag.className = "home-banner-tag";
+    tag.textContent = openUrl ? "Open" : "banner";
+    el.appendChild(tag);
+    if (openUrl) {
+      el.addEventListener("click", function () {
+        openDiscoverCard({
+          title: banner.title || block.title || "",
+          openUrl: openUrl,
+          wideUrl: banner.wideUrl || "",
+        });
+      });
+    }
+    return el;
+  }
+
+  function renderHomeBlocks(blocks, append) {
+    if (!els.homeFeed) return;
+    if (!append) els.homeFeed.innerHTML = "";
+    var list = Array.isArray(blocks) ? blocks : [];
+    var rendered = 0;
+    list.forEach(function (raw) {
+      var block = normalizeBlock(raw);
+      if (!block) return;
+      var node = null;
+      switch (block.kind) {
+        case "hero":
+          node = renderHeroBlock(block);
+          break;
+        case "landscape_rail":
+          node = renderLandscapeRail(block);
+          break;
+        case "poster_rail":
+          node = renderPosterRail(block);
+          break;
+        case "banner":
+          node = renderBannerBlock(block);
+          break;
+        default:
+          // Unknown kinds: try poster rail if cards present.
+          if (block.cards && block.cards.length) {
+            node = renderPosterRail(block);
+          }
+          break;
+      }
+      if (node) {
+        els.homeFeed.appendChild(node);
+        rendered++;
+      }
+    });
+    return rendered;
   }
 
   function renderSearchResults(cards) {
@@ -883,7 +1136,7 @@
     var list = Array.isArray(cards) ? cards : [];
     list.forEach(function (raw) {
       var card = normalizeCard(raw);
-      if (card) els.homeSearchGrid.appendChild(cardButton(card));
+      if (card) els.homeSearchGrid.appendChild(posterCardButton(card, "none"));
     });
     els.homeSearchResults.hidden = !list.length;
   }
@@ -899,6 +1152,358 @@
       .replace(/</g, "&lt;")
       .replace(/>/g, "&gt;")
       .replace(/"/g, "&quot;");
+  }
+
+  function profileInitial(name) {
+    var s = String(name || "").trim();
+    if (!s) return "?";
+    return s.charAt(0).toUpperCase();
+  }
+
+  function updateAccountChrome() {
+    var name = state.activeProfileName || "Account";
+    var sub = state.activeCRProfileName
+      ? "Profile: " + state.activeCRProfileName
+      : state.cookieFile
+        ? "Cookie set"
+        : "No profile";
+    if (els.accountName) els.accountName.textContent = name;
+    if (els.accountSub) els.accountSub.textContent = sub;
+    if (els.accountAvatar) {
+      els.accountAvatar.textContent = profileInitial(
+        state.activeCRProfileName || state.activeProfileName || name
+      );
+    }
+    if (els.btnAccount) {
+      els.btnAccount.title =
+        name + (state.activeCRProfileName ? " · " + state.activeCRProfileName : "");
+    }
+  }
+
+  function closeAccountMenu() {
+    if (!els.accountMenu) return;
+    els.accountMenu.hidden = true;
+    if (els.btnAccount) els.btnAccount.setAttribute("aria-expanded", "false");
+  }
+
+  function menuItem(label, opts) {
+    opts = opts || {};
+    var btn = document.createElement("button");
+    btn.type = "button";
+    btn.className =
+      "account-menu-item" +
+      (opts.active ? " is-active" : "") +
+      (opts.muted ? " is-muted" : "") +
+      (opts.danger ? " is-danger" : "");
+    btn.setAttribute("role", "menuitem");
+    btn.textContent = label;
+    if (opts.onClick) {
+      btn.addEventListener("click", function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        opts.onClick();
+      });
+    }
+    return btn;
+  }
+
+  function menuSection(label) {
+    var div = document.createElement("div");
+    div.className = "account-menu-section";
+    div.textContent = label;
+    return div;
+  }
+
+  function menuSep() {
+    var div = document.createElement("div");
+    div.className = "account-menu-sep";
+    div.setAttribute("role", "separator");
+    return div;
+  }
+
+  function normalizeCookieProfile(raw) {
+    if (!raw || typeof raw !== "object") return null;
+    var id = fHome(raw, "id", "ID") || "";
+    var cookieFile = fHome(raw, "cookieFile", "CookieFile") || "";
+    if (!id && !cookieFile) return null;
+    return {
+      id: id,
+      name: fHome(raw, "name", "Name") || cookieFile || "Profile",
+      cookieFile: cookieFile,
+    };
+  }
+
+  function normalizeCRProfile(raw) {
+    if (!raw || typeof raw !== "object") return null;
+    var id = fHome(raw, "id", "ID") || "";
+    if (!id) return null;
+    return {
+      id: id,
+      name: fHome(raw, "name", "Name") || id,
+      isSelected: !!(fHome(raw, "isSelected", "IsSelected")),
+    };
+  }
+
+  async function refreshAccountFromPrefs() {
+    var app = goApp();
+    if (!app || typeof app.GetPreferences !== "function") {
+      updateAccountChrome();
+      return;
+    }
+    try {
+      var prefs = await app.GetPreferences();
+      var cookie = fHome(prefs, "cookieFile", "CookieFile") || "";
+      if (cookie) state.cookieFile = cookie;
+      state.activeProfileID =
+        fHome(prefs, "activeProfileId", "ActiveProfileID") || "";
+      state.activeCRProfileID =
+        fHome(prefs, "activeCrProfileId", "ActiveCRProfileID") || "";
+      var profiles = fHome(prefs, "cookieProfiles", "CookieProfiles") || [];
+      state.activeProfileName = "";
+      if (Array.isArray(profiles)) {
+        profiles.forEach(function (p) {
+          var prof = normalizeCookieProfile(p);
+          if (prof && prof.id === state.activeProfileID) {
+            state.activeProfileName = prof.name;
+            if (prof.cookieFile) state.cookieFile = prof.cookieFile;
+          }
+        });
+        if (!state.activeProfileName && profiles.length === 1) {
+          var only = normalizeCookieProfile(profiles[0]);
+          if (only) {
+            state.activeProfileName = only.name;
+            state.activeProfileID = only.id;
+            if (only.cookieFile) state.cookieFile = only.cookieFile;
+          }
+        }
+      }
+      if (!state.activeProfileName && state.cookieFile) {
+        state.activeProfileName = "Cookie account";
+      }
+    } catch (e) {
+      /* ignore */
+    }
+    updateAccountChrome();
+  }
+
+  async function switchCookieProfile(id) {
+    var app = goApp();
+    if (!app || typeof app.SwitchCookieProfile !== "function") {
+      showBanner("Profile switch unavailable.", "err");
+      return;
+    }
+    closeAccountMenu();
+    try {
+      await app.SwitchCookieProfile(id);
+      await refreshAccountFromPrefs();
+      state.homeLoaded = false;
+      logLine("Switched cookie profile", "ok");
+      if (state.view === "home") {
+        loadHomeFeed(false);
+      }
+    } catch (err) {
+      var msg = errMessage(err);
+      showBanner("Switch profile failed: " + msg, "err");
+      logLine("Switch cookie profile: " + msg, "err");
+    }
+  }
+
+  async function addCookieProfile() {
+    var app = goApp();
+    closeAccountMenu();
+    var name = window.prompt("Profile name (e.g. Premium-BR):", "");
+    if (name == null) return;
+    name = String(name).trim();
+    if (!name) {
+      showBanner("Profile name is required.", "warn");
+      return;
+    }
+    var path = "";
+    if (app && typeof app.PickCookieFile === "function") {
+      try {
+        var picked = await app.PickCookieFile();
+        if (picked == null || picked === "") return;
+        path = String(picked).trim();
+      } catch (err) {
+        showBanner("Cookie file dialog failed: " + errMessage(err), "err");
+        return;
+      }
+    } else {
+      path = window.prompt("Path to etp_rt cookie file:", state.cookieFile || "") || "";
+      path = String(path).trim();
+    }
+    if (!path) {
+      showBanner("Cookie file path is required.", "warn");
+      return;
+    }
+    if (!app || typeof app.UpsertCookieProfile !== "function") {
+      state.cookieFile = path;
+      state.activeProfileName = name;
+      updateAccountChrome();
+      schedulePersist();
+      return;
+    }
+    try {
+      await app.UpsertCookieProfile({
+        id: "",
+        name: name,
+        cookieFile: path,
+      });
+      // Upsert may activate when none active; list + switch to newest by name/path.
+      var list =
+        typeof app.ListCookieProfiles === "function"
+          ? await app.ListCookieProfiles()
+          : [];
+      var match = null;
+      (list || []).forEach(function (raw) {
+        var p = normalizeCookieProfile(raw);
+        if (!p) return;
+        if (p.cookieFile === path || p.name === name) match = p;
+      });
+      if (match && typeof app.SwitchCookieProfile === "function") {
+        await app.SwitchCookieProfile(match.id);
+      }
+      await refreshAccountFromPrefs();
+      state.cookieFile = path;
+      state.activeProfileName = name;
+      updateAccountChrome();
+      state.homeLoaded = false;
+      logLine("Added cookie profile · " + name, "ok");
+      if (state.view === "home") loadHomeFeed(false);
+    } catch (err) {
+      showBanner("Add profile failed: " + errMessage(err), "err");
+      logLine("Upsert cookie profile: " + errMessage(err), "err");
+    }
+  }
+
+  async function switchCRProfile(id) {
+    var app = goApp();
+    if (!app || typeof app.SwitchCRProfile !== "function") return;
+    closeAccountMenu();
+    try {
+      await app.SwitchCRProfile(id);
+      state.activeCRProfileID = id;
+      state.homeLoaded = false;
+      // Refresh name from list.
+      try {
+        if (typeof app.ListCRProfiles === "function") {
+          var list = await app.ListCRProfiles();
+          (list || []).forEach(function (raw) {
+            var p = normalizeCRProfile(raw);
+            if (p && p.id === id) state.activeCRProfileName = p.name;
+          });
+        }
+      } catch (e) {
+        /* ignore */
+      }
+      updateAccountChrome();
+      logLine("Switched CR multiprofile", "ok");
+      if (state.view === "home") loadHomeFeed(false);
+    } catch (err) {
+      showBanner("CR profile switch failed: " + errMessage(err), "err");
+      logLine("Switch CR profile: " + errMessage(err), "err");
+    }
+  }
+
+  async function openAccountMenu() {
+    if (!els.accountMenu || !els.btnAccount) return;
+    if (!els.accountMenu.hidden) {
+      closeAccountMenu();
+      return;
+    }
+    var app = goApp();
+    var menu = els.accountMenu;
+    menu.innerHTML = "";
+    menu.appendChild(menuSection("Cookie profiles"));
+
+    var profiles = [];
+    if (app && typeof app.ListCookieProfiles === "function") {
+      try {
+        var rawList = await app.ListCookieProfiles();
+        (rawList || []).forEach(function (raw) {
+          var p = normalizeCookieProfile(raw);
+          if (p) profiles.push(p);
+        });
+      } catch (e) {
+        /* ignore */
+      }
+    }
+    if (!profiles.length) {
+      var hint = document.createElement("div");
+      hint.className = "account-menu-hint";
+      hint.textContent = state.cookieFile
+        ? "One cookie path in use. Add a named profile to switch accounts."
+        : "No profiles yet. Add one or use Cookie.";
+      menu.appendChild(hint);
+    } else {
+      profiles.forEach(function (p) {
+        var active =
+          p.id === state.activeProfileID ||
+          (!state.activeProfileID && p.cookieFile === state.cookieFile);
+        menu.appendChild(
+          menuItem(p.name || p.cookieFile || p.id, {
+            active: active,
+            onClick: function () {
+              switchCookieProfile(p.id);
+            },
+          })
+        );
+      });
+    }
+
+    menu.appendChild(menuSep());
+    menu.appendChild(
+      menuItem("Add cookie profile…", {
+        muted: true,
+        onClick: function () {
+          addCookieProfile();
+        },
+      })
+    );
+    menu.appendChild(
+      menuItem("Set cookie file…", {
+        muted: true,
+        onClick: function () {
+          closeAccountMenu();
+          onCookie();
+        },
+      })
+    );
+
+    // CR multiprofile submenu when available.
+    if (app && typeof app.ListCRProfiles === "function" && state.cookieFile) {
+      try {
+        var crRaw = await app.ListCRProfiles();
+        var crList = [];
+        (crRaw || []).forEach(function (raw) {
+          var p = normalizeCRProfile(raw);
+          if (p) crList.push(p);
+        });
+        if (crList.length > 0) {
+          menu.appendChild(menuSep());
+          menu.appendChild(menuSection("Crunchyroll profiles"));
+          crList.forEach(function (p) {
+            var selected =
+              p.isSelected || p.id === state.activeCRProfileID;
+            if (selected) state.activeCRProfileName = p.name;
+            menu.appendChild(
+              menuItem(p.name || p.id, {
+                active: selected,
+                onClick: function () {
+                  switchCRProfile(p.id);
+                },
+              })
+            );
+          });
+          updateAccountChrome();
+        }
+      } catch (e) {
+        /* multiprofile optional */
+      }
+    }
+
+    menu.hidden = false;
+    els.btnAccount.setAttribute("aria-expanded", "true");
   }
 
   async function loadHomeFeed(append) {
@@ -929,35 +1534,41 @@
       await persistPrefs();
       var raw = await app.GetHomeFeed(start, 20);
       var page = normalizeHomePage(raw);
-      renderHomeHeroes(page.heroes, append);
-      renderHomeRails(page.rails, append);
+      var blocks = page.blocks;
+      // Fallback: older payloads with only heroes/rails.
+      if ((!blocks || !blocks.length) && (page.heroes.length || page.rails.length)) {
+        blocks = [];
+        if (page.heroes.length) {
+          blocks.push({ kind: "hero", heroes: page.heroes, rankStyle: "none" });
+        }
+        page.rails.forEach(function (rail) {
+          blocks.push({
+            kind: "poster_rail",
+            title: fHome(rail, "title", "Title") || "Collection",
+            cards: fHome(rail, "cards", "Cards") || [],
+            rankStyle: "none",
+          });
+        });
+      }
+      var n = renderHomeBlocks(blocks, append) || 0;
       state.homeNextStart = page.nextStart || start + 20;
       state.homeLoaded = true;
-      var railCount = (page.rails || []).length;
-      var heroCount = (page.heroes || []).length;
       if (!append) {
         setHomeStatus(
           "Discover · " +
-            heroCount +
-            " hero slide(s), " +
-            railCount +
-            " rail(s) · locale " +
+            n +
+            " block(s) · locale " +
             (state.locale || "pt-BR"),
           "ok"
         );
       } else {
-        setHomeStatus("Loaded more · +" + railCount + " rail(s)", "ok");
+        setHomeStatus("Loaded more · +" + n + " block(s)", "ok");
       }
       if (els.homeMoreWrap) {
         els.homeMoreWrap.hidden = !(page.nextStart > start);
       }
       logLine(
-        "Home feed · start=" +
-          start +
-          " heroes=" +
-          heroCount +
-          " rails=" +
-          railCount,
+        "Home feed · start=" + start + " blocks=" + n,
         "ok"
       );
     } catch (err) {
@@ -1090,6 +1701,37 @@
       state.locale = "pt-BR";
     }
     if (cookie) state.cookieFile = cookie;
+    var activePid =
+      p.ActiveProfileID != null ? p.ActiveProfileID : p.activeProfileId;
+    if (activePid != null) state.activeProfileID = String(activePid || "");
+    var activeCr =
+      p.ActiveCRProfileID != null ? p.ActiveCRProfileID : p.activeCrProfileId;
+    if (activeCr != null) state.activeCRProfileID = String(activeCr || "");
+    var cookieProfiles =
+      p.CookieProfiles != null ? p.CookieProfiles : p.cookieProfiles;
+    if (Array.isArray(cookieProfiles)) {
+      state.activeProfileName = "";
+      cookieProfiles.forEach(function (raw) {
+        var prof = normalizeCookieProfile(raw);
+        if (!prof) return;
+        if (prof.id === state.activeProfileID) {
+          state.activeProfileName = prof.name;
+          if (prof.cookieFile) state.cookieFile = prof.cookieFile;
+        }
+      });
+      if (!state.activeProfileName && cookieProfiles.length === 1) {
+        var only = normalizeCookieProfile(cookieProfiles[0]);
+        if (only) {
+          state.activeProfileName = only.name;
+          if (!state.activeProfileID) state.activeProfileID = only.id;
+          if (only.cookieFile) state.cookieFile = only.cookieFile;
+        }
+      }
+    }
+    if (!state.activeProfileName && state.cookieFile) {
+      state.activeProfileName = "Cookie account";
+    }
+    updateAccountChrome();
     if (out) {
       state.outputDir = out;
       if (els.output) els.output.value = out;
@@ -2181,6 +2823,24 @@
         var picked = await app.PickCookieFile();
         if (picked == null || picked === "") return; // cancelled
         state.cookieFile = String(picked).trim();
+        // Keep active profile's cookie path in sync when we have a named profile.
+        if (
+          app &&
+          state.activeProfileID &&
+          typeof app.UpsertCookieProfile === "function"
+        ) {
+          try {
+            await app.UpsertCookieProfile({
+              id: state.activeProfileID,
+              name: state.activeProfileName || "Account",
+              cookieFile: state.cookieFile,
+            });
+          } catch (e) {
+            /* path still set on CookieFile via prefs */
+          }
+        }
+        if (!state.activeProfileName) state.activeProfileName = "Cookie account";
+        updateAccountChrome();
         logLine("Cookie path set", "ok");
         schedulePersist();
         if (state.view === "home" && state.cookieFile) {
@@ -2204,6 +2864,8 @@
     path = path.trim();
     state.cookieFile = path;
     if (path) {
+      if (!state.activeProfileName) state.activeProfileName = "Cookie account";
+      updateAccountChrome();
       logLine("Cookie path set", "ok");
       if (state.view === "home") {
         state.homeLoaded = false;
@@ -2211,6 +2873,7 @@
       }
     } else {
       logLine("Cookie path cleared", "warn");
+      updateAccountChrome();
     }
     schedulePersist();
   }
@@ -2559,6 +3222,21 @@
     if (els.inspect) els.inspect.addEventListener("click", onInspect);
     if (els.cookie) els.cookie.addEventListener("click", onCookie);
     if (els.cookieHome) els.cookieHome.addEventListener("click", onCookie);
+    if (els.btnAccount) {
+      els.btnAccount.addEventListener("click", function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        openAccountMenu();
+      });
+    }
+    document.addEventListener("click", function (e) {
+      if (!els.accountWrap || !els.accountMenu || els.accountMenu.hidden) return;
+      if (els.accountWrap.contains(e.target)) return;
+      closeAccountMenu();
+    });
+    document.addEventListener("keydown", function (e) {
+      if (e.key === "Escape") closeAccountMenu();
+    });
     if (els.outputBtn) els.outputBtn.addEventListener("click", onOutputBrowse);
     if (els.download) els.download.addEventListener("click", onDownload);
     if (els.downloadAdv) els.downloadAdv.addEventListener("click", onDownload);
@@ -2668,6 +3346,7 @@
     setAppView("home");
     subscribeProgress();
     await loadPreferences();
+    updateAccountChrome();
     // After prefs (cookie path), load Discover if still on Home.
     if (state.view === "home" && state.cookieFile && !state.homeLoaded) {
       loadHomeFeed(false);

@@ -25,6 +25,24 @@
         </nav>
         <div class="header-right">
           <button type="button" class="cr-btn cr-btn-ghost sm" id="btn-cookie-home" title="Set etp_rt cookie file path">Cookie</button>
+          <div class="account-wrap" id="account-wrap">
+            <button
+              type="button"
+              class="account-btn"
+              id="btn-account"
+              title="Cookie profiles and CR multiprofile"
+              aria-haspopup="menu"
+              aria-expanded="false"
+            >
+              <span class="account-avatar" id="account-avatar" aria-hidden="true">?</span>
+              <span class="account-meta">
+                <span class="account-name" id="account-name">Account</span>
+                <span class="account-sub" id="account-sub">No profile</span>
+              </span>
+              <span class="account-chev" aria-hidden="true">▾</span>
+            </button>
+            <div class="account-menu" id="account-menu" role="menu" hidden></div>
+          </div>
           <div class="mode-toggle" role="tablist" aria-label="Mode" id="mode-toggle">
             <button type="button" class="mode-btn is-on" id="mode-normal" data-mode="normal" role="tab" aria-selected="true">Normal</button>
             <button type="button" class="mode-btn" id="mode-advanced" data-mode="advanced" role="tab" aria-selected="false">Advanced</button>
@@ -87,8 +105,7 @@
           <div class="home-rail-title">Search results</div>
           <div id="home-search-grid" class="home-card-grid"></div>
         </div>
-        <div id="home-hero" class="home-hero" hidden></div>
-        <div id="home-rails" class="home-rails"></div>
+        <div id="home-feed" class="home-feed" aria-label="Discover feed"></div>
         <div class="home-more-wrap" id="home-more-wrap" hidden>
           <button type="button" class="cr-btn cr-btn-ghost" id="btn-home-more">Load more</button>
         </div>
