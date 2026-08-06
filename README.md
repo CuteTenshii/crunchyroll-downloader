@@ -166,18 +166,38 @@ Windows needs [WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/
 
 ### Home (Discover)
 
-The GUI opens on **Home**, which loads your personalized Crunchyroll Discover feed (same catalog APIs as the website — no Widevine, no playback).
+The GUI opens on **Home**, a Crunchyroll-like Discover feed from the same catalog APIs as the website (no Widevine, no playback).
 
-1. Set your **cookie file** (`etp_rt` path) via **Cookie**
-2. Browse hero slides and horizontal rails, or **Search** for a title
-3. Click a poster to switch to **Download**, fill the URL, and auto-**Inspect**
+1. Set your **cookie file** (`etp_rt` path) via **Cookie** or the **Account** menu
+2. Browse the feed, or **Search** for a series/movie
+3. Click a poster/card to open **Download**, fill the series/episode URL, and auto-**Inspect**
 
-Discover locale defaults to **`pt-BR`** (stored in preferences as `locale`). Home fails over to a popular-series browse list if the personalized feed is unavailable.
+**Feed blocks** (provider order, when available):
+
+| Block | What you see |
+|-------|----------------|
+| **Hero** | Full-bleed featured slides |
+| **Continue watching** | Landscape rail with playhead progress |
+| **Watchlist** | Poster rail of saved titles |
+| **Banners** | Promotional banner rows |
+| **Poster / landscape rails** | Horizontal title rails (browse/history/etc.) |
+| **Top 10 chrome** | Rank badges (1–10) on rails that look like Top 10 lists |
+
+Discover locale defaults to **`pt-BR`** (stored in preferences as `locale`). If the personalized feed fails, Home falls back to a popular-series browse list.
+
+### Account menu
+
+The header **Account** control manages:
+
+- **Cookie profiles** — named local paths to `etp_rt` files (switch accounts without re-picking a path each time). Add a profile from the menu; only file paths are stored, never the raw cookie.
+- **CR multiprofile** — when the active cookie supports Crunchyroll multiprofiles, list and switch the provider profile used for Discover personalization (watchlist, continue watching, etc.).
+
+Use **Cookie** for a one-off path, or save it as a named cookie profile from Account.
 
 ### Download
 
-1. Paste a series or episode **URL** (or open a title from Home)
-2. Choose your **cookie file** (`etp_rt` path; the raw value is never stored)
+1. Paste a series or episode **URL** (or open a title from Home — that switches to Download and runs **Inspect**)
+2. Ensure a **cookie file** / cookie profile is selected (the raw value is never stored)
 3. Press **Inspect** to load seasons, episodes, and language options
 4. **Select** what you want (episodes, audio, subs, quality)
 5. Press **Download**
@@ -193,7 +213,7 @@ Discover locale defaults to **`pt-BR`** (stored in preferences as `locale`). Hom
 | Subtitles | **None** |
 | Video / audio quality | **Max available** after probe |
 
-Preferences (URL, cookie path, output folder, last selections — never raw secrets) are saved under:
+Preferences (URL, cookie path, cookie profiles, output folder, last selections — never raw secrets) are saved under:
 
 - Windows: `%AppData%\crunchyroll-downloader\preferences.json`
 - macOS/Linux: `~/.config/crunchyroll-downloader/preferences.json`
