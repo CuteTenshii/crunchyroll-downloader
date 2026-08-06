@@ -147,6 +147,20 @@ func SavePreferences(path string, p Preferences) error {
 	return nil
 }
 
+// PreserveCookieProfilesFrom copies cookie-profile fields from existing when p
+// has an empty CookieProfiles list. Used by the GUI for partial SavePreferences
+// so settings-only writes cannot wipe account profiles.
+func (p *Preferences) PreserveCookieProfilesFrom(existing Preferences) {
+	if p == nil {
+		return
+	}
+	if len(p.CookieProfiles) == 0 && len(existing.CookieProfiles) > 0 {
+		p.CookieProfiles = existing.CookieProfiles
+		p.ActiveProfileID = existing.ActiveProfileID
+		p.ActiveCRProfileID = existing.ActiveCRProfileID
+	}
+}
+
 // EnsureCookieProfiles migrates legacy CookieFile-only prefs into a profile
 // list and keeps CookieFile aligned with the active profile.
 func (p *Preferences) EnsureCookieProfiles() {

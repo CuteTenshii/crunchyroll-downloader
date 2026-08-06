@@ -149,6 +149,56 @@ func TestEnsureCookieProfilesSyncsCookieFile(t *testing.T) {
 	}
 }
 
+func TestPreserveCookieProfilesFromPartialSave(t *testing.T) {
+	existing := Preferences{
+		CookieProfiles: []CookieProfile{
+			{ID: "a", Name: "A", CookieFile: "/a.txt"},
+			{ID: "b", Name: "B", CookieFile: "/b.txt"},
+		},
+		ActiveProfileID:   "b",
+		ActiveCRProfileID: "cr-1",
+		CookieFile:        "/b.txt",
+	}
+	// Partial GUI save: other fields only, no cookie profiles.
+	incoming := Preferences{
+		OutputDir:    "./Downloads",
+		VideoQuality: "1080p",
+		Mode:         "normal",
+	}
+	incoming.PreserveCookieProfilesFrom(existing)
+	incoming.EnsureCookieProfiles()
+	if len(incoming.CookieProfiles) != 2 {
+		t.Fatalf("want preserved profiles, got %#v", incoming.CookieProfiles)
+	}
+	if incoming.ActiveProfileID != "b" || incoming.ActiveCRProfileID != "cr-1" {
+		t.Fatalf("active ids: profile=%q cr=%q", incoming.ActiveProfileID, incoming.ActiveCRProfileID)
+	}
+	if incoming.CookieFile != "/b.txt" {
+		t.Fatalf("cookie file from active: %q", incoming.CookieFile)
+	}
+	if incoming.OutputDir != "./Downloads" {
+		t.Fatalf("other fields should remain: %#v", incoming)
+	}
+
+	// Explicit empty profiles on a first-run prefs should not invent from empty existing.
+	empty := Preferences{VideoQuality: "max"}
+	empty.PreserveCookieProfilesFrom(Preferences{})
+	empty.EnsureCookieProfiles()
+	if len(empty.CookieProfiles) != 0 {
+		t.Fatalf("want no profiles, got %#v", empty.CookieProfiles)
+	}
+
+	// Incoming that already has profiles must not be overwritten.
+	withOwn := Preferences{
+		CookieProfiles:  []CookieProfile{{ID: "x", Name: "X", CookieFile: "/x.txt"}},
+		ActiveProfileID: "x",
+	}
+	withOwn.PreserveCookieProfilesFrom(existing)
+	if len(withOwn.CookieProfiles) != 1 || withOwn.CookieProfiles[0].ID != "x" {
+		t.Fatalf("incoming profiles must win: %#v", withOwn.CookieProfiles)
+	}
+}
+
 func TestLoadPreferencesMissingFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "does-not-exist.json")
 	got, err := LoadPreferences(path)

@@ -54,9 +54,13 @@ func (a *App) GetPreferences() engine.Preferences {
 }
 
 // SavePreferences persists p to the default preferences path and updates memory.
+// When the frontend sends a partial Preferences without cookie profiles, existing
+// CookieProfiles / ActiveProfileID / ActiveCRProfileID are preserved so a
+// settings-only save cannot wipe account profiles.
 func (a *App) SavePreferences(p engine.Preferences) error {
-	p.EnsureCookieProfiles()
 	a.mu.Lock()
+	p.PreserveCookieProfilesFrom(a.prefs)
+	p.EnsureCookieProfiles()
 	a.prefs = p
 	a.mu.Unlock()
 	path, err := engine.DefaultPreferencesPath()
@@ -216,7 +220,9 @@ func (a *App) GetHomeFeed(start, n int) (engine.HomeFeedPage, error) {
 	locale := discoverLocale(prefs)
 
 	page, err := engine.FetchHomeFeed(start, n, locale)
-	if err == nil && (len(page.Heroes) > 0 || len(page.Rails) > 0) {
+	// Success is any non-empty block list (heroes, rails, continue-watching, etc.).
+	// Heroes/Rails alone can miss newer block kinds after deriveCompatFromBlocks.
+	if err == nil && len(page.Blocks) > 0 {
 		return page, nil
 	}
 	// Fall back to popular browse when personalized feed is empty or errors.
