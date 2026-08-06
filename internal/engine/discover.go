@@ -6,7 +6,22 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
+)
+
+// Block kinds for HomeBlock.Kind.
+const (
+	HomeBlockHero          = "hero"
+	HomeBlockLandscapeRail = "landscape_rail"
+	HomeBlockPosterRail    = "poster_rail"
+	HomeBlockBanner        = "banner"
+)
+
+// Rank styles for HomeBlock.RankStyle.
+const (
+	RankStyleNone  = "none"
+	RankStyleTop10 = "top10"
 )
 
 // DiscoverCard is a browse/home/search result ready for the Home UI.
@@ -18,10 +33,13 @@ type DiscoverCard struct {
 	PosterURL   string `json:"posterUrl,omitempty"`
 	WideURL     string `json:"wideUrl,omitempty"`
 	// OpenURL is a path the download UI can Inspect (e.g. https://www.crunchyroll.com/series/ID).
-	OpenURL string `json:"openUrl"`
+	OpenURL  string   `json:"openUrl"`
+	Progress *float64 `json:"progress,omitempty"` // 0..1 Continue Watching
+	Rank     int      `json:"rank,omitempty"`     // 1..10 Top 10 chrome
+	Subtitle string   `json:"subtitle,omitempty"` // e.g. S01E12
 }
 
-// DiscoverRail is a horizontal home-feed section.
+// DiscoverRail is a horizontal home-feed section (backward-compat view of a rail block).
 type DiscoverRail struct {
 	ID    string         `json:"id"`
 	Title string         `json:"title"`
@@ -38,13 +56,55 @@ type DiscoverHero struct {
 	ButtonText  string `json:"buttonText,omitempty"`
 }
 
+// HomeBanner is a wide in-feed promo (only series/watch open targets).
+type HomeBanner struct {
+	ID      string `json:"id,omitempty"`
+	Title   string `json:"title,omitempty"`
+	WideURL string `json:"wideUrl,omitempty"`
+	OpenURL string `json:"openUrl,omitempty"`
+}
+
+// HomeBlock is one ordered section of the Discover home feed.
+type HomeBlock struct {
+	ID        string         `json:"id"`
+	Kind      string         `json:"kind"` // hero | landscape_rail | poster_rail | banner
+	Title     string         `json:"title,omitempty"`
+	RankStyle string         `json:"rankStyle"` // none | top10
+	Cards     []DiscoverCard `json:"cards,omitempty"`
+	Heroes    []DiscoverHero `json:"heroes,omitempty"`
+	Banner    *HomeBanner    `json:"banner,omitempty"`
+}
+
 // HomeFeedPage is one page of Discover home content.
+// Blocks is the primary ordered model; Heroes/Rails are derived for backward compatibility.
 type HomeFeedPage struct {
-	Heroes     []DiscoverHero `json:"heroes"`
-	Rails      []DiscoverRail `json:"rails"`
-	NextStart  int            `json:"nextStart"`
-	PageSize   int            `json:"pageSize"`
-	TotalApprox int           `json:"totalApprox,omitempty"`
+	Blocks      []HomeBlock    `json:"blocks"`
+	Heroes      []DiscoverHero `json:"heroes"`
+	Rails       []DiscoverRail `json:"rails"`
+	NextStart   int            `json:"nextStart"`
+	PageSize    int            `json:"pageSize"`
+	TotalApprox int            `json:"totalApprox,omitempty"`
+}
+
+// Hydrate kinds for dynamic / curated feed entries that need network follow-up.
+const (
+	hydrateNone              = ""
+	hydrateHistory           = "history"
+	hydrateWatchlist         = "watchlist"
+	hydrateRecommendations   = "recommendations"
+	hydrateBecauseYouWatched = "because_you_watched"
+	hydrateBrowse            = "browse"
+	hydrateCurated           = "curated"
+)
+
+// feedMapResult is the pure mapping outcome for one home_feed data item.
+type feedMapResult struct {
+	Block         HomeBlock
+	Hydrate       string
+	CuratedIDs    []string
+	SourceMediaID string
+	BrowseLink    string
+	Skip          bool
 }
 
 type v2BulkRaw struct {
@@ -60,14 +120,31 @@ type cmsObjectItem struct {
 	SlugTitle   string   `json:"slug_title"`
 	Images      CRImages `json:"images"`
 	// Episode / series nested metadata sometimes carries series_id.
-	EpisodeMetadata *struct {
-		SeriesID    string `json:"series_id"`
-		SeriesTitle string `json:"series_title"`
-	} `json:"episode_metadata"`
+	EpisodeMetadata *cmsEpisodeMetadata `json:"episode_metadata"`
+}
+
+type cmsEpisodeMetadata struct {
+	SeriesID      string          `json:"series_id"`
+	SeriesTitle   string          `json:"series_title"`
+	SeasonNumber  int             `json:"season_number"`
+	Episode       json.RawMessage `json:"episode"`
+	EpisodeNumber json.RawMessage `json:"episode_number"`
+	DurationMS    int64           `json:"duration_ms"`
+}
+
+type feedItemHead struct {
+	ResourceType  string `json:"resource_type"`
+	ResponseType  string `json:"response_type"`
+	Title         string `json:"title"`
+	Description   string `json:"description"`
+	ID            string `json:"id"`
+	Link          string `json:"link"`
+	SourceMediaID string `json:"source_media_id"`
 }
 
 // FetchHomeFeed loads a page of the personalized Discover home feed.
 // Requires a valid token (refreshAccessToken) so GetAccountID() is non-empty.
+// Catalog only — no Widevine. Individual hydrator failures drop that block only.
 func FetchHomeFeed(start, n int, locale string) (HomeFeedPage, error) {
 	if n <= 0 {
 		n = 20
@@ -102,155 +179,8 @@ func FetchHomeFeed(start, n int, locale string) (HomeFeedPage, error) {
 		NextStart:   start + len(bulk.Data),
 		TotalApprox: bulk.Total,
 	}
-
-	var pendingIDs []string
-	idToRail := map[string]int{} // rail index for series ids still needing cards
-
-	for i, raw := range bulk.Data {
-		var head struct {
-			ResourceType string `json:"resource_type"`
-			ResponseType string `json:"response_type"`
-			Title        string `json:"title"`
-			Description  string `json:"description"`
-			ID           string `json:"id"`
-		}
-		if err := json.Unmarshal(raw, &head); err != nil {
-			continue
-		}
-		switch head.ResourceType {
-		case "hero_carousel":
-			var hero struct {
-				Items []struct {
-					Title       string `json:"title"`
-					Description string `json:"description"`
-					Link        string `json:"link"`
-					ButtonText  string `json:"button_text"`
-					Slug        string `json:"slug"`
-					Images      struct {
-						LandscapeLarge string `json:"landscape_large"`
-						PortraitLarge  string `json:"portrait_large"`
-					} `json:"images"`
-					Panel json.RawMessage `json:"panel"`
-				} `json:"items"`
-			}
-			if err := json.Unmarshal(raw, &hero); err != nil {
-				continue
-			}
-			for _, it := range hero.Items {
-				h := DiscoverHero{
-					Title:       it.Title,
-					Description: it.Description,
-					WideURL:     it.Images.LandscapeLarge,
-					PosterURL:   it.Images.PortraitLarge,
-					ButtonText:  it.ButtonText,
-					OpenURL:     normalizeOpenURL(it.Link, locale),
-				}
-				if h.OpenURL == "" && len(it.Panel) > 0 {
-					if card, ok := cardFromCMSObject(it.Panel, locale); ok {
-						h.OpenURL = card.OpenURL
-						if h.PosterURL == "" {
-							h.PosterURL = card.PosterURL
-						}
-						if h.WideURL == "" {
-							h.WideURL = card.WideURL
-						}
-						if h.Title == "" {
-							h.Title = card.Title
-						}
-					}
-				}
-				if h.Title != "" || h.OpenURL != "" {
-					page.Heroes = append(page.Heroes, h)
-				}
-			}
-		case "curated_collection":
-			if head.ResponseType != "" && head.ResponseType != "series" {
-				// music etc. — skip for v1
-				continue
-			}
-			var coll struct {
-				Title string   `json:"title"`
-				IDs   []string `json:"ids"`
-				ID    string   `json:"id"`
-			}
-			if err := json.Unmarshal(raw, &coll); err != nil {
-				continue
-			}
-			if len(coll.IDs) == 0 {
-				continue
-			}
-			railIdx := len(page.Rails)
-			page.Rails = append(page.Rails, DiscoverRail{
-				ID:    firstNonEmpty(coll.ID, fmt.Sprintf("rail-%d", i)),
-				Title: firstNonEmpty(coll.Title, "Collection"),
-			})
-			for _, id := range coll.IDs {
-				id = strings.TrimSpace(id)
-				if id == "" {
-					continue
-				}
-				pendingIDs = append(pendingIDs, id)
-				idToRail[id] = railIdx
-			}
-		case "panel":
-			var panelWrap struct {
-				Panel json.RawMessage `json:"panel"`
-			}
-			if err := json.Unmarshal(raw, &panelWrap); err != nil || len(panelWrap.Panel) == 0 {
-				continue
-			}
-			if card, ok := cardFromCMSObject(panelWrap.Panel, locale); ok {
-				page.Rails = append(page.Rails, DiscoverRail{
-					ID:    "panel-" + card.ID,
-					Title: "Featured",
-					Cards: []DiscoverCard{card},
-				})
-			}
-		default:
-			// Skip unknown / dynamic collections in v1 (recommendations etc. can be phase 2).
-			continue
-		}
-	}
-
-	if len(pendingIDs) > 0 {
-		cards, err := ResolveObjectCards(pendingIDs, locale)
-		if err != nil {
-			return page, err
-		}
-		byID := map[string]DiscoverCard{}
-		for _, c := range cards {
-			byID[c.ID] = c
-		}
-		// Preserve order of ids per rail by walking pending in order.
-		railCards := map[int][]DiscoverCard{}
-		seen := map[string]struct{}{}
-		for _, id := range pendingIDs {
-			if _, ok := seen[id]; ok {
-				continue
-			}
-			seen[id] = struct{}{}
-			card, ok := byID[id]
-			if !ok {
-				continue
-			}
-			ri := idToRail[id]
-			railCards[ri] = append(railCards[ri], card)
-		}
-		for ri, cards := range railCards {
-			if ri >= 0 && ri < len(page.Rails) {
-				page.Rails[ri].Cards = cards
-			}
-		}
-		// Drop empty rails
-		filtered := page.Rails[:0]
-		for _, r := range page.Rails {
-			if len(r.Cards) > 0 {
-				filtered = append(filtered, r)
-			}
-		}
-		page.Rails = filtered
-	}
-
+	page.Blocks = buildHomeBlocks(bulk.Data, accountID, locale, defaultFeedHydrator{})
+	deriveCompatFromBlocks(&page)
 	return page, nil
 }
 
@@ -293,12 +223,17 @@ func BrowsePopular(start, n int, locale string) (HomeFeedPage, error) {
 		TotalApprox: bulk.Total,
 	}
 	if len(cards) > 0 {
-		page.Rails = []DiscoverRail{{
-			ID:    "browse-popular",
-			Title: "Popular",
-			Cards: cards,
-		}}
+		block := HomeBlock{
+			ID:        "browse-popular",
+			Kind:      HomeBlockPosterRail,
+			Title:     "Popular",
+			RankStyle: RankStyleNone,
+			Cards:     cards,
+		}
+		applyTop10Ranks(&block)
+		page.Blocks = []HomeBlock{block}
 	}
+	deriveCompatFromBlocks(&page)
 	return page, nil
 }
 
@@ -429,6 +364,563 @@ func ResolveObjectCards(ids []string, locale string) ([]DiscoverCard, error) {
 	return out, nil
 }
 
+// feedHydrator loads dynamic/curated card payloads. Tests inject fakes.
+type feedHydrator interface {
+	History(accountID, locale string, n int) ([]DiscoverCard, error)
+	Watchlist(accountID, locale string, n int) ([]DiscoverCard, error)
+	Recommendations(accountID, locale string, n int) ([]DiscoverCard, error)
+	SimilarTo(accountID, mediaID, locale string, n int) ([]DiscoverCard, error)
+	Browse(link, locale string, n int) ([]DiscoverCard, error)
+	Objects(ids []string, locale string) ([]DiscoverCard, error)
+}
+
+type defaultFeedHydrator struct{}
+
+func (defaultFeedHydrator) History(accountID, locale string, n int) ([]DiscoverCard, error) {
+	return fetchWatchHistory(accountID, locale, n)
+}
+func (defaultFeedHydrator) Watchlist(accountID, locale string, n int) ([]DiscoverCard, error) {
+	return fetchWatchlist(accountID, locale, n)
+}
+func (defaultFeedHydrator) Recommendations(accountID, locale string, n int) ([]DiscoverCard, error) {
+	return fetchRecommendations(accountID, locale, n)
+}
+func (defaultFeedHydrator) SimilarTo(accountID, mediaID, locale string, n int) ([]DiscoverCard, error) {
+	return fetchSimilarTo(accountID, mediaID, locale, n)
+}
+func (defaultFeedHydrator) Browse(link, locale string, n int) ([]DiscoverCard, error) {
+	return fetchBrowseLink(link, locale, n)
+}
+func (defaultFeedHydrator) Objects(ids []string, locale string) ([]DiscoverCard, error) {
+	return ResolveObjectCards(ids, locale)
+}
+
+// buildHomeBlocks walks home_feed data in order, maps approved types, hydrates dynamics.
+// Hydrator errors drop that block only.
+func buildHomeBlocks(data []json.RawMessage, accountID, locale string, h feedHydrator) []HomeBlock {
+	const cardLimit = 20
+	var blocks []HomeBlock
+	// Batch curated ids across the page for fewer cms/objects calls.
+	type curatedPending struct {
+		blockIdx int
+		ids      []string
+	}
+	var pending []curatedPending
+
+	for i, raw := range data {
+		mapped := mapHomeFeedEntry(raw, i, locale)
+		if mapped.Skip {
+			continue
+		}
+		block := mapped.Block
+		switch mapped.Hydrate {
+		case hydrateNone:
+			// fully static (hero, panel, banner)
+		case hydrateCurated:
+			pending = append(pending, curatedPending{blockIdx: len(blocks), ids: mapped.CuratedIDs})
+			blocks = append(blocks, block)
+			continue
+		case hydrateHistory:
+			cards, err := h.History(accountID, locale, cardLimit)
+			if err != nil || len(cards) == 0 {
+				continue
+			}
+			block.Cards = cards
+		case hydrateWatchlist:
+			cards, err := h.Watchlist(accountID, locale, cardLimit)
+			if err != nil || len(cards) == 0 {
+				continue
+			}
+			block.Cards = cards
+		case hydrateRecommendations:
+			cards, err := h.Recommendations(accountID, locale, cardLimit)
+			if err != nil || len(cards) == 0 {
+				continue
+			}
+			block.Cards = cards
+		case hydrateBecauseYouWatched:
+			if mapped.SourceMediaID == "" {
+				continue
+			}
+			cards, err := h.SimilarTo(accountID, mapped.SourceMediaID, locale, cardLimit)
+			if err != nil || len(cards) == 0 {
+				continue
+			}
+			block.Cards = cards
+		case hydrateBrowse:
+			cards, err := h.Browse(mapped.BrowseLink, locale, cardLimit)
+			if err != nil || len(cards) == 0 {
+				continue
+			}
+			block.Cards = cards
+		default:
+			continue
+		}
+		if !blockHasContent(block) {
+			continue
+		}
+		applyTop10Ranks(&block)
+		blocks = append(blocks, block)
+	}
+
+	if len(pending) > 0 {
+		allIDs := make([]string, 0)
+		for _, p := range pending {
+			allIDs = append(allIDs, p.ids...)
+		}
+		byID := map[string]DiscoverCard{}
+		if cards, err := h.Objects(allIDs, locale); err == nil {
+			for _, c := range cards {
+				byID[c.ID] = c
+			}
+		}
+		// Fill curated blocks in place (or leave empty for filtering).
+		for _, p := range pending {
+			if p.blockIdx < 0 || p.blockIdx >= len(blocks) {
+				continue
+			}
+			cards := make([]DiscoverCard, 0, len(p.ids))
+			seen := map[string]struct{}{}
+			for _, id := range p.ids {
+				id = strings.TrimSpace(id)
+				if id == "" {
+					continue
+				}
+				if _, ok := seen[id]; ok {
+					continue
+				}
+				seen[id] = struct{}{}
+				if c, ok := byID[id]; ok {
+					cards = append(cards, c)
+				}
+			}
+			blocks[p.blockIdx].Cards = cards
+			applyTop10Ranks(&blocks[p.blockIdx])
+		}
+	}
+
+	// Drop empty rails after curated fill / hydration gaps.
+	out := blocks[:0]
+	for _, b := range blocks {
+		if blockHasContent(b) {
+			out = append(out, b)
+		}
+	}
+	return out
+}
+
+// mapHomeFeedEntry is a pure mapper from one home_feed item to a block skeleton + hydrate hint.
+func mapHomeFeedEntry(raw json.RawMessage, index int, locale string) feedMapResult {
+	var head feedItemHead
+	if err := json.Unmarshal(raw, &head); err != nil {
+		return feedMapResult{Skip: true}
+	}
+	resType := strings.ToLower(strings.TrimSpace(head.ResourceType))
+	respType := strings.ToLower(strings.TrimSpace(head.ResponseType))
+	id := firstNonEmpty(head.ID, fmt.Sprintf("block-%d", index))
+	title := strings.TrimSpace(head.Title)
+
+	switch resType {
+	case "hero_carousel":
+		heroes := mapHeroItems(raw, locale)
+		if len(heroes) == 0 {
+			return feedMapResult{Skip: true}
+		}
+		return feedMapResult{
+			Block: HomeBlock{
+				ID:        id,
+				Kind:      HomeBlockHero,
+				Title:     title,
+				RankStyle: RankStyleNone,
+				Heroes:    heroes,
+			},
+			Hydrate: hydrateNone,
+		}
+
+	case "curated_collection":
+		if respType != "" && respType != "series" {
+			return feedMapResult{Skip: true}
+		}
+		var coll struct {
+			Title string   `json:"title"`
+			IDs   []string `json:"ids"`
+			ID    string   `json:"id"`
+		}
+		if err := json.Unmarshal(raw, &coll); err != nil || len(coll.IDs) == 0 {
+			return feedMapResult{Skip: true}
+		}
+		return feedMapResult{
+			Block: HomeBlock{
+				ID:        firstNonEmpty(coll.ID, id),
+				Kind:      HomeBlockPosterRail,
+				Title:     firstNonEmpty(coll.Title, title, "Collection"),
+				RankStyle: RankStyleNone,
+			},
+			Hydrate:    hydrateCurated,
+			CuratedIDs: coll.IDs,
+		}
+
+	case "panel":
+		var panelWrap struct {
+			Panel json.RawMessage `json:"panel"`
+			Title string          `json:"title"`
+			ID    string          `json:"id"`
+		}
+		if err := json.Unmarshal(raw, &panelWrap); err != nil || len(panelWrap.Panel) == 0 {
+			return feedMapResult{Skip: true}
+		}
+		card, ok := cardFromCMSObject(panelWrap.Panel, locale)
+		if !ok {
+			return feedMapResult{Skip: true}
+		}
+		return feedMapResult{
+			Block: HomeBlock{
+				ID:        firstNonEmpty(panelWrap.ID, "panel-"+card.ID),
+				Kind:      HomeBlockPosterRail,
+				Title:     firstNonEmpty(panelWrap.Title, title, "Featured"),
+				RankStyle: RankStyleNone,
+				Cards:     []DiscoverCard{card},
+			},
+			Hydrate: hydrateNone,
+		}
+
+	case "in_feed_banner":
+		banner, ok := mapInFeedBanner(raw, head, locale)
+		if !ok {
+			return feedMapResult{Skip: true}
+		}
+		return feedMapResult{
+			Block: HomeBlock{
+				ID:        firstNonEmpty(banner.ID, id),
+				Kind:      HomeBlockBanner,
+				Title:     firstNonEmpty(banner.Title, title),
+				RankStyle: RankStyleNone,
+				Banner:    &banner,
+			},
+			Hydrate: hydrateNone,
+		}
+
+	case "dynamic_collection":
+		return mapDynamicCollection(raw, head, id, title, respType)
+
+	case "music_carousel", "music", "game", "games", "news_feed", "news", "store":
+		return feedMapResult{Skip: true}
+
+	default:
+		// Unknown resource types are skipped (music/game/news often appear with other names).
+		if strings.Contains(resType, "music") || strings.Contains(resType, "game") ||
+			strings.Contains(resType, "news") || strings.Contains(resType, "manga") {
+			return feedMapResult{Skip: true}
+		}
+		return feedMapResult{Skip: true}
+	}
+}
+
+func mapDynamicCollection(raw json.RawMessage, head feedItemHead, id, title, respType string) feedMapResult {
+	// Pull optional fields that may only appear on the full object.
+	var extra struct {
+		SourceMediaID string `json:"source_media_id"`
+		Link          string `json:"link"`
+		// Nested source sometimes used by because_you_watched
+		SourceMedia struct {
+			ID string `json:"id"`
+		} `json:"source_media"`
+	}
+	_ = json.Unmarshal(raw, &extra)
+	sourceID := firstNonEmpty(head.SourceMediaID, extra.SourceMediaID, extra.SourceMedia.ID)
+	link := firstNonEmpty(head.Link, extra.Link)
+
+	switch respType {
+	case "history", "continue_watching", "watch_history":
+		return feedMapResult{
+			Block: HomeBlock{
+				ID:        id,
+				Kind:      HomeBlockLandscapeRail,
+				Title:     firstNonEmpty(title, "Continue Watching"),
+				RankStyle: RankStyleNone,
+			},
+			Hydrate: hydrateHistory,
+		}
+	case "watchlist":
+		return feedMapResult{
+			Block: HomeBlock{
+				ID:        id,
+				Kind:      HomeBlockPosterRail,
+				Title:     firstNonEmpty(title, "Watchlist"),
+				RankStyle: RankStyleNone,
+			},
+			Hydrate: hydrateWatchlist,
+		}
+	case "recommendations", "recommendation":
+		return feedMapResult{
+			Block: HomeBlock{
+				ID:        id,
+				Kind:      HomeBlockPosterRail,
+				Title:     firstNonEmpty(title, "Recommended"),
+				RankStyle: RankStyleNone,
+			},
+			Hydrate: hydrateRecommendations,
+		}
+	case "because_you_watched", "similar_to":
+		if sourceID == "" {
+			return feedMapResult{Skip: true}
+		}
+		return feedMapResult{
+			Block: HomeBlock{
+				ID:        id,
+				Kind:      HomeBlockPosterRail,
+				Title:     firstNonEmpty(title, "Because You Watched"),
+				RankStyle: RankStyleNone,
+			},
+			Hydrate:       hydrateBecauseYouWatched,
+			SourceMediaID: sourceID,
+		}
+	case "browse", "recent_episodes", "recent_episode":
+		kind := HomeBlockPosterRail
+		if respType == "recent_episodes" || respType == "recent_episode" {
+			kind = HomeBlockLandscapeRail
+		}
+		// Prefer explicit link; empty link still hydrates default browse popularity.
+		return feedMapResult{
+			Block: HomeBlock{
+				ID:        id,
+				Kind:      kind,
+				Title:     firstNonEmpty(title, "Browse"),
+				RankStyle: RankStyleNone,
+			},
+			Hydrate:    hydrateBrowse,
+			BrowseLink: link,
+		}
+	default:
+		// Some dynamic rows only set link without a known response_type.
+		if link != "" && (strings.Contains(link, "browse") || strings.Contains(link, "watchlist") ||
+			strings.Contains(link, "recommendations") || strings.Contains(link, "similar_to")) {
+			hydrate := hydrateBrowse
+			kind := HomeBlockPosterRail
+			switch {
+			case strings.Contains(link, "watchlist"):
+				hydrate = hydrateWatchlist
+			case strings.Contains(link, "recommendations"):
+				hydrate = hydrateRecommendations
+			case strings.Contains(link, "similar_to"):
+				hydrate = hydrateBecauseYouWatched
+			case strings.Contains(link, "watch-history") || strings.Contains(link, "history"):
+				hydrate = hydrateHistory
+				kind = HomeBlockLandscapeRail
+			}
+			return feedMapResult{
+				Block: HomeBlock{
+					ID:        id,
+					Kind:      kind,
+					Title:     firstNonEmpty(title, "Collection"),
+					RankStyle: RankStyleNone,
+				},
+				Hydrate:       hydrate,
+				BrowseLink:    link,
+				SourceMediaID: sourceID,
+			}
+		}
+		return feedMapResult{Skip: true}
+	}
+}
+
+func mapHeroItems(raw json.RawMessage, locale string) []DiscoverHero {
+	var hero struct {
+		Items []struct {
+			Title       string `json:"title"`
+			Description string `json:"description"`
+			Link        string `json:"link"`
+			ButtonText  string `json:"button_text"`
+			Slug        string `json:"slug"`
+			Images      struct {
+				LandscapeLarge string `json:"landscape_large"`
+				PortraitLarge  string `json:"portrait_large"`
+			} `json:"images"`
+			Panel json.RawMessage `json:"panel"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(raw, &hero); err != nil {
+		return nil
+	}
+	var out []DiscoverHero
+	for _, it := range hero.Items {
+		h := DiscoverHero{
+			Title:       it.Title,
+			Description: it.Description,
+			WideURL:     it.Images.LandscapeLarge,
+			PosterURL:   it.Images.PortraitLarge,
+			ButtonText:  it.ButtonText,
+			OpenURL:     normalizeOpenURL(it.Link, locale),
+		}
+		if h.OpenURL == "" && len(it.Panel) > 0 {
+			if card, ok := cardFromCMSObject(it.Panel, locale); ok {
+				h.OpenURL = card.OpenURL
+				if h.PosterURL == "" {
+					h.PosterURL = card.PosterURL
+				}
+				if h.WideURL == "" {
+					h.WideURL = card.WideURL
+				}
+				if h.Title == "" {
+					h.Title = card.Title
+				}
+			}
+		}
+		if h.Title != "" || h.OpenURL != "" {
+			out = append(out, h)
+		}
+	}
+	return out
+}
+
+// mapInFeedBanner extracts a banner only when the open URL is series/watch catalog content.
+func mapInFeedBanner(raw json.RawMessage, head feedItemHead, locale string) (HomeBanner, bool) {
+	var b struct {
+		ID          string `json:"id"`
+		Title       string `json:"title"`
+		Link        string `json:"link"`
+		URL         string `json:"url"`
+		Description string `json:"description"`
+		Images      struct {
+			LandscapeLarge string `json:"landscape_large"`
+			DesktopWide    string `json:"desktop_wide"`
+			MobileWide     string `json:"mobile_wide"`
+			PosterWide     string `json:"poster_wide"`
+		} `json:"images"`
+		Panel json.RawMessage `json:"panel"`
+	}
+	if err := json.Unmarshal(raw, &b); err != nil {
+		return HomeBanner{}, false
+	}
+	open := normalizeOpenURL(firstNonEmpty(b.Link, b.URL, head.Link), locale)
+	wide := firstNonEmpty(b.Images.LandscapeLarge, b.Images.DesktopWide, b.Images.MobileWide, b.Images.PosterWide)
+	title := firstNonEmpty(b.Title, head.Title)
+	if open == "" && len(b.Panel) > 0 {
+		if card, ok := cardFromCMSObject(b.Panel, locale); ok {
+			open = card.OpenURL
+			if wide == "" {
+				wide = card.WideURL
+			}
+			if title == "" {
+				title = card.Title
+			}
+		}
+	}
+	if !isCatalogOpenURL(open) {
+		return HomeBanner{}, false
+	}
+	return HomeBanner{
+		ID:      firstNonEmpty(b.ID, head.ID),
+		Title:   title,
+		WideURL: wide,
+		OpenURL: open,
+	}, true
+}
+
+// isCatalogOpenURL reports whether url points at a series or watch title we can Inspect.
+func isCatalogOpenURL(open string) bool {
+	open = strings.TrimSpace(strings.ToLower(open))
+	if open == "" {
+		return false
+	}
+	// Absolute or path.
+	if strings.Contains(open, "/series/") || strings.Contains(open, "/watch/") {
+		return true
+	}
+	return false
+}
+
+// looksLikeTop10 uses title/id heuristics (locale-aware) for Top 10 chrome.
+func looksLikeTop10(title, id string) bool {
+	s := strings.ToLower(strings.TrimSpace(title + " " + id))
+	if s == "" {
+		return false
+	}
+	// Normalize separators for matching.
+	compact := strings.NewReplacer("-", " ", "_", " ", ".", " ").Replace(s)
+	compact = strings.Join(strings.Fields(compact), " ")
+	needles := []string{
+		"top 10",
+		"top10",
+		"top ten",
+		"top-10",
+		"mais populares",
+		"most popular",
+		"ranking",
+	}
+	for _, n := range needles {
+		if strings.Contains(s, n) || strings.Contains(compact, n) {
+			return true
+		}
+	}
+	// top10 without space already covered; also "top_10" via compact.
+	if strings.Contains(compact, "top 10") {
+		return true
+	}
+	return false
+}
+
+// applyTop10Ranks sets rankStyle and card ranks when the rail looks like a Top 10 list.
+func applyTop10Ranks(block *HomeBlock) {
+	if block == nil {
+		return
+	}
+	if block.RankStyle == "" {
+		block.RankStyle = RankStyleNone
+	}
+	if block.Kind != HomeBlockPosterRail && block.Kind != HomeBlockLandscapeRail {
+		return
+	}
+	if !looksLikeTop10(block.Title, block.ID) {
+		return
+	}
+	block.RankStyle = RankStyleTop10
+	n := len(block.Cards)
+	if n > 10 {
+		n = 10
+	}
+	for i := 0; i < n; i++ {
+		block.Cards[i].Rank = i + 1
+	}
+}
+
+func blockHasContent(b HomeBlock) bool {
+	switch b.Kind {
+	case HomeBlockHero:
+		return len(b.Heroes) > 0
+	case HomeBlockBanner:
+		return b.Banner != nil && b.Banner.OpenURL != ""
+	case HomeBlockPosterRail, HomeBlockLandscapeRail:
+		return len(b.Cards) > 0
+	default:
+		return false
+	}
+}
+
+// deriveCompatFromBlocks fills Heroes/Rails from Blocks for older GUI consumers.
+func deriveCompatFromBlocks(page *HomeFeedPage) {
+	if page == nil {
+		return
+	}
+	page.Heroes = nil
+	page.Rails = nil
+	for _, b := range page.Blocks {
+		switch b.Kind {
+		case HomeBlockHero:
+			page.Heroes = append(page.Heroes, b.Heroes...)
+		case HomeBlockPosterRail, HomeBlockLandscapeRail:
+			if len(b.Cards) == 0 {
+				continue
+			}
+			page.Rails = append(page.Rails, DiscoverRail{
+				ID:    b.ID,
+				Title: b.Title,
+				Cards: b.Cards,
+			})
+		}
+	}
+}
+
 func discoverGET(endpoint string) ([]byte, error) {
 	req, err := http.NewRequest(http.MethodGet, endpoint, nil)
 	if err != nil {
@@ -477,8 +969,17 @@ func cardFromCMSObject(raw json.RawMessage, locale string) (DiscoverCard, bool) 
 		card.OpenURL = seriesOpenURL(obj.ID, obj.SlugTitle, locale)
 	case typ == "episode":
 		card.OpenURL = watchOpenURL(obj.ID, obj.SlugTitle, locale)
-		if obj.EpisodeMetadata != nil && obj.EpisodeMetadata.SeriesTitle != "" && card.Title == "" {
-			card.Title = obj.EpisodeMetadata.SeriesTitle
+		if obj.EpisodeMetadata != nil {
+			if card.Title == "" && obj.EpisodeMetadata.SeriesTitle != "" {
+				card.Title = obj.EpisodeMetadata.SeriesTitle
+			}
+			card.Subtitle = episodeSubtitle(obj.EpisodeMetadata)
+			if card.PosterURL == "" {
+				card.PosterURL = thumbnailFromImages(obj.Images)
+			}
+			if card.WideURL == "" {
+				card.WideURL = thumbnailFromImages(obj.Images)
+			}
 		}
 	case strings.Contains(typ, "movie"):
 		card.OpenURL = watchOpenURL(obj.ID, obj.SlugTitle, locale)
@@ -487,6 +988,45 @@ func cardFromCMSObject(raw json.RawMessage, locale string) (DiscoverCard, bool) 
 		card.OpenURL = seriesOpenURL(obj.ID, obj.SlugTitle, locale)
 	}
 	return card, true
+}
+
+func episodeSubtitle(meta *cmsEpisodeMetadata) string {
+	if meta == nil {
+		return ""
+	}
+	ep := firstNonEmpty(rawJSONString(meta.Episode), rawJSONString(meta.EpisodeNumber))
+	if meta.SeasonNumber > 0 && ep != "" {
+		return fmt.Sprintf("S%02dE%s", meta.SeasonNumber, ep)
+	}
+	if ep != "" {
+		return "E" + ep
+	}
+	if meta.SeasonNumber > 0 {
+		return fmt.Sprintf("S%02d", meta.SeasonNumber)
+	}
+	return ""
+}
+
+func rawJSONString(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var s string
+	if err := json.Unmarshal(raw, &s); err == nil {
+		return strings.TrimSpace(s)
+	}
+	var n json.Number
+	if err := json.Unmarshal(raw, &n); err == nil {
+		return strings.TrimSpace(n.String())
+	}
+	var f float64
+	if err := json.Unmarshal(raw, &f); err == nil {
+		if f == float64(int64(f)) {
+			return strconv.FormatInt(int64(f), 10)
+		}
+		return strconv.FormatFloat(f, 'f', -1, 64)
+	}
+	return ""
 }
 
 func seriesOpenURL(id, slug, locale string) string {
@@ -572,4 +1112,16 @@ func dedupeCards(in []DiscoverCard) []DiscoverCard {
 		out = append(out, c)
 	}
 	return out
+}
+
+// progressPtr returns a heap-backed *float64 clamped to [0,1].
+func progressPtr(v float64) *float64 {
+	if v < 0 {
+		v = 0
+	}
+	if v > 1 {
+		v = 1
+	}
+	p := v
+	return &p
 }
