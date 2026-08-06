@@ -12,16 +12,23 @@
     <!-- Fixed top chrome (Android TopAppBar-style): stays put while content scrolls -->
     <div class="app-chrome">
       <header class="header">
-        <div class="brand">
+        <div class="brand" id="brand-home" role="button" tabindex="0" title="Home">
           <div class="brand-mark" aria-hidden="true">CR</div>
           <div class="brand-text">
             <div class="brand-title">Crunchyroll Downloader</div>
             <div class="brand-sub">Local · authorized account only</div>
           </div>
         </div>
-        <div class="mode-toggle" role="tablist" aria-label="Mode">
-          <button type="button" class="mode-btn is-on" id="mode-normal" data-mode="normal" role="tab" aria-selected="true">Normal</button>
-          <button type="button" class="mode-btn" id="mode-advanced" data-mode="advanced" role="tab" aria-selected="false">Advanced</button>
+        <nav class="view-nav" role="tablist" aria-label="Main">
+          <button type="button" class="view-nav-btn is-on" id="nav-home" role="tab" aria-selected="true">Home</button>
+          <button type="button" class="view-nav-btn" id="nav-download" role="tab" aria-selected="false">Download</button>
+        </nav>
+        <div class="header-right">
+          <button type="button" class="cr-btn cr-btn-ghost sm" id="btn-cookie-home" title="Set etp_rt cookie file path">Cookie</button>
+          <div class="mode-toggle" role="tablist" aria-label="Mode" id="mode-toggle">
+            <button type="button" class="mode-btn is-on" id="mode-normal" data-mode="normal" role="tab" aria-selected="true">Normal</button>
+            <button type="button" class="mode-btn" id="mode-advanced" data-mode="advanced" role="tab" aria-selected="false">Advanced</button>
+          </div>
         </div>
       </header>
 
@@ -31,30 +38,63 @@
         <button type="button" class="banner-close" id="banner-close" aria-label="Dismiss">×</button>
       </div>
 
-      <div class="toolbar">
-        <input
-          class="cr-input"
-          type="text"
-          id="url"
-          placeholder="Paste series or episode URL…"
-          spellcheck="false"
-          autocomplete="off"
-        />
-        <button type="button" class="cr-btn cr-btn-ghost" id="btn-cookie" title="Set etp_rt cookie file path">Cookie</button>
-        <button type="button" class="cr-btn cr-btn-primary" id="btn-inspect">Inspect</button>
+      <!-- Download chrome: URL bar + inspected title hero -->
+      <div id="download-chrome">
+        <div class="toolbar">
+          <input
+            class="cr-input"
+            type="text"
+            id="url"
+            placeholder="Paste series or episode URL…"
+            spellcheck="false"
+            autocomplete="off"
+          />
+          <button type="button" class="cr-btn cr-btn-ghost" id="btn-cookie" title="Set etp_rt cookie file path">Cookie</button>
+          <button type="button" class="cr-btn cr-btn-primary" id="btn-inspect">Inspect</button>
+        </div>
+
+        <div id="media-hero" class="media-hero" hidden>
+          <img id="media-poster" class="media-poster" alt="" />
+          <div class="media-hero-text">
+            <div class="media-hero-kicker" id="media-kicker">Title</div>
+            <div class="media-hero-title" id="media-title">—</div>
+          </div>
+        </div>
       </div>
 
-      <div id="media-hero" class="media-hero" hidden>
-        <img id="media-poster" class="media-poster" alt="" />
-        <div class="media-hero-text">
-          <div class="media-hero-kicker" id="media-kicker">Title</div>
-          <div class="media-hero-title" id="media-title">—</div>
+      <!-- Home chrome: Discover search -->
+      <div id="home-chrome" hidden>
+        <div class="toolbar home-toolbar">
+          <input
+            class="cr-input"
+            type="search"
+            id="home-search"
+            placeholder="Search series and movies…"
+            spellcheck="false"
+            autocomplete="off"
+          />
+          <button type="button" class="cr-btn cr-btn-primary" id="btn-home-search">Search</button>
+          <button type="button" class="cr-btn cr-btn-ghost" id="btn-home-refresh" title="Reload home feed">Refresh</button>
         </div>
       </div>
     </div>
 
     <div class="workspace">
-      <div class="main-pane" id="main-pane">
+      <!-- Discover / Home -->
+      <div id="view-home" class="view-home is-on" role="tabpanel" aria-label="Home">
+        <div id="home-status" class="home-status muted-hint">Set a cookie file, then load your Discover feed.</div>
+        <div id="home-search-results" class="home-search-results" hidden>
+          <div class="home-rail-title">Search results</div>
+          <div id="home-search-grid" class="home-card-grid"></div>
+        </div>
+        <div id="home-hero" class="home-hero" hidden></div>
+        <div id="home-rails" class="home-rails"></div>
+        <div class="home-more-wrap" id="home-more-wrap" hidden>
+          <button type="button" class="cr-btn cr-btn-ghost" id="btn-home-more">Load more</button>
+        </div>
+      </div>
+
+      <div class="main-pane" id="main-pane" hidden>
         <div id="view-normal" class="view is-on" role="tabpanel">
           <div class="cols">
             <!-- Col 1: Seasons + Episodes -->

@@ -71,6 +71,61 @@ func (a *App) Inspect(req engine.InspectRequest) (engine.InspectResult, error) {
 	return engine.Inspect(req, cfg)
 }
 
+// GetHomeFeed loads a page of Discover home rails/heroes (catalog only — no Widevine).
+// start/n paginate the feed. On home_feed failure, falls back to popular browse.
+func (a *App) GetHomeFeed(start, n int) (engine.HomeFeedPage, error) {
+	a.mu.Lock()
+	prefs := a.prefs
+	a.mu.Unlock()
+
+	cookie := strings.TrimSpace(prefs.CookieFile)
+	if cookie == "" {
+		return engine.HomeFeedPage{}, fmt.Errorf("cookie file path is not configured")
+	}
+	if err := engine.AuthenticateFromCookieFile(cookie); err != nil {
+		return engine.HomeFeedPage{}, err
+	}
+	locale := discoverLocale(prefs)
+
+	page, err := engine.FetchHomeFeed(start, n, locale)
+	if err == nil && (len(page.Heroes) > 0 || len(page.Rails) > 0) {
+		return page, nil
+	}
+	// Fall back to popular browse when personalized feed is empty or errors.
+	browse, berr := engine.BrowsePopular(start, n, locale)
+	if berr != nil {
+		if err != nil {
+			return engine.HomeFeedPage{}, fmt.Errorf("home feed: %w; browse fallback: %v", err, berr)
+		}
+		return engine.HomeFeedPage{}, berr
+	}
+	return browse, nil
+}
+
+// SearchTitles runs Discover search and returns series/movie cards.
+func (a *App) SearchTitles(q string) ([]engine.DiscoverCard, error) {
+	a.mu.Lock()
+	prefs := a.prefs
+	a.mu.Unlock()
+
+	cookie := strings.TrimSpace(prefs.CookieFile)
+	if cookie == "" {
+		return nil, fmt.Errorf("cookie file path is not configured")
+	}
+	if err := engine.AuthenticateFromCookieFile(cookie); err != nil {
+		return nil, err
+	}
+	return engine.SearchDiscover(q, 0, 24, discoverLocale(prefs))
+}
+
+func discoverLocale(p engine.Preferences) string {
+	loc := strings.TrimSpace(p.Locale)
+	if loc == "" {
+		return "pt-BR"
+	}
+	return loc
+}
+
 // LoadSeasonEpisodes fetches episode list for one season CMS id (lazy load when
 // the user switches seasons). Auth uses the saved cookie path. Returns catalog
 // rows only — no playback open.

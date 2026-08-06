@@ -164,7 +164,19 @@ Windows needs [WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/
 
 ## GUI usage
 
-1. Paste a series or episode **URL**
+### Home (Discover)
+
+The GUI opens on **Home**, which loads your personalized Crunchyroll Discover feed (same catalog APIs as the website — no Widevine, no playback).
+
+1. Set your **cookie file** (`etp_rt` path) via **Cookie**
+2. Browse hero slides and horizontal rails, or **Search** for a title
+3. Click a poster to switch to **Download**, fill the URL, and auto-**Inspect**
+
+Discover locale defaults to **`pt-BR`** (stored in preferences as `locale`). Home fails over to a popular-series browse list if the personalized feed is unavailable.
+
+### Download
+
+1. Paste a series or episode **URL** (or open a title from Home)
 2. Choose your **cookie file** (`etp_rt` path; the raw value is never stored)
 3. Press **Inspect** to load seasons, episodes, and language options
 4. **Select** what you want (episodes, audio, subs, quality)
@@ -174,6 +186,8 @@ Windows needs [WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/
 
 | Setting | Default |
 |---------|---------|
+| Main view | **Home** (Discover feed) |
+| Discover locale | **pt-BR** |
 | Episodes | **S1E1** only (or the single `/watch/…` title) |
 | Audio | **Original** (usually `ja-JP`) |
 | Subtitles | **None** |

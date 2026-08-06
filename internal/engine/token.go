@@ -69,6 +69,13 @@ func getETPRT() string {
 	return authState.etpRT
 }
 
+// GetAccountID returns the account id pinned from the last successful token exchange.
+func GetAccountID() string {
+	authState.Lock()
+	defer authState.Unlock()
+	return authState.accountID
+}
+
 // GetAccessToken fetches an access token with a supplied cookie. Callers that
 // own a run should use refreshAccessToken so account identity pinning applies.
 func GetAccessToken(etpRT string) (CrunchyrollTokenResponse, error) {

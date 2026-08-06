@@ -44,9 +44,11 @@
 
   var state = {
     mode: "normal",
+    view: "home", // home | download
     cookieFile: "",
     outputDir: "./Downloads",
     url: "",
+    locale: "pt-BR",
     catalog: null,
     selectedSeason: null,
     selectedEpisodeIds: {},
@@ -74,6 +76,9 @@
     indexCircuitLimit: DEFAULT_CIRCUIT,
     indexWindow: DEFAULT_INDEX_WINDOW,
     queueLabels: {}, // episodeId -> label for queue display
+    homeNextStart: 0,
+    homeLoaded: false,
+    homeLoading: false,
   };
 
   var prefsTimer = null;
@@ -88,6 +93,7 @@
     els = {
       url: $("url"),
       cookie: $("btn-cookie"),
+      cookieHome: $("btn-cookie-home"),
       inspect: $("btn-inspect"),
       download: $("btn-download"),
       downloadAdv: $("btn-download-adv"),
@@ -123,10 +129,27 @@
       bannerText: $("banner-text"),
       bannerClose: $("banner-close"),
       mainPane: $("main-pane"),
+      viewHome: $("view-home"),
       viewNormal: $("view-normal"),
       viewAdvanced: $("view-advanced"),
       modeNormal: $("mode-normal"),
       modeAdvanced: $("mode-advanced"),
+      modeToggle: $("mode-toggle"),
+      navHome: $("nav-home"),
+      navDownload: $("nav-download"),
+      brandHome: $("brand-home"),
+      downloadChrome: $("download-chrome"),
+      homeChrome: $("home-chrome"),
+      homeSearch: $("home-search"),
+      btnHomeSearch: $("btn-home-search"),
+      btnHomeRefresh: $("btn-home-refresh"),
+      btnHomeMore: $("btn-home-more"),
+      homeMoreWrap: $("home-more-wrap"),
+      homeStatus: $("home-status"),
+      homeHero: $("home-hero"),
+      homeRails: $("home-rails"),
+      homeSearchResults: $("home-search-results"),
+      homeSearchGrid: $("home-search-grid"),
       batchUrls: $("batch-urls"),
       batchFile: $("btn-batch-file"),
       wvdPath: $("wvd-path"),
@@ -652,6 +675,360 @@
     schedulePersist();
   }
 
+  function setAppView(view) {
+    state.view = view === "download" ? "download" : "home";
+    var isHome = state.view === "home";
+    if (els.navHome) {
+      els.navHome.classList.toggle("is-on", isHome);
+      els.navHome.setAttribute("aria-selected", isHome ? "true" : "false");
+    }
+    if (els.navDownload) {
+      els.navDownload.classList.toggle("is-on", !isHome);
+      els.navDownload.setAttribute("aria-selected", !isHome ? "true" : "false");
+    }
+    if (els.viewHome) {
+      els.viewHome.classList.toggle("is-on", isHome);
+      els.viewHome.hidden = !isHome;
+    }
+    if (els.mainPane) {
+      els.mainPane.hidden = isHome;
+    }
+    if (els.downloadChrome) {
+      els.downloadChrome.hidden = isHome;
+    }
+    if (els.homeChrome) {
+      els.homeChrome.hidden = !isHome;
+    }
+    if (els.modeToggle) {
+      // Normal/Advanced only applies to Download workspace.
+      els.modeToggle.style.visibility = isHome ? "hidden" : "visible";
+    }
+    if (isHome && !state.homeLoaded && !state.homeLoading && state.cookieFile) {
+      loadHomeFeed(false);
+    }
+  }
+
+  function setHomeStatus(text, kind) {
+    if (!els.homeStatus) return;
+    els.homeStatus.textContent = text || "";
+    els.homeStatus.classList.remove("is-err", "is-ok");
+    if (kind === "err") els.homeStatus.classList.add("is-err");
+    if (kind === "ok") els.homeStatus.classList.add("is-ok");
+  }
+
+  function fHome(obj, camel, pascal) {
+    return field(obj, pascal, camel);
+  }
+
+  function normalizeHomePage(raw) {
+    if (!raw || typeof raw !== "object") {
+      return { heroes: [], rails: [], nextStart: 0, pageSize: 0 };
+    }
+    var heroes = fHome(raw, "heroes", "Heroes") || [];
+    var rails = fHome(raw, "rails", "Rails") || [];
+    return {
+      heroes: Array.isArray(heroes) ? heroes : [],
+      rails: Array.isArray(rails) ? rails : [],
+      nextStart: Number(fHome(raw, "nextStart", "NextStart") || 0),
+      pageSize: Number(fHome(raw, "pageSize", "PageSize") || 0),
+      totalApprox: Number(fHome(raw, "totalApprox", "TotalApprox") || 0),
+    };
+  }
+
+  function normalizeCard(raw) {
+    if (!raw || typeof raw !== "object") return null;
+    var id = fHome(raw, "id", "ID") || "";
+    var openUrl = fHome(raw, "openUrl", "OpenURL") || "";
+    var title = fHome(raw, "title", "Title") || "";
+    if (!id && !openUrl) return null;
+    return {
+      id: id,
+      type: fHome(raw, "type", "Type") || "",
+      title: title,
+      description: fHome(raw, "description", "Description") || "",
+      posterUrl: fHome(raw, "posterUrl", "PosterURL") || "",
+      wideUrl: fHome(raw, "wideUrl", "WideURL") || "",
+      openUrl: openUrl,
+    };
+  }
+
+  function cardButton(card, extraClass) {
+    var btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "home-card" + (extraClass ? " " + extraClass : "");
+    btn.title = card.title || card.id || "Open";
+    btn.dataset.openUrl = card.openUrl || "";
+    btn.dataset.id = card.id || "";
+
+    var art = document.createElement("div");
+    art.className = "home-card-art" + (card.posterUrl ? "" : " is-empty");
+    if (card.posterUrl) {
+      var img = document.createElement("img");
+      img.src = card.posterUrl;
+      img.alt = "";
+      img.loading = "lazy";
+      img.referrerPolicy = "no-referrer";
+      art.appendChild(img);
+    } else {
+      art.textContent = "No art";
+    }
+    btn.appendChild(art);
+
+    var title = document.createElement("div");
+    title.className = "home-card-title";
+    title.textContent = card.title || card.id || "Untitled";
+    btn.appendChild(title);
+
+    btn.addEventListener("click", function () {
+      openDiscoverCard(card);
+    });
+    return btn;
+  }
+
+  function renderHomeHeroes(heroes, append) {
+    if (!els.homeHero) return;
+    if (!append) els.homeHero.innerHTML = "";
+    var list = Array.isArray(heroes) ? heroes : [];
+    if (!list.length && !append) {
+      els.homeHero.hidden = true;
+      return;
+    }
+    list.forEach(function (h) {
+      var title = fHome(h, "title", "Title") || "";
+      var openUrl = fHome(h, "openUrl", "OpenURL") || "";
+      var wide = fHome(h, "wideUrl", "WideURL") || "";
+      var poster = fHome(h, "posterUrl", "PosterURL") || "";
+      var desc = fHome(h, "description", "Description") || "";
+      var btnText = fHome(h, "buttonText", "ButtonText") || "Open";
+      if (!title && !openUrl) return;
+
+      var slide = document.createElement("button");
+      slide.type = "button";
+      slide.className = "home-hero-slide";
+      slide.title = title;
+
+      if (wide || poster) {
+        var img = document.createElement("img");
+        img.src = wide || poster;
+        img.alt = "";
+        img.loading = "lazy";
+        img.referrerPolicy = "no-referrer";
+        slide.appendChild(img);
+      }
+      var fade = document.createElement("div");
+      fade.className = "home-hero-fade";
+      slide.appendChild(fade);
+
+      var meta = document.createElement("div");
+      meta.className = "home-hero-meta";
+      meta.innerHTML =
+        '<div class="kicker">' +
+        escapeHtml(btnText) +
+        '</div><div class="title"></div>';
+      meta.querySelector(".title").textContent = title || "Featured";
+      if (desc) {
+        var d = document.createElement("div");
+        d.className = "desc";
+        d.textContent = desc;
+        meta.appendChild(d);
+      }
+      slide.appendChild(meta);
+
+      slide.addEventListener("click", function () {
+        openDiscoverCard({
+          title: title,
+          openUrl: openUrl,
+          posterUrl: poster,
+          wideUrl: wide,
+        });
+      });
+      els.homeHero.appendChild(slide);
+    });
+    els.homeHero.hidden = !els.homeHero.childElementCount;
+  }
+
+  function renderHomeRails(rails, append) {
+    if (!els.homeRails) return;
+    if (!append) els.homeRails.innerHTML = "";
+    (rails || []).forEach(function (rail) {
+      var title = fHome(rail, "title", "Title") || "Collection";
+      var cardsRaw = fHome(rail, "cards", "Cards") || [];
+      var cards = [];
+      (cardsRaw || []).forEach(function (c) {
+        var card = normalizeCard(c);
+        if (card) cards.push(card);
+      });
+      if (!cards.length) return;
+
+      var section = document.createElement("section");
+      section.className = "home-rail";
+      var h = document.createElement("div");
+      h.className = "home-rail-title";
+      h.textContent = title;
+      section.appendChild(h);
+
+      var scroller = document.createElement("div");
+      scroller.className = "home-rail-scroller";
+      cards.forEach(function (card) {
+        scroller.appendChild(cardButton(card));
+      });
+      section.appendChild(scroller);
+      els.homeRails.appendChild(section);
+    });
+  }
+
+  function renderSearchResults(cards) {
+    if (!els.homeSearchResults || !els.homeSearchGrid) return;
+    els.homeSearchGrid.innerHTML = "";
+    var list = Array.isArray(cards) ? cards : [];
+    list.forEach(function (raw) {
+      var card = normalizeCard(raw);
+      if (card) els.homeSearchGrid.appendChild(cardButton(card));
+    });
+    els.homeSearchResults.hidden = !list.length;
+  }
+
+  function clearSearchResults() {
+    if (els.homeSearchResults) els.homeSearchResults.hidden = true;
+    if (els.homeSearchGrid) els.homeSearchGrid.innerHTML = "";
+  }
+
+  function escapeHtml(s) {
+    return String(s || "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
+  async function loadHomeFeed(append) {
+    var app = goApp();
+    if (!app || typeof app.GetHomeFeed !== "function") {
+      setHomeStatus("Go bindings unavailable. Run inside the Wails app.", "err");
+      return;
+    }
+    if (!state.cookieFile) {
+      setHomeStatus("Set a cookie file (Cookie) to load your Discover feed.", "err");
+      return;
+    }
+    if (state.homeLoading) return;
+
+    state.homeLoading = true;
+    var start = append ? state.homeNextStart || 0 : 0;
+    if (!append) {
+      setHomeStatus("Loading Discover feed…");
+      clearSearchResults();
+    } else {
+      setHomeStatus("Loading more…");
+    }
+    if (els.btnHomeMore) els.btnHomeMore.disabled = true;
+    if (els.btnHomeRefresh) els.btnHomeRefresh.disabled = true;
+
+    try {
+      // Persist cookie path first so GetHomeFeed reads current prefs.
+      await persistPrefs();
+      var raw = await app.GetHomeFeed(start, 20);
+      var page = normalizeHomePage(raw);
+      renderHomeHeroes(page.heroes, append);
+      renderHomeRails(page.rails, append);
+      state.homeNextStart = page.nextStart || start + 20;
+      state.homeLoaded = true;
+      var railCount = (page.rails || []).length;
+      var heroCount = (page.heroes || []).length;
+      if (!append) {
+        setHomeStatus(
+          "Discover · " +
+            heroCount +
+            " hero slide(s), " +
+            railCount +
+            " rail(s) · locale " +
+            (state.locale || "pt-BR"),
+          "ok"
+        );
+      } else {
+        setHomeStatus("Loaded more · +" + railCount + " rail(s)", "ok");
+      }
+      if (els.homeMoreWrap) {
+        els.homeMoreWrap.hidden = !(page.nextStart > start);
+      }
+      logLine(
+        "Home feed · start=" +
+          start +
+          " heroes=" +
+          heroCount +
+          " rails=" +
+          railCount,
+        "ok"
+      );
+    } catch (err) {
+      var msg = errMessage(err);
+      setHomeStatus("Home failed: " + msg, "err");
+      logLine("Home feed error: " + msg, "err");
+      showBanner("Home failed: " + msg, "err");
+    } finally {
+      state.homeLoading = false;
+      if (els.btnHomeMore) els.btnHomeMore.disabled = false;
+      if (els.btnHomeRefresh) els.btnHomeRefresh.disabled = false;
+    }
+  }
+
+  async function onHomeSearch() {
+    var q = (els.homeSearch && els.homeSearch.value.trim()) || "";
+    if (!q) {
+      clearSearchResults();
+      setHomeStatus("Enter a search query.", "err");
+      return;
+    }
+    var app = goApp();
+    if (!app || typeof app.SearchTitles !== "function") {
+      setHomeStatus("Go bindings unavailable.", "err");
+      return;
+    }
+    if (!state.cookieFile) {
+      setHomeStatus("Cookie file path required for search.", "err");
+      return;
+    }
+    setHomeStatus("Searching “" + q + "”…");
+    try {
+      await persistPrefs();
+      var raw = await app.SearchTitles(q);
+      var cards = Array.isArray(raw) ? raw : [];
+      renderSearchResults(cards);
+      setHomeStatus(
+        cards.length
+          ? "Search · " + cards.length + " result(s) for “" + q + "”"
+          : "No results for “" + q + "”",
+        cards.length ? "ok" : "err"
+      );
+      logLine("Search “" + q + "” · " + cards.length + " hit(s)", "ok");
+    } catch (err) {
+      var msg = errMessage(err);
+      setHomeStatus("Search failed: " + msg, "err");
+      logLine("Search error: " + msg, "err");
+      showBanner("Search failed: " + msg, "err");
+    }
+  }
+
+  function openDiscoverCard(card) {
+    var url = (card && card.openUrl) || "";
+    if (!url) {
+      showBanner("This title has no openable URL.", "warn");
+      logLine("Open card blocked: missing openUrl", "warn");
+      return;
+    }
+    if (els.url) els.url.value = url;
+    state.url = url;
+    logLine("Open · " + ((card && card.title) || url), "info");
+    setAppView("download");
+    schedulePersist();
+    // Auto-Inspect when cookie is ready.
+    if (state.cookieFile) {
+      onInspect();
+    } else {
+      showBanner("Title opened. Set Cookie, then Inspect.", "warn");
+    }
+  }
+
   /* ── Preferences ── */
 
   function collectPreferences() {
@@ -672,6 +1049,7 @@
       CookieFile: state.cookieFile || "",
       OutputDir: (els.output && els.output.value.trim()) || state.outputDir || "./Downloads",
       Mode: state.mode || "normal",
+      Locale: state.locale || "pt-BR",
       AudioLangs: audioLangs,
       SubtitleLangs: subtitleLangs,
       CaptionLangs: captionLangs,
@@ -704,6 +1082,12 @@
     if (url && els.url) {
       els.url.value = url;
       state.url = url;
+    }
+    var locale = p.Locale != null ? p.Locale : p.locale;
+    if (locale && String(locale).trim()) {
+      state.locale = String(locale).trim();
+    } else if (!state.locale) {
+      state.locale = "pt-BR";
     }
     if (cookie) state.cookieFile = cookie;
     if (out) {
@@ -1799,6 +2183,10 @@
         state.cookieFile = String(picked).trim();
         logLine("Cookie path set", "ok");
         schedulePersist();
+        if (state.view === "home" && state.cookieFile) {
+          state.homeLoaded = false;
+          loadHomeFeed(false);
+        }
         return;
       } catch (err) {
         logLine("Cookie file dialog failed: " + errMessage(err), "err");
@@ -1817,6 +2205,10 @@
     state.cookieFile = path;
     if (path) {
       logLine("Cookie path set", "ok");
+      if (state.view === "home") {
+        state.homeLoaded = false;
+        loadHomeFeed(false);
+      }
     } else {
       logLine("Cookie path cleared", "warn");
     }
@@ -2116,6 +2508,49 @@
         setMode("advanced");
       });
     }
+    if (els.navHome) {
+      els.navHome.addEventListener("click", function () {
+        setAppView("home");
+      });
+    }
+    if (els.navDownload) {
+      els.navDownload.addEventListener("click", function () {
+        setAppView("download");
+      });
+    }
+    if (els.brandHome) {
+      els.brandHome.addEventListener("click", function () {
+        setAppView("home");
+      });
+      els.brandHome.addEventListener("keydown", function (e) {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          setAppView("home");
+        }
+      });
+    }
+    if (els.btnHomeSearch) {
+      els.btnHomeSearch.addEventListener("click", onHomeSearch);
+    }
+    if (els.btnHomeRefresh) {
+      els.btnHomeRefresh.addEventListener("click", function () {
+        state.homeLoaded = false;
+        loadHomeFeed(false);
+      });
+    }
+    if (els.btnHomeMore) {
+      els.btnHomeMore.addEventListener("click", function () {
+        loadHomeFeed(true);
+      });
+    }
+    if (els.homeSearch) {
+      els.homeSearch.addEventListener("keydown", function (e) {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          onHomeSearch();
+        }
+      });
+    }
     if (els.btnToggleActivity) {
       els.btnToggleActivity.addEventListener("click", function () {
         setActivityCollapsed(!isActivityCollapsed());
@@ -2123,6 +2558,7 @@
     }
     if (els.inspect) els.inspect.addEventListener("click", onInspect);
     if (els.cookie) els.cookie.addEventListener("click", onCookie);
+    if (els.cookieHome) els.cookieHome.addEventListener("click", onCookie);
     if (els.outputBtn) els.outputBtn.addEventListener("click", onOutputBrowse);
     if (els.download) els.download.addEventListener("click", onDownload);
     if (els.downloadAdv) els.downloadAdv.addEventListener("click", onDownload);
@@ -2229,8 +2665,13 @@
     updateDockSummary();
     syncAdvancedInputsFromState();
     setMode("normal");
+    setAppView("home");
     subscribeProgress();
     await loadPreferences();
+    // After prefs (cookie path), load Discover if still on Home.
+    if (state.view === "home" && state.cookieFile && !state.homeLoaded) {
+      loadHomeFeed(false);
+    }
   }
 
   if (document.readyState === "loading") {

@@ -15,6 +15,8 @@ type Preferences struct {
 	CookieFile     string   `json:"cookieFile"`
 	OutputDir      string   `json:"outputDir"`
 	Mode           string   `json:"mode"` // normal | advanced
+	// Locale is the Discover/CMS locale (e.g. pt-BR). Empty means engine default pt-BR.
+	Locale         string   `json:"locale,omitempty"`
 	AudioLangs     []string `json:"audioLangs"`
 	SubtitleLangs  []string `json:"subtitleLangs"`
 	CaptionLangs   []string `json:"captionLangs"`
