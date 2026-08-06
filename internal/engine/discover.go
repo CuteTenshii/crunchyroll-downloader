@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 // Block kinds for HomeBlock.Kind.
@@ -37,6 +38,8 @@ type DiscoverCard struct {
 	Progress *float64 `json:"progress,omitempty"` // 0..1 Continue Watching
 	Rank     int      `json:"rank,omitempty"`     // 1..10 Top 10 chrome
 	Subtitle string   `json:"subtitle,omitempty"` // e.g. S01E12
+	// SeriesID is set for episode-like cards so rails can promote to series posters.
+	SeriesID string `json:"seriesId,omitempty"`
 }
 
 // DiscoverRail is a horizontal home-feed section (backward-compat view of a rail block).
@@ -396,115 +399,254 @@ func (defaultFeedHydrator) Objects(ids []string, locale string) ([]DiscoverCard,
 }
 
 // buildHomeBlocks walks home_feed data in order, maps approved types, hydrates dynamics.
-// Hydrator errors drop that block only.
+// Dynamic hydrators run in parallel; hydrator errors drop that block only.
 func buildHomeBlocks(data []json.RawMessage, accountID, locale string, h feedHydrator) []HomeBlock {
 	const cardLimit = 20
-	var blocks []HomeBlock
-	// Batch curated ids across the page for fewer cms/objects calls.
-	type curatedPending struct {
-		blockIdx int
-		ids      []string
+
+	type slot struct {
+		mapped feedMapResult
+		// For hydrateCurated we keep the empty block skeleton and fill later.
+		block HomeBlock
+		// Dynamic hydrate job index into dynJobs, or -1.
+		dynIdx int
 	}
-	var pending []curatedPending
+
+	type dynJob struct {
+		hydrate       string
+		sourceMediaID string
+		browseLink    string
+		// result filled by worker
+		cards []DiscoverCard
+		ok    bool
+	}
+
+	var slots []slot
+	var dynJobs []dynJob
+	var curatedIDs []string
+	type curatedRef struct {
+		slotIdx int
+		ids     []string
+	}
+	var curatedRefs []curatedRef
 
 	for i, raw := range data {
 		mapped := mapHomeFeedEntry(raw, i, locale)
 		if mapped.Skip {
 			continue
 		}
-		block := mapped.Block
+		s := slot{mapped: mapped, block: mapped.Block, dynIdx: -1}
 		switch mapped.Hydrate {
 		case hydrateNone:
-			// fully static (hero, panel, banner)
+			// static
 		case hydrateCurated:
-			pending = append(pending, curatedPending{blockIdx: len(blocks), ids: mapped.CuratedIDs})
-			blocks = append(blocks, block)
-			continue
-		case hydrateHistory:
-			cards, err := h.History(accountID, locale, cardLimit)
-			if err != nil || len(cards) == 0 {
+			curatedRefs = append(curatedRefs, curatedRef{slotIdx: len(slots), ids: mapped.CuratedIDs})
+			curatedIDs = append(curatedIDs, mapped.CuratedIDs...)
+		case hydrateHistory, hydrateWatchlist, hydrateRecommendations, hydrateBecauseYouWatched, hydrateBrowse:
+			if mapped.Hydrate == hydrateBecauseYouWatched && mapped.SourceMediaID == "" {
 				continue
 			}
-			block.Cards = cards
-		case hydrateWatchlist:
-			cards, err := h.Watchlist(accountID, locale, cardLimit)
-			if err != nil || len(cards) == 0 {
-				continue
-			}
-			block.Cards = cards
-		case hydrateRecommendations:
-			cards, err := h.Recommendations(accountID, locale, cardLimit)
-			if err != nil || len(cards) == 0 {
-				continue
-			}
-			block.Cards = cards
-		case hydrateBecauseYouWatched:
-			if mapped.SourceMediaID == "" {
-				continue
-			}
-			cards, err := h.SimilarTo(accountID, mapped.SourceMediaID, locale, cardLimit)
-			if err != nil || len(cards) == 0 {
-				continue
-			}
-			block.Cards = cards
-		case hydrateBrowse:
-			cards, err := h.Browse(mapped.BrowseLink, locale, cardLimit)
-			if err != nil || len(cards) == 0 {
-				continue
-			}
-			block.Cards = cards
+			s.dynIdx = len(dynJobs)
+			dynJobs = append(dynJobs, dynJob{
+				hydrate:       mapped.Hydrate,
+				sourceMediaID: mapped.SourceMediaID,
+				browseLink:    mapped.BrowseLink,
+			})
 		default:
 			continue
+		}
+		slots = append(slots, s)
+	}
+
+	// Parallel dynamic hydrates (main latency source on first Home load).
+	if len(dynJobs) > 0 {
+		var wg sync.WaitGroup
+		for i := range dynJobs {
+			wg.Add(1)
+			go func(j *dynJob) {
+				defer wg.Done()
+				var cards []DiscoverCard
+				var err error
+				switch j.hydrate {
+				case hydrateHistory:
+					cards, err = h.History(accountID, locale, cardLimit)
+				case hydrateWatchlist:
+					cards, err = h.Watchlist(accountID, locale, cardLimit)
+				case hydrateRecommendations:
+					cards, err = h.Recommendations(accountID, locale, cardLimit)
+				case hydrateBecauseYouWatched:
+					cards, err = h.SimilarTo(accountID, j.sourceMediaID, locale, cardLimit)
+				case hydrateBrowse:
+					cards, err = h.Browse(j.browseLink, locale, cardLimit)
+				}
+				if err != nil || len(cards) == 0 {
+					return
+				}
+				// Episode rows → series posters/titles (My List, New Releases, CW, etc.).
+				cards = promoteEpisodesToSeriesCards(cards, locale, h)
+				if j.hydrate == hydrateHistory {
+					// One card per series: most recent history entry wins (API order).
+					cards = dedupeCardsBySeriesKeepFirst(cards)
+				}
+				j.cards = cards
+				j.ok = len(cards) > 0
+			}(&dynJobs[i])
+		}
+		wg.Wait()
+	}
+
+	// Single batched cms/objects for all curated rails.
+	byID := map[string]DiscoverCard{}
+	if len(curatedIDs) > 0 {
+		if cards, err := h.Objects(curatedIDs, locale); err == nil {
+			for _, c := range cards {
+				byID[c.ID] = c
+			}
+		}
+	}
+	for _, ref := range curatedRefs {
+		if ref.slotIdx < 0 || ref.slotIdx >= len(slots) {
+			continue
+		}
+		cards := make([]DiscoverCard, 0, len(ref.ids))
+		seen := map[string]struct{}{}
+		for _, id := range ref.ids {
+			id = strings.TrimSpace(id)
+			if id == "" {
+				continue
+			}
+			if _, ok := seen[id]; ok {
+				continue
+			}
+			seen[id] = struct{}{}
+			if c, ok := byID[id]; ok {
+				cards = append(cards, c)
+			}
+		}
+		slots[ref.slotIdx].block.Cards = promoteEpisodesToSeriesCards(cards, locale, h)
+	}
+
+	// Assemble in feed order.
+	var out []HomeBlock
+	for _, s := range slots {
+		block := s.block
+		if s.dynIdx >= 0 {
+			job := dynJobs[s.dynIdx]
+			if !job.ok {
+				continue
+			}
+			block.Cards = job.cards
 		}
 		if !blockHasContent(block) {
 			continue
 		}
 		applyTop10Ranks(&block)
-		blocks = append(blocks, block)
+		out = append(out, block)
+	}
+	return out
+}
+
+// promoteEpisodesToSeriesCards rewrites episode-like cards to series cards so rails
+// show anime posters/titles (My List, New Releases, Continue Watching). Keeps
+// episode subtitle + progress. Resolves series objects in one batch when needed.
+func promoteEpisodesToSeriesCards(cards []DiscoverCard, locale string, h feedHydrator) []DiscoverCard {
+	if len(cards) == 0 {
+		return cards
+	}
+	locale = normalizeDiscoverLocale(locale)
+	need := make([]string, 0)
+	seenNeed := map[string]struct{}{}
+	for _, c := range cards {
+		sid := strings.TrimSpace(c.SeriesID)
+		if sid == "" {
+			continue
+		}
+		if !isEpisodeLikeCard(c) {
+			continue
+		}
+		if _, ok := seenNeed[sid]; ok {
+			continue
+		}
+		seenNeed[sid] = struct{}{}
+		need = append(need, sid)
+	}
+	seriesByID := map[string]DiscoverCard{}
+	if len(need) > 0 && h != nil {
+		if resolved, err := h.Objects(need, locale); err == nil {
+			for _, c := range resolved {
+				seriesByID[c.ID] = c
+			}
+		}
 	}
 
-	if len(pending) > 0 {
-		allIDs := make([]string, 0)
-		for _, p := range pending {
-			allIDs = append(allIDs, p.ids...)
+	out := make([]DiscoverCard, 0, len(cards))
+	for _, c := range cards {
+		if !isEpisodeLikeCard(c) || strings.TrimSpace(c.SeriesID) == "" {
+			out = append(out, c)
+			continue
 		}
-		byID := map[string]DiscoverCard{}
-		if cards, err := h.Objects(allIDs, locale); err == nil {
-			for _, c := range cards {
-				byID[c.ID] = c
-			}
+		sid := strings.TrimSpace(c.SeriesID)
+		progress := c.Progress
+		subtitle := c.Subtitle
+		if subtitle == "" && c.Title != "" && (c.Type == "episode" || strings.Contains(c.Type, "episode")) {
+			// Keep episode title as subtitle when we only had episode name.
+			subtitle = c.Title
 		}
-		// Fill curated blocks in place (or leave empty for filtering).
-		for _, p := range pending {
-			if p.blockIdx < 0 || p.blockIdx >= len(blocks) {
-				continue
+		if s, ok := seriesByID[sid]; ok {
+			s.Progress = progress
+			if subtitle != "" {
+				s.Subtitle = subtitle
 			}
-			cards := make([]DiscoverCard, 0, len(p.ids))
-			seen := map[string]struct{}{}
-			for _, id := range p.ids {
-				id = strings.TrimSpace(id)
-				if id == "" {
-					continue
-				}
-				if _, ok := seen[id]; ok {
-					continue
-				}
-				seen[id] = struct{}{}
-				if c, ok := byID[id]; ok {
-					cards = append(cards, c)
-				}
-			}
-			blocks[p.blockIdx].Cards = cards
-			applyTop10Ranks(&blocks[p.blockIdx])
+			s.SeriesID = sid
+			out = append(out, s)
+			continue
 		}
+		// Soft fallback without CMS series object.
+		c.ID = sid
+		c.Type = "series"
+		c.OpenURL = seriesOpenURL(sid, "", locale)
+		c.Progress = progress
+		c.Subtitle = subtitle
+		out = append(out, c)
 	}
+	return out
+}
 
-	// Drop empty rails after curated fill / hydration gaps.
-	out := blocks[:0]
-	for _, b := range blocks {
-		if blockHasContent(b) {
-			out = append(out, b)
+func isEpisodeLikeCard(c DiscoverCard) bool {
+	typ := strings.ToLower(strings.TrimSpace(c.Type))
+	if typ == "episode" || strings.Contains(typ, "episode") {
+		return true
+	}
+	// History sometimes leaves type empty but series id set.
+	if strings.TrimSpace(c.SeriesID) != "" && strings.Contains(strings.ToLower(c.OpenURL), "/watch/") {
+		return true
+	}
+	return false
+}
+
+// dedupeCardsBySeriesKeepFirst keeps the first card per series (or id).
+// Watch-history is newest-first, so this yields one Continue Watching card per anime.
+func dedupeCardsBySeriesKeepFirst(cards []DiscoverCard) []DiscoverCard {
+	if len(cards) == 0 {
+		return cards
+	}
+	seen := map[string]struct{}{}
+	out := make([]DiscoverCard, 0, len(cards))
+	for _, c := range cards {
+		key := strings.TrimSpace(c.SeriesID)
+		if key == "" {
+			key = strings.TrimSpace(c.ID)
 		}
+		if key == "" {
+			key = strings.ToLower(strings.TrimSpace(c.Title))
+		}
+		if key == "" {
+			continue
+		}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, c)
 	}
 	return out
 }
@@ -680,10 +822,8 @@ func mapDynamicCollection(raw json.RawMessage, head feedItemHead, id, title, res
 			SourceMediaID: sourceID,
 		}
 	case "browse", "recent_episodes", "recent_episode":
+		// New releases / browse: series posters (episodes promoted after hydrate).
 		kind := HomeBlockPosterRail
-		if respType == "recent_episodes" || respType == "recent_episode" {
-			kind = HomeBlockLandscapeRail
-		}
 		// Prefer explicit link; empty link still hydrates default browse popularity.
 		return feedMapResult{
 			Block: HomeBlock{
@@ -763,16 +903,13 @@ func mediaIDFromSimilarToLink(link string) string {
 func mapHeroItems(raw json.RawMessage, locale string) []DiscoverHero {
 	var hero struct {
 		Items []struct {
-			Title       string `json:"title"`
-			Description string `json:"description"`
-			Link        string `json:"link"`
-			ButtonText  string `json:"button_text"`
-			Slug        string `json:"slug"`
-			Images      struct {
-				LandscapeLarge string `json:"landscape_large"`
-				PortraitLarge  string `json:"portrait_large"`
-			} `json:"images"`
-			Panel json.RawMessage `json:"panel"`
+			Title       string          `json:"title"`
+			Description string          `json:"description"`
+			Link        string          `json:"link"`
+			ButtonText  string          `json:"button_text"`
+			Slug        string          `json:"slug"`
+			Images      json.RawMessage `json:"images"`
+			Panel       json.RawMessage `json:"panel"`
 		} `json:"items"`
 	}
 	if err := json.Unmarshal(raw, &hero); err != nil {
@@ -780,33 +917,83 @@ func mapHeroItems(raw json.RawMessage, locale string) []DiscoverHero {
 	}
 	var out []DiscoverHero
 	for _, it := range hero.Items {
+		wide, poster := heroImageURLs(it.Images)
 		h := DiscoverHero{
 			Title:       it.Title,
 			Description: it.Description,
-			WideURL:     it.Images.LandscapeLarge,
-			PosterURL:   it.Images.PortraitLarge,
+			WideURL:     wide,
+			PosterURL:   poster,
 			ButtonText:  it.ButtonText,
 			OpenURL:     normalizeOpenURL(it.Link, locale),
 		}
-		if h.OpenURL == "" && len(it.Panel) > 0 {
+		// Always merge panel CMS art when present (CR often only puts art on panel).
+		if len(it.Panel) > 0 {
 			if card, ok := cardFromCMSObject(it.Panel, locale); ok {
-				h.OpenURL = card.OpenURL
+				if h.OpenURL == "" {
+					h.OpenURL = card.OpenURL
+				}
 				if h.PosterURL == "" {
 					h.PosterURL = card.PosterURL
 				}
 				if h.WideURL == "" {
-					h.WideURL = card.WideURL
+					h.WideURL = firstNonEmpty(card.WideURL, card.PosterURL)
 				}
 				if h.Title == "" {
 					h.Title = card.Title
 				}
+				if h.Description == "" {
+					h.Description = card.Description
+				}
 			}
+		}
+		if h.WideURL == "" {
+			h.WideURL = h.PosterURL
 		}
 		if h.Title != "" || h.OpenURL != "" {
 			out = append(out, h)
 		}
 	}
 	return out
+}
+
+// heroImageURLs extracts wide/poster URLs from CR hero image objects that may be
+// flat string maps or nested CMS image groups.
+func heroImageURLs(raw json.RawMessage) (wide, poster string) {
+	if len(raw) == 0 {
+		return "", ""
+	}
+	// Flat string map (common on hero_carousel items).
+	var flat map[string]string
+	if err := json.Unmarshal(raw, &flat); err == nil && len(flat) > 0 {
+		wide = firstNonEmpty(
+			flat["landscape_large"],
+			flat["desktop_large"],
+			flat["desktop_wide"],
+			flat["poster_wide"],
+			flat["wide"],
+			flat["banner"],
+		)
+		poster = firstNonEmpty(
+			flat["portrait_large"],
+			flat["poster_tall"],
+			flat["tall"],
+			flat["poster"],
+		)
+		if wide != "" || poster != "" {
+			return wide, poster
+		}
+	}
+	// Nested CRImages groups.
+	var imgs CRImages
+	if err := json.Unmarshal(raw, &imgs); err == nil {
+		wide = firstNonEmpty(
+			pickImageURLFromGroups(imgs.PosterWide, 1280),
+			pickImageURLFromGroups(imgs.Thumbnail, 640),
+		)
+		poster = pickImageURLFromGroups(imgs.PosterTall, 480)
+		return wide, poster
+	}
+	return "", ""
 }
 
 // mapInFeedBanner extracts a banner only when the open URL is series/watch catalog content.
@@ -999,10 +1186,13 @@ func cardFromCMSObject(raw json.RawMessage, locale string) (DiscoverCard, bool) 
 	switch {
 	case typ == "series" || strings.Contains(typ, "series"):
 		card.OpenURL = seriesOpenURL(obj.ID, obj.SlugTitle, locale)
-	case typ == "episode":
+		card.SeriesID = obj.ID
+	case typ == "episode" || strings.Contains(typ, "episode"):
 		card.OpenURL = watchOpenURL(obj.ID, obj.SlugTitle, locale)
 		if obj.EpisodeMetadata != nil {
-			if card.Title == "" && obj.EpisodeMetadata.SeriesTitle != "" {
+			card.SeriesID = strings.TrimSpace(obj.EpisodeMetadata.SeriesID)
+			if obj.EpisodeMetadata.SeriesTitle != "" {
+				// Keep series name as primary title for rail cards.
 				card.Title = obj.EpisodeMetadata.SeriesTitle
 			}
 			card.Subtitle = episodeSubtitle(obj.EpisodeMetadata)

@@ -813,7 +813,7 @@
       img.src = url;
       img.alt = "";
       img.loading = "lazy";
-      img.referrerPolicy = "no-referrer";
+      img.decoding = "async";
       art.appendChild(img);
     } else {
       art.textContent = emptyLabel || "No art";
@@ -907,6 +907,15 @@
     return btn;
   }
 
+  var heroCarouselTimers = [];
+
+  function clearHeroCarousels() {
+    heroCarouselTimers.forEach(function (id) {
+      clearInterval(id);
+    });
+    heroCarouselTimers = [];
+  }
+
   function renderHeroBlock(block) {
     var section = document.createElement("section");
     section.className = "home-block home-block-hero";
@@ -929,6 +938,7 @@
     if (!heroes.length) return null;
 
     var slides = [];
+    var slideMeta = [];
     heroes.forEach(function (h, idx) {
       var title = fHome(h, "title", "Title") || h.title || "";
       var openUrl = fHome(h, "openUrl", "OpenURL") || h.openUrl || "";
@@ -943,13 +953,21 @@
       slide.type = "button";
       slide.className = "home-hero-slide" + (idx === 0 ? " is-on" : "");
       slide.title = title;
+      slide.setAttribute("aria-hidden", idx === 0 ? "false" : "true");
 
       if (wide || poster) {
         var img = document.createElement("img");
         img.src = wide || poster;
-        img.alt = "";
+        img.alt = title || "";
         img.loading = idx === 0 ? "eager" : "lazy";
-        img.referrerPolicy = "no-referrer";
+        // Omit no-referrer — CR CDN art often requires a normal referrer.
+        img.decoding = "async";
+        img.addEventListener("error", function () {
+          // Fallback: try the other art field once.
+          if (wide && poster && img.src.indexOf(poster) < 0) {
+            img.src = poster;
+          }
+        });
         slide.appendChild(img);
       }
       var fade = document.createElement("div");
@@ -988,30 +1006,115 @@
       });
       section.appendChild(slide);
       slides.push(slide);
+      slideMeta.push({ title: title, openUrl: openUrl });
     });
 
     if (!slides.length) return null;
 
+    var current = 0;
+    var dots = null;
+    var paused = false;
+
+    function goTo(index, userAction) {
+      if (!slides.length) return;
+      current = ((index % slides.length) + slides.length) % slides.length;
+      slides.forEach(function (s, j) {
+        var on = j === current;
+        s.classList.toggle("is-on", on);
+        s.setAttribute("aria-hidden", on ? "false" : "true");
+      });
+      if (dots) {
+        Array.prototype.forEach.call(dots.children, function (d, j) {
+          d.classList.toggle("is-on", j === current);
+        });
+      }
+      if (userAction) {
+        // Restart autoplay after manual interaction.
+        restartAutoplay();
+      }
+    }
+
+    function next(userAction) {
+      goTo(current + 1, userAction);
+    }
+    function prev(userAction) {
+      goTo(current - 1, userAction);
+    }
+
+    var autoplayId = null;
+    function stopAutoplay() {
+      if (autoplayId != null) {
+        clearInterval(autoplayId);
+        var ix = heroCarouselTimers.indexOf(autoplayId);
+        if (ix >= 0) heroCarouselTimers.splice(ix, 1);
+        autoplayId = null;
+      }
+    }
+    function restartAutoplay() {
+      stopAutoplay();
+      if (slides.length < 2 || paused) return;
+      autoplayId = setInterval(function () {
+        if (!paused) next(false);
+      }, 5500);
+      heroCarouselTimers.push(autoplayId);
+    }
+
     if (slides.length > 1) {
-      var dots = document.createElement("div");
+      // Edge fade + chevron arrows (CR-style)
+      var arrowPrev = document.createElement("button");
+      arrowPrev.type = "button";
+      arrowPrev.className = "home-hero-arrow home-hero-arrow-prev";
+      arrowPrev.setAttribute("aria-label", "Previous featured title");
+      arrowPrev.innerHTML =
+        '<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+      arrowPrev.addEventListener("click", function (e) {
+        e.stopPropagation();
+        prev(true);
+      });
+
+      var arrowNext = document.createElement("button");
+      arrowNext.type = "button";
+      arrowNext.className = "home-hero-arrow home-hero-arrow-next";
+      arrowNext.setAttribute("aria-label", "Next featured title");
+      arrowNext.innerHTML =
+        '<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M9 5l7 7-7 7" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+      arrowNext.addEventListener("click", function (e) {
+        e.stopPropagation();
+        next(true);
+      });
+
+      section.appendChild(arrowPrev);
+      section.appendChild(arrowNext);
+
+      dots = document.createElement("div");
       dots.className = "home-hero-dots";
-      slides.forEach(function (slide, i) {
+      slides.forEach(function (_slide, i) {
         var dot = document.createElement("button");
         dot.type = "button";
         dot.className = i === 0 ? "is-on" : "";
-        dot.setAttribute("aria-label", "Hero slide " + (i + 1));
+        dot.setAttribute("aria-label", "Featured slide " + (i + 1));
         dot.addEventListener("click", function (e) {
           e.stopPropagation();
-          slides.forEach(function (s, j) {
-            s.classList.toggle("is-on", j === i);
-          });
-          Array.prototype.forEach.call(dots.children, function (d, j) {
-            d.classList.toggle("is-on", j === i);
-          });
+          goTo(i, true);
         });
         dots.appendChild(dot);
       });
       section.appendChild(dots);
+
+      section.addEventListener("mouseenter", function () {
+        paused = true;
+      });
+      section.addEventListener("mouseleave", function () {
+        paused = false;
+      });
+      section.addEventListener("focusin", function () {
+        paused = true;
+      });
+      section.addEventListener("focusout", function () {
+        paused = false;
+      });
+
+      restartAutoplay();
     }
     return section;
   }
@@ -1067,7 +1170,7 @@
       img.src = banner.wideUrl;
       img.alt = "";
       img.loading = "lazy";
-      img.referrerPolicy = "no-referrer";
+      img.decoding = "async";
       el.appendChild(img);
     }
     var fade = document.createElement("div");
@@ -1095,7 +1198,10 @@
 
   function renderHomeBlocks(blocks, append) {
     if (!els.homeFeed) return;
-    if (!append) els.homeFeed.innerHTML = "";
+    if (!append) {
+      clearHeroCarousels();
+      els.homeFeed.innerHTML = "";
+    }
     var list = Array.isArray(blocks) ? blocks : [];
     var rendered = 0;
     list.forEach(function (raw) {

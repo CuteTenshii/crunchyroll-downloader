@@ -57,6 +57,12 @@ func TestCardFromCMSObjectEpisodeSubtitle(t *testing.T) {
 	if card.Subtitle != "S01E12" {
 		t.Fatalf("subtitle %q", card.Subtitle)
 	}
+	if card.SeriesID != "GYZJ43JMR" {
+		t.Fatalf("seriesId %q", card.SeriesID)
+	}
+	if card.Title != "Slime" {
+		t.Fatalf("title %q want series title", card.Title)
+	}
 	if !strings.Contains(card.OpenURL, "/watch/GWDU82Z05") {
 		t.Fatalf("url %q", card.OpenURL)
 	}
@@ -76,6 +82,100 @@ func TestDedupeCards(t *testing.T) {
 	out := dedupeCards(in)
 	if len(out) != 2 {
 		t.Fatalf("%d", len(out))
+	}
+}
+
+func TestDedupeCardsBySeriesKeepFirst(t *testing.T) {
+	in := []DiscoverCard{
+		{ID: "ep1", SeriesID: "S1", Title: "Show", Subtitle: "S01E03"},
+		{ID: "ep2", SeriesID: "S1", Title: "Show", Subtitle: "S01E02"},
+		{ID: "ep3", SeriesID: "S2", Title: "Other", Subtitle: "S01E01"},
+	}
+	out := dedupeCardsBySeriesKeepFirst(in)
+	if len(out) != 2 {
+		t.Fatalf("len %d", len(out))
+	}
+	if out[0].Subtitle != "S01E03" || out[0].SeriesID != "S1" {
+		t.Fatalf("first %+v", out[0])
+	}
+	if out[1].SeriesID != "S2" {
+		t.Fatalf("second %+v", out[1])
+	}
+}
+
+func TestPromoteEpisodesToSeriesCards(t *testing.T) {
+	fake := &fakeFeedHydrator{
+		objects: map[string]DiscoverCard{
+			"SER1": {
+				ID:        "SER1",
+				Type:      "series",
+				Title:     "Series One",
+				PosterURL: "https://cdn.example/s1.jpg",
+				OpenURL:   "https://www.crunchyroll.com/series/SER1",
+			},
+		},
+	}
+	in := []DiscoverCard{
+		{
+			ID:       "EP1",
+			Type:     "episode",
+			Title:    "Series One",
+			SeriesID: "SER1",
+			Subtitle: "S01E05",
+			OpenURL:  "https://www.crunchyroll.com/watch/EP1",
+			Progress: progressPtr(0.4),
+		},
+		{
+			ID:        "SER2",
+			Type:      "series",
+			Title:     "Already Series",
+			PosterURL: "https://cdn.example/s2.jpg",
+			OpenURL:   "https://www.crunchyroll.com/series/SER2",
+		},
+	}
+	out := promoteEpisodesToSeriesCards(in, "pt-BR", fake)
+	if len(out) != 2 {
+		t.Fatalf("len %d", len(out))
+	}
+	if out[0].ID != "SER1" || out[0].Type != "series" {
+		t.Fatalf("promoted %+v", out[0])
+	}
+	if out[0].PosterURL != "https://cdn.example/s1.jpg" {
+		t.Fatalf("poster %q", out[0].PosterURL)
+	}
+	if out[0].Subtitle != "S01E05" {
+		t.Fatalf("subtitle %q", out[0].Subtitle)
+	}
+	if out[0].Progress == nil || *out[0].Progress != 0.4 {
+		t.Fatalf("progress %v", out[0].Progress)
+	}
+	if out[1].ID != "SER2" {
+		t.Fatalf("series passthrough %+v", out[1])
+	}
+}
+
+func TestHeroImageURLsFlatAndPanel(t *testing.T) {
+	raw := json.RawMessage(`{
+		"resource_type": "hero_carousel",
+		"items": [{
+			"title": "Hero Title",
+			"link": "/series/ABC/hero-title",
+			"button_text": "Watch",
+			"images": {
+				"landscape_large": "https://cdn.example/wide.jpg",
+				"portrait_large": "https://cdn.example/tall.jpg"
+			}
+		}]
+	}`)
+	heroes := mapHeroItems(raw, "pt-BR")
+	if len(heroes) != 1 {
+		t.Fatalf("len %d", len(heroes))
+	}
+	if heroes[0].WideURL != "https://cdn.example/wide.jpg" {
+		t.Fatalf("wide %q", heroes[0].WideURL)
+	}
+	if heroes[0].PosterURL != "https://cdn.example/tall.jpg" {
+		t.Fatalf("poster %q", heroes[0].PosterURL)
 	}
 }
 
@@ -266,7 +366,7 @@ func TestMapHomeFeedEntryDynamicWatchlistRecsBYW(t *testing.T) {
 				"link": "/content/v2/discover/browse?type=episode"
 			}`,
 			hydrate: hydrateBrowse,
-			kind:    HomeBlockLandscapeRail,
+			kind:    HomeBlockPosterRail,
 		},
 	}
 	for _, tc := range cases {

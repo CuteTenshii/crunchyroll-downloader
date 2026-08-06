@@ -390,12 +390,19 @@ func cardFromHistoryItem(raw json.RawMessage, locale string) (DiscoverCard, stri
 		meta = metaHolder.Panel.EpisodeMetadata
 	}
 	if meta != nil {
+		if sid := strings.TrimSpace(meta.SeriesID); sid != "" {
+			card.SeriesID = sid
+		}
 		if meta.SeriesTitle != "" {
 			card.Title = meta.SeriesTitle
 		}
 		if card.Subtitle == "" {
 			card.Subtitle = episodeSubtitle(meta)
 		}
+	}
+	if card.SeriesID == "" && strings.TrimSpace(wrap.ParentID) != "" {
+		// Some history payloads put series id on parent_id.
+		card.SeriesID = strings.TrimSpace(wrap.ParentID)
 	}
 
 	contentID := firstNonEmpty(wrap.ID, card.ID)
@@ -446,38 +453,55 @@ func parsePanelListResponse(body []byte, locale string) []DiscoverCard {
 	}
 	var cards []DiscoverCard
 	for _, raw := range bulk.Data {
-		var wrap struct {
-			Panel json.RawMessage `json:"panel"`
-			ID    string          `json:"id"`
-		}
-		_ = json.Unmarshal(raw, &wrap)
-		if len(wrap.Panel) > 0 {
-			if card, ok := cardFromCMSObject(wrap.Panel, locale); ok {
-				cards = append(cards, card)
-				continue
-			}
-		}
-		if card, ok := cardFromCMSObject(raw, locale); ok {
+		if card, ok := cardFromPanelListItem(raw, locale); ok {
 			cards = append(cards, card)
-			continue
-		}
-		// Nested resource { id, type, ... under "resource" or "item" }
-		var nested struct {
-			Resource json.RawMessage `json:"resource"`
-			Item     json.RawMessage `json:"item"`
-		}
-		_ = json.Unmarshal(raw, &nested)
-		if len(nested.Resource) > 0 {
-			if card, ok := cardFromCMSObject(nested.Resource, locale); ok {
-				cards = append(cards, card)
-				continue
-			}
-		}
-		if len(nested.Item) > 0 {
-			if card, ok := cardFromCMSObject(nested.Item, locale); ok {
-				cards = append(cards, card)
-			}
 		}
 	}
 	return dedupeCards(cards)
+}
+
+func cardFromPanelListItem(raw json.RawMessage, locale string) (DiscoverCard, bool) {
+	var wrap struct {
+		Panel    json.RawMessage `json:"panel"`
+		ID       string          `json:"id"`
+		ParentID string          `json:"parent_id"`
+		SeriesID string          `json:"series_id"`
+	}
+	_ = json.Unmarshal(raw, &wrap)
+
+	try := func(src json.RawMessage) (DiscoverCard, bool) {
+		card, ok := cardFromCMSObject(src, locale)
+		if !ok {
+			return DiscoverCard{}, false
+		}
+		if card.SeriesID == "" {
+			card.SeriesID = firstNonEmpty(wrap.SeriesID, wrap.ParentID)
+		}
+		return card, true
+	}
+
+	if len(wrap.Panel) > 0 {
+		if card, ok := try(wrap.Panel); ok {
+			return card, true
+		}
+	}
+	if card, ok := try(raw); ok {
+		return card, true
+	}
+	var nested struct {
+		Resource json.RawMessage `json:"resource"`
+		Item     json.RawMessage `json:"item"`
+	}
+	_ = json.Unmarshal(raw, &nested)
+	if len(nested.Resource) > 0 {
+		if card, ok := try(nested.Resource); ok {
+			return card, true
+		}
+	}
+	if len(nested.Item) > 0 {
+		if card, ok := try(nested.Item); ok {
+			return card, true
+		}
+	}
+	return DiscoverCard{}, false
 }
