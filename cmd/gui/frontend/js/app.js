@@ -143,7 +143,15 @@
       modeToggle: $("mode-toggle"),
       navHome: $("nav-home"),
       navDownload: $("nav-download"),
+      navQueue: $("nav-queue"),
+      navHistory: $("nav-history"),
+      navSettings: $("nav-settings"),
       brandHome: $("brand-home"),
+      topbarTitle: $("topbar-title"),
+      pageDownload: $("page-download"),
+      pageQueue: $("page-queue"),
+      pageHistory: $("page-history"),
+      pageSettings: $("page-settings"),
       downloadChrome: $("download-chrome"),
       homeChrome: $("home-chrome"),
       homeSearch: $("home-search"),
@@ -161,6 +169,19 @@
       accountName: $("account-name"),
       accountSub: $("account-sub"),
       accountAvatar: $("account-avatar"),
+      tabActivity: $("tab-activity"),
+      tabQueue: $("tab-queue"),
+      tabProgress: $("tab-progress"),
+      panelActivity: $("panel-activity"),
+      panelQueue: $("panel-queue"),
+      panelProgress: $("panel-progress"),
+      btnClearActivity: $("btn-clear-activity"),
+      btnGotoDownloadFromQueue: $("btn-goto-download-from-queue"),
+      btnGotoHomeFromHistory: $("btn-goto-home-from-history"),
+      btnSettingsCookie: $("btn-settings-cookie"),
+      btnGotoDownloadSettings: $("btn-goto-download-settings"),
+      sidebarStatusTitle: $("sidebar-status-title"),
+      sidebarStatusSub: $("sidebar-status-sub"),
       batchUrls: $("batch-urls"),
       batchFile: $("btn-batch-file"),
       wvdPath: $("wvd-path"),
@@ -219,13 +240,15 @@
       if (els.activityDockBody) els.activityDockBody.hidden = true;
       if (els.btnToggleActivity) {
         els.btnToggleActivity.setAttribute("aria-expanded", "false");
+        els.btnToggleActivity.textContent = "Show";
       }
-      if (els.activityHint) els.activityHint.textContent = "Show logs";
+      if (els.activityHint) els.activityHint.textContent = "Show";
     } else {
       els.activityDock.classList.remove("is-collapsed");
       if (els.activityDockBody) els.activityDockBody.hidden = false;
       if (els.btnToggleActivity) {
         els.btnToggleActivity.setAttribute("aria-expanded", "true");
+        els.btnToggleActivity.textContent = "Hide";
       }
       if (els.activityHint) els.activityHint.textContent = "Hide";
     }
@@ -234,6 +257,26 @@
     } catch (e) {
       /* ignore */
     }
+  }
+
+  function setActivityTab(tab) {
+    tab = tab || "activity";
+    var tabs = [
+      { btn: els.tabActivity, panel: els.panelActivity, id: "activity" },
+      { btn: els.tabQueue, panel: els.panelQueue, id: "queue" },
+      { btn: els.tabProgress, panel: els.panelProgress, id: "progress" },
+    ];
+    tabs.forEach(function (t) {
+      var on = t.id === tab;
+      if (t.btn) {
+        t.btn.classList.toggle("is-on", on);
+        t.btn.setAttribute("aria-selected", on ? "true" : "false");
+      }
+      if (t.panel) {
+        t.panel.classList.toggle("is-on", on);
+        t.panel.hidden = !on;
+      }
+    });
   }
 
   function expandActivityForWork() {
@@ -689,39 +732,53 @@
   }
 
   function setAppView(view) {
-    state.view = view === "download" ? "download" : "home";
-    var isHome = state.view === "home";
-    // Preserve activity collapsed/expanded — never force-open the dock on tab switch.
-    var wasCollapsed = isActivityCollapsed();
-    if (els.navHome) {
-      els.navHome.classList.toggle("is-on", isHome);
-      els.navHome.setAttribute("aria-selected", isHome ? "true" : "false");
-    }
-    if (els.navDownload) {
-      els.navDownload.classList.toggle("is-on", !isHome);
-      els.navDownload.setAttribute("aria-selected", !isHome ? "true" : "false");
-    }
-    if (els.viewHome) {
-      els.viewHome.classList.toggle("is-on", isHome);
-      els.viewHome.hidden = !isHome;
-    }
-    if (els.mainPane) {
-      els.mainPane.hidden = isHome;
-    }
-    if (els.downloadChrome) {
-      els.downloadChrome.hidden = isHome;
-    }
-    if (els.homeChrome) {
-      els.homeChrome.hidden = !isHome;
-    }
+    // Back-compat: home | download (and shell pages).
+    if (view === "download") setShellPage("download");
+    else setShellPage("home");
+  }
+
+  function setShellPage(page) {
+    var map = {
+      home: { title: "Home", el: els.viewHome, nav: els.navHome },
+      download: { title: "Downloads", el: els.pageDownload, nav: els.navDownload },
+      queue: { title: "Queue", el: els.pageQueue, nav: els.navQueue },
+      history: { title: "History", el: els.pageHistory, nav: els.navHistory },
+      settings: { title: "Settings", el: els.pageSettings, nav: els.navSettings },
+    };
+    if (!map[page]) page = "home";
+    state.view = page === "download" ? "download" : page === "home" ? "home" : page;
+
+    Object.keys(map).forEach(function (key) {
+      var m = map[key];
+      var on = key === page;
+      if (m.el) {
+        m.el.classList.toggle("is-on", on);
+        m.el.hidden = !on;
+      }
+      if (m.nav) {
+        m.nav.classList.toggle("is-active", on);
+      }
+    });
+    if (els.topbarTitle) els.topbarTitle.textContent = map[page].title;
+
+    // Mode toggle is most useful on Downloads.
     if (els.modeToggle) {
-      // Normal/Advanced only applies to Download workspace.
-      els.modeToggle.style.visibility = isHome ? "hidden" : "visible";
+      els.modeToggle.style.visibility =
+        page === "download" || page === "settings" ? "visible" : "hidden";
     }
-    // Re-apply collapsed state after layout swap (prevents accidental expand on reflow).
-    if (wasCollapsed) setActivityCollapsed(true);
-    if (isHome && !state.homeLoaded && !state.homeLoading && state.cookieFile) {
+
+    if (page === "home" && !state.homeLoaded && !state.homeLoading && state.cookieFile) {
       loadHomeFeed(false);
+    }
+    if (page === "queue") {
+      setActivityTab("queue");
+      setActivityCollapsed(false);
+    }
+    if (page === "download") {
+      // Keep activity visible by default in new shell (user can Hide).
+      if (isActivityCollapsed()) {
+        /* leave user preference */
+      }
     }
   }
 
@@ -3379,25 +3436,69 @@
         setMode("advanced");
       });
     }
-    if (els.navHome) {
-      els.navHome.addEventListener("click", function () {
-        setAppView("home");
+    function wireNav(el, page) {
+      if (!el) return;
+      el.addEventListener("click", function () {
+        setShellPage(page);
       });
     }
-    if (els.navDownload) {
-      els.navDownload.addEventListener("click", function () {
-        setAppView("download");
-      });
-    }
+    wireNav(els.navHome, "home");
+    wireNav(els.navDownload, "download");
+    wireNav(els.navQueue, "queue");
+    wireNav(els.navHistory, "history");
+    wireNav(els.navSettings, "settings");
     if (els.brandHome) {
       els.brandHome.addEventListener("click", function () {
-        setAppView("home");
+        setShellPage("home");
       });
       els.brandHome.addEventListener("keydown", function (e) {
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
-          setAppView("home");
+          setShellPage("home");
         }
+      });
+    }
+    if (els.tabActivity) {
+      els.tabActivity.addEventListener("click", function () {
+        setActivityTab("activity");
+      });
+    }
+    if (els.tabQueue) {
+      els.tabQueue.addEventListener("click", function () {
+        setActivityTab("queue");
+      });
+    }
+    if (els.tabProgress) {
+      els.tabProgress.addEventListener("click", function () {
+        setActivityTab("progress");
+      });
+    }
+    if (els.btnClearActivity) {
+      els.btnClearActivity.addEventListener("click", function () {
+        if (!els.activity) return;
+        els.activity.innerHTML = "";
+        logLine("● Ready", "ok", { quiet: true });
+      });
+    }
+    if (els.btnGotoDownloadFromQueue) {
+      els.btnGotoDownloadFromQueue.addEventListener("click", function () {
+        setShellPage("download");
+        setActivityTab("queue");
+        setActivityCollapsed(false);
+      });
+    }
+    if (els.btnGotoHomeFromHistory) {
+      els.btnGotoHomeFromHistory.addEventListener("click", function () {
+        setShellPage("home");
+      });
+    }
+    if (els.btnSettingsCookie) {
+      els.btnSettingsCookie.addEventListener("click", onCookie);
+    }
+    if (els.btnGotoDownloadSettings) {
+      els.btnGotoDownloadSettings.addEventListener("click", function () {
+        setShellPage("download");
+        setMode("advanced");
       });
     }
     if (els.btnHomeSearch) {
@@ -3538,8 +3639,8 @@
   async function init() {
     cacheEls();
     wireUI();
-    // Default collapsed; remember user preference in localStorage.
-    var collapsed = true;
+    // Activity card: default expanded in shell; remember preference.
+    var collapsed = false;
     try {
       var saved = localStorage.getItem("crdl.activityCollapsed");
       if (saved === "0") collapsed = false;
@@ -3548,10 +3649,11 @@
       /* ignore */
     }
     setActivityCollapsed(collapsed);
+    setActivityTab("activity");
     updateDockSummary();
     syncAdvancedInputsFromState();
     setMode("normal");
-    setAppView("home");
+    setShellPage("home");
     subscribeProgress();
     await loadPreferences();
     updateAccountChrome();
