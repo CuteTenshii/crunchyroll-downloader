@@ -299,6 +299,7 @@ type fakePlaySess struct {
 
 func (f *fakePlaySess) SeekTarget(sec float64) { f.seek = sec }
 func (f *fakePlaySess) BufferedEnd() float64   { return f.end }
+func (f *fakePlaySess) BufferStart() float64   { return f.seek }
 func (f *fakePlaySess) Duration() float64      { return 100 }
 func (f *fakePlaySess) PlayingPath() string    { return f.path }
 func (f *fakePlaySess) AudioPath() string      { return f.audio }

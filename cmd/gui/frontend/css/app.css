@@ -2722,16 +2722,11 @@ textarea.cr-input {
 }
 
 /* ── Play overlay (cinema chrome; scoped so shell .spacer/.track/.ctrl stay intact) ── */
-body.is-playing .shell {
-  visibility: hidden;
-  pointer-events: none;
-}
-
 #page-play.page-play {
   position: fixed;
   inset: 0;
   z-index: 80;
-  background: transparent;
+  background: #000;
   color: #fff;
   overflow: hidden;
   outline: none;
@@ -2745,9 +2740,19 @@ body.is-playing .shell {
 #page-play .play-stage {
   position: absolute;
   inset: 0;
-  background: transparent;
+  background: #000;
   display: grid;
   place-items: center;
+}
+
+#page-play .play-video {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 72px;
+  bottom: 96px;
+  background: #000;
+  z-index: 1;
 }
 
 #page-play .play-stage-label {

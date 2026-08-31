@@ -94,6 +94,7 @@
   var playStopPromise = Promise.resolve();
   var playDuration = 0;
   var playBufferEnd = 0;
+  var playBufferStart = 0;
   var playSeekTarget = 0;
   var playLastPos = 0;
   var playResumeHandled = false;
@@ -128,6 +129,7 @@
       playLock: $("play-lock"),
       playTime: $("play-time"),
       playStage: $("play-stage"),
+      playVideo: $("play-video"),
       playError: $("play-error"),
       playWait: $("play-wait"),
       playTimeline: $("play-timeline"),
@@ -920,8 +922,9 @@
   }
 
   function layoutPlayStage() {
-    if (!els.playStage) return;
-    var r = els.playStage.getBoundingClientRect();
+    var hole = els.playVideo || els.playStage;
+    if (!hole) return;
+    var r = hole.getBoundingClientRect();
     var app = goApp();
     if (!app || typeof app.PlayLayout !== "function") return;
     try {
@@ -1059,6 +1062,10 @@
     if (bufRaw != null && bufRaw !== "") {
       playBufferEnd = Number(bufRaw) || 0;
     }
+    var bufStartRaw = ev.bufferStart != null ? ev.bufferStart : ev.BufferStart;
+    if (bufStartRaw != null && bufStartRaw !== "") {
+      playBufferStart = Number(bufStartRaw) || 0;
+    }
     playDuration = dur;
     if (els.playTime) {
       els.playTime.textContent = formatPlayClock(pos) + " / " + formatPlayClock(dur);
@@ -1067,14 +1074,18 @@
     if (els.playProg) els.playProg.style.width = pct + "%";
     if (els.playDot) els.playDot.style.left = pct + "%";
     if (els.playBuf) {
+      var startPct = 0;
       var bufPct = 100;
       if (dur > 0) {
-        bufPct = Math.max(0, Math.min(100, (playBufferEnd / dur) * 100));
+        startPct = Math.max(0, Math.min(100, (playBufferStart / dur) * 100));
+        bufPct = Math.max(0, Math.min(100, ((playBufferEnd - playBufferStart) / dur) * 100));
       }
+      els.playBuf.style.left = startPct + "%";
       els.playBuf.style.width = bufPct + "%";
     }
     if (playSeekTarget > 0) {
-      var bufReady = playBufferEnd >= playSeekTarget - 0.05;
+      var bufReady =
+        playBufferStart <= playSeekTarget + 0.05 && playBufferEnd >= playSeekTarget - 0.05;
       var nearSeek = Math.abs(pos - playSeekTarget) <= 0.5;
       if (bufReady || nearSeek) showPlayWait(false);
     } else if (dur > 0 || (hasPos && pos > 0)) {
@@ -1133,6 +1144,9 @@
         var offEsc = window.runtime.EventsOn("play-escape", function () {
           closePlayOverlay();
         });
+        var offMouse = window.runtime.EventsOn("play-mousemove", function () {
+          if (isPlayOverlayOpen()) wakePlayChrome();
+        });
         playEventsUnsub = function () {
           try {
             if (typeof offState === "function") offState();
@@ -1147,6 +1161,11 @@
           try {
             if (typeof offEsc === "function") offEsc();
           } catch (e3) {
+            /* ignore */
+          }
+          try {
+            if (typeof offMouse === "function") offMouse();
+          } catch (e4) {
             /* ignore */
           }
         };

@@ -27,22 +27,23 @@ const (
 // PlayProgress is emitted as the progressive buffer grows. Ready is set once
 // when BufferEndSec >= 0.5s or the first contiguous media segment is present.
 type PlayProgress struct {
-	BufferEndSec float64
-	DurationSec  float64
-	Ready        bool
-	PlayingPath  string
-	Err          error
+	BufferEndSec   float64
+	BufferStartSec float64
+	DurationSec    float64
+	Ready          bool
+	Reload         bool
+	PlayingPath    string
+	Err            error
 }
 
 // PlaySession is a forced-quality (never ABR) decrypt-while-watching session.
-// playing.mp4 is built by writing ftyp+moov from the first decrypted fragment
-// and appending subsequent moof+mdat CMAF samples. SeekTarget retargets the
-// worker queue; BufferEndSec stays the contiguous prefix from 0.
+// playing.mp4 is built from the current play-from index (0 at start, or the
+// seek target) so watch-ahead does not wait for 0..N.
 type PlaySession struct {
 	EpisodeID    string
 	VideoQuality string
 	AudioQuality string
-	BufferEndSec float64 // contiguous from 0
+	BufferEndSec float64
 	Dir          string  // temp session dir
 
 	mu              sync.Mutex
@@ -59,6 +60,8 @@ type PlaySession struct {
 	audioNums       []int64
 	contiguous      int
 	audioContiguous int
+	playFrom        int
+	fileContig      int
 	playingFile     string
 	audioFile       string
 	videoInit       []byte
@@ -503,28 +506,28 @@ func (s *PlaySession) commitVideoSegment(index int, decrypted []byte) error {
 		s.have[index] = true
 		s.pending[index] = decrypted
 	}
-	var appendErr error
 	for s.contiguous < len(s.have) && s.have[s.contiguous] {
-		if err := s.appendPlayingLocked(s.contiguous, s.pending[s.contiguous], s.playingFile); err != nil {
-			appendErr = err
-			break
-		}
-		s.pending[s.contiguous] = nil
-		if s.contiguous < len(s.segDurations) {
-			s.BufferEndSec += s.segDurations[s.contiguous]
-		}
 		s.contiguous++
 	}
-	ready := playBufferReady(s.BufferEndSec, s.contiguous) || (len(s.have) > 0 && s.contiguous >= len(s.have))
+	reload, appendErr := s.extendPlayingFileLocked()
+	from := timeAtIndex(s.segDurations, s.playFrom)
+	playable := 0.0
+	if s.fileContig > 0 {
+		playable = timeAtRange(s.segDurations, s.playFrom, s.playFrom+s.fileContig)
+	}
+	s.BufferEndSec = from + playable
+	ready := s.fileContig > 0 && (playBufferReady(playable, s.fileContig) || s.playFrom+s.fileContig >= len(s.have))
 	firstReady := ready && !s.readyEmitted
 	if firstReady {
 		s.readyEmitted = true
 	}
 	progress := PlayProgress{
-		BufferEndSec: s.BufferEndSec,
-		DurationSec:  s.durationSec,
-		Ready:        firstReady,
-		PlayingPath:  s.playingFile,
+		BufferEndSec:   s.BufferEndSec,
+		BufferStartSec: from,
+		DurationSec:    s.durationSec,
+		Ready:          firstReady,
+		Reload:         reload,
+		PlayingPath:    s.playingFile,
 	}
 	emit := s.emit
 	s.mu.Unlock()
@@ -593,8 +596,73 @@ func (s *PlaySession) appendPlayingLocked(index int, decrypted []byte, dest stri
 	return err
 }
 
-// SeekTarget maps seconds to a segment index and prioritizes that index in the
-// worker queue. Quality is never changed.
+func timeAtIndex(durs []float64, n int) float64 {
+	if n <= 0 {
+		return 0
+	}
+	if n > len(durs) {
+		n = len(durs)
+	}
+	var t float64
+	for i := 0; i < n; i++ {
+		t += durs[i]
+	}
+	return t
+}
+
+func timeAtRange(durs []float64, from, to int) float64 {
+	if from < 0 {
+		from = 0
+	}
+	if to > len(durs) {
+		to = len(durs)
+	}
+	if to <= from {
+		return 0
+	}
+	var t float64
+	for i := from; i < to; i++ {
+		t += durs[i]
+	}
+	return t
+}
+
+// extendPlayingFileLocked appends decrypted samples from playFrom into playing.mp4.
+// Caller holds s.mu. Reload is true when the file is truncated and rebuilt.
+func (s *PlaySession) extendPlayingFileLocked() (reload bool, err error) {
+	if s.playFrom < 0 {
+		s.playFrom = 0
+	}
+	if s.playFrom >= len(s.have) {
+		return false, nil
+	}
+	if s.fileContig == 0 {
+		if !s.have[s.playFrom] || len(s.pending[s.playFrom]) == 0 {
+			return false, nil
+		}
+		if err := s.appendPlayingLocked(0, s.pending[s.playFrom], s.playingFile); err != nil {
+			return false, err
+		}
+		s.fileContig = 1
+		reload = true
+	}
+	for s.playFrom+s.fileContig < len(s.have) && s.have[s.playFrom+s.fileContig] {
+		i := s.playFrom + s.fileContig
+		data := s.pending[i]
+		if len(data) == 0 {
+			break
+		}
+		if err := s.appendPlayingLocked(s.fileContig, data, s.playingFile); err != nil {
+			return reload, err
+		}
+		s.fileContig++
+	}
+	return reload, nil
+}
+
+// SeekTarget maps seconds to a segment index, prioritizes that index in the
+// worker queue, and rebuilds playing.mp4 from that point so playback does not
+// wait for 0..N. Quality is never changed.
 func (s *PlaySession) SeekTarget(sec float64) {
 	if s == nil {
 		return
@@ -602,9 +670,15 @@ func (s *PlaySession) SeekTarget(sec float64) {
 	s.mu.Lock()
 	vq, aq := s.queue, s.audioQueue
 	vd, ad := s.segDurations, s.audioDurations
+	idx := indexForTime(vd, sec)
+	if idx != s.playFrom {
+		s.playFrom = idx
+		s.fileContig = 0
+		s.readyEmitted = false
+	}
 	s.mu.Unlock()
 	if vq != nil {
-		vq.Retarget(indexForTime(vd, sec))
+		vq.Retarget(idx)
 	}
 	if aq != nil {
 		aq.Retarget(indexForTime(ad, sec))
@@ -618,6 +692,15 @@ func (s *PlaySession) BufferedEnd() float64 {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.BufferEndSec
+}
+
+func (s *PlaySession) BufferStart() float64 {
+	if s == nil {
+		return 0
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return timeAtIndex(s.segDurations, s.playFrom)
 }
 
 func (s *PlaySession) Duration() float64 {

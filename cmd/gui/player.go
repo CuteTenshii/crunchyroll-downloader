@@ -72,6 +72,7 @@ var (
 	resolvePlayFile      = resolveLocalMKV
 	startProgressivePlay = engine.StartProgressivePlay
 	playEscapeFn         func()
+	playMouseFn          func()
 )
 
 // playBufferSession is the progressive-play control surface used by StartPlay,
@@ -79,6 +80,7 @@ var (
 type playBufferSession interface {
 	SeekTarget(sec float64)
 	BufferedEnd() float64
+	BufferStart() float64
 	Duration() float64
 	PlayingPath() string
 	AudioPath() string
@@ -667,12 +669,17 @@ func (a *App) emitPlayState(wailsCtx context.Context, host MpvHost) {
 		bufEnd = a.playSession.BufferedEnd()
 		a.playBufferEnd = bufEnd
 	}
+	bufStart := 0.0
+	if a.playSession != nil {
+		bufStart = a.playSession.BufferStart()
+	}
 	payload := map[string]any{
-		"position":  pos,
-		"duration":  dur,
-		"paused":    paused,
-		"eof":       eof,
-		"bufferEnd": bufEnd,
+		"position":    pos,
+		"duration":    dur,
+		"paused":      paused,
+		"eof":         eof,
+		"bufferEnd":   bufEnd,
+		"bufferStart": bufStart,
 	}
 	a.playMu.Unlock()
 
@@ -773,6 +780,16 @@ func (a *App) onPlayProgress(p engine.PlayProgress, gen uint64) {
 		if p.DurationSec > a.playDurationHint {
 			a.playDurationHint = p.DurationSec
 		}
+		if p.Reload && a.playHost != nil && strings.TrimSpace(p.PlayingPath) != "" {
+			_ = a.playHost.LoadFile(p.PlayingPath)
+			_ = a.playHost.Pause(false)
+			a.playPaused = false
+			if a.playPendingSeek > 0 {
+				_ = a.playHost.Seek(a.playPendingSeek)
+			} else if p.BufferStartSec > 0.05 {
+				_ = a.playHost.Seek(p.BufferStartSec)
+			}
+		}
 		a.applyPendingSeekLocked()
 		a.attachPlayAudioLocked()
 		pos := a.playLastPos
@@ -802,11 +819,12 @@ func (a *App) onPlayProgress(p engine.PlayProgress, gen uint64) {
 		a.playLastDur = dur
 		ctx := a.ctx
 		payload := map[string]any{
-			"position":  pos,
-			"duration":  dur,
-			"paused":    paused,
-			"eof":       eof,
-			"bufferEnd": a.playBufferEnd,
+			"position":    pos,
+			"duration":    dur,
+			"paused":      paused,
+			"eof":         eof,
+			"bufferEnd":   a.playBufferEnd,
+			"bufferStart": p.BufferStartSec,
 		}
 		if p.Err != nil {
 			payload["error"] = p.Err.Error()

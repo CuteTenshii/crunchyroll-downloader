@@ -62,6 +62,9 @@ func (a *App) startup(ctx context.Context) {
 	playEscapeFn = func() {
 		wailsruntime.EventsEmit(ctx, "play-escape", true)
 	}
+	playMouseFn = func() {
+		wailsruntime.EventsEmit(ctx, "play-mousemove", true)
+	}
 	path, err := engine.DefaultPreferencesPath()
 	if err != nil {
 		return
