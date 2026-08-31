@@ -12,7 +12,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	widevine "github.com/iyear/gowidevine"
 	"github.com/unki2aut/go-mpd"
 )
 
@@ -251,8 +250,8 @@ func downloadParts(baseUrl, representationId *string, set *mpd.AdaptationSet) (s
 	}
 	defer file.Close()
 
-	if err = widevine.DecryptMP4Auto(encFile, keys, file); err != nil {
-		return "", fmt.Errorf("widevine.DecryptMP4Auto: %w", err)
+	if err = decryptMP4(initData, encFile, keys, file); err != nil {
+		return "", fmt.Errorf("decryptMP4: %w", err)
 	}
 
 	return filename, nil
