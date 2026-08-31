@@ -36,7 +36,7 @@ func TestPlayheadPOSTBody(t *testing.T) {
 	if method != http.MethodPost {
 		t.Fatalf("method %s", method)
 	}
-	if !strings.Contains(path, "/content/v2/acct/playheads") {
+	if path != "/content/v2/acct/playheads" {
 		t.Fatalf("path %s", path)
 	}
 	if locale != "pt-BR" {
@@ -45,7 +45,7 @@ func TestPlayheadPOSTBody(t *testing.T) {
 	if audio != "ja-JP" {
 		t.Fatalf("preferred_audio_language %q", audio)
 	}
-	if !strings.HasPrefix(auth, "Bearer ") {
+	if auth != "Bearer test-token" {
 		t.Fatalf("Authorization %q", auth)
 	}
 	if contentType != "application/json" {
@@ -97,14 +97,21 @@ func TestPlayheadPOSTHTTP500(t *testing.T) {
 }
 
 func TestPlayheadRequiresAccountAndContentID(t *testing.T) {
-	if err := PostPlayheadWithBase("http://127.0.0.1:1", "", "GWep", 1, "pt-BR", "ja-JP"); err == nil {
-		t.Fatal("expected error for empty account")
+	const want = "playhead requires account and content id"
+	cases := []struct {
+		name      string
+		accountID string
+		contentID string
+	}{
+		{"empty account", "", "GWep"},
+		{"empty content", "acct", ""},
+		{"whitespace account", "  ", "id"},
 	}
-	if err := PostPlayheadWithBase("http://127.0.0.1:1", "acct", "", 1, "pt-BR", "ja-JP"); err == nil {
-		t.Fatal("expected error for empty content id")
-	}
-	if err := PostPlayheadWithBase("http://127.0.0.1:1", "  ", "id", 1, "pt-BR", "ja-JP"); err == nil {
-		t.Fatal("expected error for whitespace account")
+	for _, tc := range cases {
+		err := PostPlayheadWithBase("http://127.0.0.1:1", tc.accountID, tc.contentID, 1, "pt-BR", "ja-JP")
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Fatalf("%s: err=%v", tc.name, err)
+		}
 	}
 }
 
