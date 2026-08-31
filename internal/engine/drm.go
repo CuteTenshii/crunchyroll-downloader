@@ -172,6 +172,19 @@ func loadWidevineFromRaw(clientIDPath, privateKeyPath string) (*widevine.Device,
 	return widevine.NewDevice(widevine.FromRaw(clientID, privateKey))
 }
 
+// ErrNoAuthorizedWidevine is returned when full-media work has no explicit
+// operator-owned device configuration. Play uses this without scanning cwd.
+var ErrNoAuthorizedWidevine = errors.New("no authorized Widevine device configured; set CRUNCHYROLL_WIDEVINE_DEVICE_FILE or both private raw-device file variables for full-media downloads (subtitle indexing requires none)")
+
+// explicitWidevineEnvSet reports whether the operator configured a device via
+// environment variables. It does not search the working tree or well-known folders.
+func explicitWidevineEnvSet() bool {
+	wvd := strings.TrimSpace(os.Getenv("CRUNCHYROLL_WIDEVINE_DEVICE_FILE"))
+	clientID := strings.TrimSpace(os.Getenv("CRUNCHYROLL_WIDEVINE_CLIENT_ID_FILE"))
+	privateKey := strings.TrimSpace(os.Getenv("CRUNCHYROLL_WIDEVINE_PRIVATE_KEY_FILE"))
+	return wvd != "" || clientID != "" || privateKey != ""
+}
+
 func getWidevineDevice() (*widevine.Device, error) {
 	wvdPath := strings.TrimSpace(os.Getenv("CRUNCHYROLL_WIDEVINE_DEVICE_FILE"))
 	clientIDPath := strings.TrimSpace(os.Getenv("CRUNCHYROLL_WIDEVINE_CLIENT_ID_FILE"))
@@ -229,7 +242,7 @@ func getLicense(psshData, contentId, videoToken string) error {
 		return err
 	}
 	if device == nil {
-		return errors.New("no authorized Widevine device configured; set CRUNCHYROLL_WIDEVINE_DEVICE_FILE or both private raw-device file variables for full-media downloads (subtitle indexing requires none)")
+		return ErrNoAuthorizedWidevine
 	}
 	cdm := widevine.NewCDM(device)
 	decodedPssh, err := base64.StdEncoding.DecodeString(psshData)

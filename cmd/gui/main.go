@@ -22,6 +22,7 @@ func main() {
 		},
 		BackgroundColour: &options.RGBA{R: 12, G: 10, B: 9, A: 255},
 		OnStartup:        app.startup,
+		OnShutdown:       app.shutdown,
 		Bind:             []interface{}{app},
 	})
 	if err != nil {

@@ -272,6 +272,9 @@ func StartProgressivePlay(ctx context.Context, episodeID string, cfg RuntimeConf
 	if currentJobProgress() != nil {
 		return nil, errors.New("download already running")
 	}
+	if !explicitWidevineEnvSet() {
+		return nil, ErrNoAuthorizedWidevine
+	}
 	if !progressivePlayHeld.CompareAndSwap(false, true) {
 		return nil, errors.New("progressive play already running")
 	}

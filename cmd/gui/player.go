@@ -204,7 +204,20 @@ func (a *App) StartPlay(req PlayRequest) error {
 	a.playGen++
 	mine := a.playGen
 	prev, doPrev := a.queuePlayheadLocked()
+	oldSess := a.playSession
+	oldCancel := a.playSessionCancel
+	a.playSession = nil
+	a.playSessionCancel = nil
+	a.playAudioAdded = false
 	a.playMu.Unlock()
+	if oldCancel != nil {
+		oldCancel()
+	}
+	if oldSess != nil {
+		if cerr := oldSess.Close(); cerr != nil {
+			a.logPlaySessionErr(cerr)
+		}
+	}
 
 	commitPrev := func() { a.commitPlayhead(prev, doPrev) }
 	if a.playAbandonedLocked(mine) {
@@ -279,7 +292,7 @@ func (a *App) StartPlay(req PlayRequest) error {
 				a.playMu.Unlock()
 
 				sess, perr := startProgressivePlay(pctx, episodeID, cfg, func(p engine.PlayProgress) {
-					a.onPlayProgress(p)
+					a.onPlayProgress(p, mine)
 				})
 				if a.playAbandonedLocked(mine) {
 					if sess != nil {
@@ -371,13 +384,7 @@ func (a *App) StartPlay(req PlayRequest) error {
 			return err
 		}
 		a.playPaused = false
-		if adder, ok := a.playHost.(mpvAudioAdder); ok {
-			if a.playSession != nil {
-				if audio := a.playSession.AudioPath(); audio != "" {
-					_ = adder.AddAudio(audio)
-				}
-			}
-		}
+		a.attachPlayAudioLocked()
 	}
 	a.playEpisodeID = episodeID
 	a.playLocale = locale
@@ -410,6 +417,10 @@ func (a *App) playAbandonedLocked(mine uint64) bool {
 // StopPlay tears down the host, child HWND, and play-state ticker for the
 // generation captured at call start. A later StartPlay bumps playGen so a
 // delayed StopPlay cannot destroy the new session.
+func (a *App) shutdown(ctx context.Context) {
+	_ = a.StopPlay()
+}
+
 func (a *App) StopPlay() error {
 	a.playMu.Lock()
 	a.playAbandoned = a.playGen
@@ -547,6 +558,7 @@ func (a *App) clearPlayLocked() error {
 	a.playLastPos = 0
 	a.playLastDur = 0
 	a.playLastEOF = false
+	a.playAudioAdded = false
 	a.playPaused = true
 	a.playEpisodeID = ""
 	a.playLocale = ""
@@ -700,15 +712,36 @@ func (a *App) commitPlayhead(shot playheadPost, ok bool) error {
 	return nil
 }
 
-func (a *App) onPlayProgress(p engine.PlayProgress) {
+func (a *App) attachPlayAudioLocked() {
+	if a.playAudioAdded || a.playHost == nil || a.playSession == nil {
+		return
+	}
+	adder, ok := a.playHost.(mpvAudioAdder)
+	if !ok {
+		return
+	}
+	audio := a.playSession.AudioPath()
+	if audio == "" {
+		return
+	}
+	a.playAudioAdded = true
+	_ = adder.AddAudio(audio)
+}
+
+func (a *App) onPlayProgress(p engine.PlayProgress, gen uint64) {
 	// Emit off the download worker so we cannot deadlock with StartPlay's playMu.
 	go func() {
 		a.playMu.Lock()
+		if a.playGen != gen {
+			a.playMu.Unlock()
+			return
+		}
 		a.playBufferEnd = p.BufferEndSec
 		if p.DurationSec > a.playDurationHint {
 			a.playDurationHint = p.DurationSec
 		}
 		a.applyPendingSeekLocked()
+		a.attachPlayAudioLocked()
 		pos := a.playLastPos
 		dur := a.playLastDur
 		if a.playDurationHint > dur {

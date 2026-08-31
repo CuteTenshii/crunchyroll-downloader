@@ -932,10 +932,20 @@
       return Promise.resolve();
     }
     req = req || {};
-    return Promise.resolve(playStopPromise)
-      .catch(function () {
-        /* ignore in-flight stop errors */
-      })
+    var stop = Promise.resolve(playStopPromise).catch(function () {
+      /* ignore in-flight stop errors */
+    });
+    if (typeof app.StopPlay === "function") {
+      stop = stop
+        .then(function () {
+          return Promise.resolve(app.StopPlay());
+        })
+        .catch(function () {
+          /* ignore stop errors before a new StartPlay */
+        });
+    }
+    playStopPromise = stop;
+    return stop
       .then(function () {
         layoutPlayStage();
         return Promise.resolve(app.StartPlay(req));

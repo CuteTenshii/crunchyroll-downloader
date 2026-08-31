@@ -291,6 +291,7 @@ func TestStartPlayProgressiveBlockedWhenDownloading(t *testing.T) {
 type fakePlaySess struct {
 	end, seek float64
 	path      string
+	audio     string
 	closed    bool
 }
 
@@ -298,7 +299,7 @@ func (f *fakePlaySess) SeekTarget(sec float64) { f.seek = sec }
 func (f *fakePlaySess) BufferedEnd() float64   { return f.end }
 func (f *fakePlaySess) Duration() float64      { return 100 }
 func (f *fakePlaySess) PlayingPath() string    { return f.path }
-func (f *fakePlaySess) AudioPath() string      { return "" }
+func (f *fakePlaySess) AudioPath() string      { return f.audio }
 func (f *fakePlaySess) Close() error           { f.closed = true; return nil }
 
 func TestPlaySeekRetargetsWhenAheadOfBuffer(t *testing.T) {
@@ -348,7 +349,7 @@ func TestPlaySeekPendingAppliedWhenBufferCatchesUp(t *testing.T) {
 	}
 
 	sess.end = 40
-	a.onPlayProgress(engine.PlayProgress{BufferEndSec: 40, DurationSec: 100})
+	a.onPlayProgress(engine.PlayProgress{BufferEndSec: 40, DurationSec: 100}, a.playGen)
 
 	deadline := time.Now().Add(time.Second)
 	for time.Now().Before(deadline) {
@@ -398,7 +399,7 @@ func TestOnPlayProgressKeepsLastPosition(t *testing.T) {
 	a.playLastPos = 12.5
 	a.playPaused = false
 
-	a.onPlayProgress(engine.PlayProgress{BufferEndSec: 24, DurationSec: 100})
+	a.onPlayProgress(engine.PlayProgress{BufferEndSec: 24, DurationSec: 100}, a.playGen)
 
 	deadline := time.Now().Add(time.Second)
 	for time.Now().Before(deadline) {
@@ -473,6 +474,128 @@ func TestStopPlayDestroysHostBeforeSessionClose(t *testing.T) {
 	}
 	if h.destroys != 1 {
 		t.Fatalf("destroys=%d", h.destroys)
+	}
+}
+
+type audioHost struct {
+	scriptedHost
+	mu    sync.Mutex
+	added []string
+}
+
+func (h *audioHost) AddAudio(path string) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.added = append(h.added, path)
+	return nil
+}
+
+func (h *audioHost) addedCopy() []string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	out := make([]string, len(h.added))
+	copy(out, h.added)
+	return out
+}
+
+func waitPlay(t *testing.T, timeout time.Duration, ok func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if ok() {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatal("timed out")
+}
+
+func TestOnPlayProgressAttachesLateAudioOnce(t *testing.T) {
+	h := &audioHost{}
+	sess := &fakePlaySess{end: 8}
+	a := NewApp()
+	a.playHost = h
+	a.playSession = sess
+	a.playGen = 4
+
+	a.onPlayProgress(engine.PlayProgress{BufferEndSec: 8, DurationSec: 100}, 4)
+	waitPlay(t, time.Second, func() bool {
+		a.playMu.Lock()
+		defer a.playMu.Unlock()
+		return a.playBufferEnd == 8
+	})
+	if n := len(h.addedCopy()); n != 0 {
+		t.Fatalf("AddAudio before path ready: %d", n)
+	}
+
+	sess.audio = filepath.Join(t.TempDir(), "audio.mp4")
+	a.onPlayProgress(engine.PlayProgress{BufferEndSec: 10, DurationSec: 100}, 4)
+	waitPlay(t, time.Second, func() bool { return len(h.addedCopy()) == 1 })
+	if got := h.addedCopy(); got[0] != sess.audio {
+		t.Fatalf("added %q want %q", got[0], sess.audio)
+	}
+
+	a.onPlayProgress(engine.PlayProgress{BufferEndSec: 12, DurationSec: 100}, 4)
+	waitPlay(t, time.Second, func() bool {
+		a.playMu.Lock()
+		defer a.playMu.Unlock()
+		return a.playBufferEnd == 12
+	})
+	if n := len(h.addedCopy()); n != 1 {
+		t.Fatalf("AddAudio calls=%d want 1", n)
+	}
+}
+
+func TestOnPlayProgressIgnoresStaleGen(t *testing.T) {
+	h := &audioHost{}
+	sess := &fakePlaySess{end: 8, audio: "late.mp4"}
+	a := NewApp()
+	a.playHost = h
+	a.playSession = sess
+	a.playGen = 9
+	a.playBufferEnd = 3
+
+	a.onPlayProgress(engine.PlayProgress{BufferEndSec: 50, DurationSec: 100}, 8)
+	time.Sleep(50 * time.Millisecond)
+	a.playMu.Lock()
+	buf := a.playBufferEnd
+	added := a.playAudioAdded
+	a.playMu.Unlock()
+	if buf != 3 {
+		t.Fatalf("bufferEnd=%v want 3", buf)
+	}
+	if added || len(h.addedCopy()) != 0 {
+		t.Fatal("stale progress attached audio")
+	}
+}
+
+func TestStartPlayClosesPreviousSession(t *testing.T) {
+	old := &fakePlaySess{end: 6}
+	a := NewApp()
+	a.playHost = &scriptedHost{}
+	a.playSession = old
+	_ = a.StartPlay(PlayRequest{})
+	if !old.closed {
+		t.Fatal("previous playSession not closed")
+	}
+}
+
+func TestShutdownStopsPlay(t *testing.T) {
+	h := &scriptedHost{}
+	sess := &fakePlaySess{end: 4}
+	a := NewApp()
+	a.playHost = h
+	a.playGen = 1
+	a.playSession = sess
+	a.shutdown(context.Background())
+	if !sess.closed {
+		t.Fatal("session not closed on shutdown")
+	}
+	if h.destroys != 1 {
+		t.Fatalf("destroys=%d", h.destroys)
+	}
+	if a.playHost != nil || a.playSession != nil {
+		t.Fatal("play state remains after shutdown")
 	}
 }
 

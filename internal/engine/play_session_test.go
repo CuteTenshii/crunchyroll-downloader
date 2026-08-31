@@ -81,6 +81,50 @@ func TestMediaAfterInit(t *testing.T) {
 	}
 }
 
+func TestStartProgressivePlayRequiresExplicitWidevine(t *testing.T) {
+	t.Setenv("CRUNCHYROLL_WIDEVINE_DEVICE_FILE", "")
+	t.Setenv("CRUNCHYROLL_WIDEVINE_CLIENT_ID_FILE", "")
+	t.Setenv("CRUNCHYROLL_WIDEVINE_PRIVATE_KEY_FILE", "")
+
+	cwd := t.TempDir()
+	t.Chdir(cwd)
+	if err := os.WriteFile(filepath.Join(cwd, "device.wvd"), []byte("planted"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cwd, "client_id.bin"), []byte("planted"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cwd, "private_key.pem"), []byte("planted"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	origOpen := playOpenPlayback
+	origLic := playGetLicense
+	opens, licenses := 0, 0
+	playOpenPlayback = func(string) Episode {
+		opens++
+		t.Fatal("play must not open playback without explicit Widevine env")
+		return Episode{}
+	}
+	playGetLicense = func(string, string, string) error {
+		licenses++
+		t.Fatal("play must not call getLicense without explicit Widevine env")
+		return nil
+	}
+	t.Cleanup(func() {
+		playOpenPlayback = origOpen
+		playGetLicense = origLic
+	})
+
+	_, err := StartProgressivePlay(context.Background(), "GWep", DefaultRuntimeConfig(), nil)
+	if err == nil || !strings.Contains(err.Error(), "no authorized Widevine device configured") {
+		t.Fatalf("err=%v", err)
+	}
+	if opens != 0 || licenses != 0 {
+		t.Fatalf("opened=%d licenses=%d", opens, licenses)
+	}
+}
+
 func TestStartProgressivePlayFailsWhenDownloadRunning(t *testing.T) {
 	setJobProgress(&activeJobProgress{ctx: context.Background()})
 	t.Cleanup(clearJobProgress)
@@ -184,6 +228,7 @@ func fakeFragment() []byte {
 
 func stubPlayPipeline(t *testing.T, segs int, secPerSeg float64) (restore func()) {
 	t.Helper()
+	t.Setenv("CRUNCHYROLL_WIDEVINE_DEVICE_FILE", filepath.Join(t.TempDir(), "device.wvd"))
 	origOpen := playOpenPlayback
 	origParse := playParseManifest
 	origLic := playGetLicense

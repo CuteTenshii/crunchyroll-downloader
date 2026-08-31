@@ -48,6 +48,7 @@ type App struct {
 	playLastPos       float64
 	playLastDur       float64
 	playLastEOF       bool
+	playAudioAdded    bool
 }
 
 // NewApp constructs an empty App; prefs load on startup.
