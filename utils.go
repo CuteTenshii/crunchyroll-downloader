@@ -1,5 +1,10 @@
 package main
 
+import (
+	"regexp"
+	"strings"
+)
+
 var languageNames = map[string]string{
 	"ja-JP":  "日本語",
 	"en-US":  "English",
@@ -58,4 +63,22 @@ var languageCodes = map[string]string{
 	"zh-TW":  "zho",
 	"ko-KR":  "kor",
 	"th-TH":  "tha",
+}
+
+var (
+	// Characters that are illegal in Windows filenames or break the final path.
+	illegalFilenameChars = regexp.MustCompile(`[\\/:*?"<>|'’\x60“”]`)
+	underscoreRuns       = regexp.MustCompile(`_+`)
+)
+
+// sanitizeFilename replaces characters that cannot appear in a filename with
+// underscores, collapses the resulting runs, and trims trailing spaces and dots
+// that Windows silently strips. Empty input yields "Unknown".
+func sanitizeFilename(name string) string {
+	if name == "" {
+		return "Unknown"
+	}
+	res := illegalFilenameChars.ReplaceAllString(name, "_")
+	res = underscoreRuns.ReplaceAllString(res, "_")
+	return strings.TrimRight(res, " .")
 }

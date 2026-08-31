@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"fmt"
 	"io"
 	"net/http"
@@ -89,9 +88,121 @@ func getFilename(set *mpd.AdaptationSet, subExt string) string {
 	return ""
 }
 
-type segmentJob struct {
-	index int
-	url   string
+// maxBufferedSegments bounds how many segments may be resident in memory at
+// once, counting both in-flight downloads and payloads still waiting to be
+// written. Without it the workers race arbitrarily far ahead of the sequential
+// writer whenever an early segment is slow, which is what exhausted memory on
+// movie-length titles.
+const maxBufferedSegments = maxWorkers * 2
+
+// streamSegments fetches every url concurrently but writes the payloads to w
+// strictly in index order, releasing each one as soon as it has been written.
+// Peak memory is therefore bounded by maxBufferedSegments rather than growing
+// with the length of the media.
+//
+// onProgress, if non-nil, is called with the running count of fetched segments.
+func streamSegments(w io.Writer, urls []string, fetch func(string) ([]byte, error), onProgress func(fetched int64)) error {
+	total := len(urls)
+	if total == 0 {
+		return nil
+	}
+
+	var (
+		mu      sync.Mutex
+		cond    = sync.NewCond(&mu)
+		payload = make([][]byte, total)
+		ready   = make([]bool, total)
+		failure error
+	)
+
+	abort := make(chan struct{})
+	var abortOnce sync.Once
+	fail := func(err error) {
+		mu.Lock()
+		if failure == nil {
+			failure = err
+		}
+		mu.Unlock()
+		cond.Broadcast()
+		abortOnce.Do(func() { close(abort) })
+	}
+
+	// A worker claims a slot before claiming an index, so the indices held at
+	// any moment are always the lowest outstanding ones. That ordering is what
+	// guarantees the writer's next index is always held by a live worker and
+	// can never be starved by later segments hogging every slot.
+	slots := make(chan struct{}, maxBufferedSegments)
+	var next atomic.Int64
+	var fetched atomic.Int64
+
+	var wg sync.WaitGroup
+	for n := 0; n < maxWorkers; n++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for {
+				select {
+				case slots <- struct{}{}:
+				case <-abort:
+					return
+				}
+
+				i := int(next.Add(1) - 1)
+				if i >= total {
+					<-slots
+					return
+				}
+
+				data, err := fetch(urls[i])
+				if err != nil {
+					fail(err)
+					return
+				}
+
+				mu.Lock()
+				payload[i] = data
+				ready[i] = true
+				mu.Unlock()
+				cond.Broadcast()
+
+				if onProgress != nil {
+					onProgress(fetched.Add(1))
+				}
+			}
+		}()
+	}
+
+	writerDone := make(chan struct{})
+	go func() {
+		defer close(writerDone)
+		for i := 0; i < total; i++ {
+			mu.Lock()
+			for !ready[i] && failure == nil {
+				cond.Wait()
+			}
+			if failure != nil {
+				mu.Unlock()
+				return
+			}
+			data := payload[i]
+			payload[i] = nil
+			mu.Unlock()
+
+			_, err := w.Write(data)
+			<-slots
+			if err != nil {
+				fail(fmt.Errorf("writing segment %d: %w", i, err))
+				return
+			}
+		}
+	}()
+
+	wg.Wait()
+	<-writerDone
+
+	mu.Lock()
+	defer mu.Unlock()
+	return failure
 }
 
 func downloadParts(baseUrl, representationId *string, set *mpd.AdaptationSet) (string, error) {
@@ -103,57 +214,44 @@ func downloadParts(baseUrl, representationId *string, set *mpd.AdaptationSet) (s
 
 	timeline := expandTimeline(set.SegmentTemplate.SegmentTimeline.S, 1)
 	total := len(timeline)
-	results := make([][]byte, total)
-	var downloadErr error
-	var errOnce sync.Once
-	var done atomic.Int64
-
-	jobs := make(chan segmentJob, total)
-	var wg sync.WaitGroup
-
-	for w := 0; w < maxWorkers; w++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for job := range jobs {
-				data, err := downloadPart(job.url)
-				if err != nil {
-					errOnce.Do(func() { downloadErr = err })
-					return
-				}
-				results[job.index] = data
-				count := done.Add(1)
-				fmt.Printf("\rDownloaded %v of %v segments (%v%%)", count, total, (100*count)/int64(total))
-			}
-		}()
-	}
-
+	urls := make([]string, total)
 	for i, item := range timeline {
-		url := buildUrl(*baseUrl, *representationId, *set.SegmentTemplate.Media, &item)
-		jobs <- segmentJob{index: i, url: url}
+		urls[i] = buildUrl(*baseUrl, *representationId, *set.SegmentTemplate.Media, &item)
 	}
-	close(jobs)
-	wg.Wait()
 
-	if downloadErr != nil {
-		return "", downloadErr
+	filename := getFilename(set, "")
+	encPath := filename + ".enc"
+	encFile, err := os.Create(encPath)
+	if err != nil {
+		return "", err
+	}
+	defer os.Remove(encPath)
+	defer encFile.Close()
+
+	if _, err = encFile.Write(initData); err != nil {
+		return "", fmt.Errorf("writing init segment: %w", err)
+	}
+
+	err = streamSegments(encFile, urls, downloadPart, func(fetched int64) {
+		fmt.Printf("\rDownloaded %v of %v segments (%v%%)", fetched, total, (100*fetched)/int64(total))
+	})
+	if err != nil {
+		return "", err
 	}
 
 	fmt.Println("\nFinished downloading!")
 
-	var parts []byte
-	parts = append(parts, initData...)
-	for _, data := range results {
-		parts = append(parts, data...)
+	if _, err = encFile.Seek(0, io.SeekStart); err != nil {
+		return "", fmt.Errorf("rewinding %s: %w", encPath, err)
 	}
 
-	filename := getFilename(set, "")
 	file, err := os.Create(filename)
 	if err != nil {
 		return "", err
 	}
 	defer file.Close()
-	if err = widevine.DecryptMP4Auto(io.NopCloser(bytes.NewReader(parts)), keys, file); err != nil {
+
+	if err = widevine.DecryptMP4Auto(encFile, keys, file); err != nil {
 		return "", fmt.Errorf("widevine.DecryptMP4Auto: %w", err)
 	}
 
@@ -191,25 +289,8 @@ func downloadSubs(url, format string) string {
 }
 
 func downloadEpisode(baseContentId string, info EpisodeInfo, audioLangs, subsLangs, ccLangs []string, videoQuality, audioQuality *string) {
-	sanitize := func(s string) string {
-		if s == "" {
-			return "Unknown"
-		}
-
-		// Characters that are illegal in Windows filenames or break the final path
-		illegal := []string{"\\", "/", ":", "*", "?", "\"", "<", ">", "|", "'", "’", "`", "“", "”"}
-		res := s
-		for _, char := range illegal {
-			res = strings.ReplaceAll(res, char, "_")
-		}
-		for strings.Contains(res, "__") {
-			res = strings.ReplaceAll(res, "__", "_")
-		}
-		return strings.TrimRight(res, " .")
-	}
-
-	cleanSeriesTitle := sanitize(info.EpisodeMetadata.SeriesTitle)
-	cleanEpisodeTitle := sanitize(info.Title)
+	cleanSeriesTitle := sanitizeFilename(info.EpisodeMetadata.SeriesTitle)
+	cleanEpisodeTitle := sanitizeFilename(info.Title)
 
 	if _, err := os.Stat(cleanSeriesTitle); err != nil {
 		_ = os.MkdirAll(cleanSeriesTitle, 0777)
@@ -281,7 +362,7 @@ func downloadEpisode(baseContentId string, info EpisodeInfo, audioLangs, subsLan
 			deleteStream(id, sToken)
 		}
 		if r := recover(); r != nil {
-			print("Recovered from error:", r)
+			fmt.Println("Recovered from error:", r)
 		}
 	}()
 
