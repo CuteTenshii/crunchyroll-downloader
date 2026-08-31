@@ -1467,6 +1467,11 @@ button {
   scroll-snap-align: start;
 }
 
+.home-cw-card:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 .home-cw-art {
   position: relative;
   height: 149px;
@@ -2823,6 +2828,13 @@ textarea.cr-input {
 
 #page-play .play-icon-btn:hover {
   opacity: 1;
+}
+
+#page-play .play-icon-btn:disabled,
+#page-play .play-icon-btn[aria-disabled="true"] {
+  opacity: 0.35;
+  cursor: default;
+  pointer-events: none;
 }
 
 #page-play .play-ctrl .play-icon-btn svg {

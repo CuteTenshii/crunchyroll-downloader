@@ -99,6 +99,7 @@
   var playResumeHandled = false;
   var playEventsUnsub = null;
   var playCurrentMeta = null;
+  var playCatalogGen = 0;
   var els = {};
 
   function $(id) {
@@ -1097,6 +1098,7 @@
   }
 
   function closePlayOverlay() {
+    playCatalogGen++;
     if (playIdleTimer) {
       clearTimeout(playIdleTimer);
       playIdleTimer = null;
@@ -1133,8 +1135,9 @@
     return series ? series + " · " + code : code;
   }
 
-  function openPlayOverlay(meta) {
+  function openPlayOverlay(meta, opts) {
     meta = meta || {};
+    opts = opts || {};
     playCurrentMeta = {
       episodeId: meta.episodeId || meta.episodeID || "",
       seriesTitle: meta.seriesTitle || "",
@@ -1168,6 +1171,8 @@
     }
     setPlayStageError("");
     wakePlayChrome();
+    updatePlayNextButton();
+    if (opts.start === false) return;
     requestAnimationFrame(function () {
       startPlaySurface(buildPlayRequest(meta));
     });
@@ -1191,6 +1196,17 @@
       return String(card.id);
     }
     return "";
+  }
+
+  function discoverCardInspectTarget(card) {
+    var rawUrl = (card && card.openUrl) || "";
+    var seriesId = String((card && (card.seriesId || card.SeriesID)) || "").trim();
+    var epId = episodeIdFromCard(card);
+    var url = rawUrl;
+    if (seriesId) {
+      url = "https://www.crunchyroll.com/series/" + encodeURIComponent(seriesId);
+    }
+    return { url: url, episodeId: epId };
   }
 
   function parseCardSeasonEpisode(card) {
@@ -1231,18 +1247,14 @@
       evt.preventDefault();
       evt.stopPropagation();
     }
-    var epId = episodeIdFromCard(card);
+    var target = discoverCardInspectTarget(card);
+    var epId = target.episodeId;
     if (!epId) {
       showBanner("This title has no playable episode.", "warn");
       return;
     }
-    var ep = catalogEpisodeById(epId);
-    if (ep) {
-      openPlayOverlay(playMetaFromCatalogEpisode(ep, { filePath: "" }));
-      return;
-    }
     var se = parseCardSeasonEpisode(card);
-    openPlayOverlay({
+    var cardMeta = {
       seriesTitle: (card && card.title) || "",
       episodeTitle: (card && (card.episodeTitle || card.subtitle)) || "Untitled",
       seasonNumber: se.seasonNumber,
@@ -1251,7 +1263,55 @@
       filePath: "",
       audioLang: firstSelectedAudioLang(),
       locale: state.locale || "pt-BR",
-    });
+    };
+    var existing = catalogEpisodeById(epId);
+    var gen = ++playCatalogGen;
+    if (existing) {
+      openPlayOverlay(playMetaFromCatalogEpisode(existing, { filePath: "" }));
+      return ensureAllSeasonEpisodesLoaded().then(function () {
+        if (gen !== playCatalogGen) return;
+        updatePlayNextButton();
+      });
+    }
+    openPlayOverlay(cardMeta, { start: false });
+    return loadSeriesCatalogForPlay(target, epId, cardMeta, gen);
+  }
+
+  async function loadSeriesCatalogForPlay(target, epId, cardMeta, gen) {
+    try {
+      if (!target.url) {
+        showBanner("This title has no openable URL.", "warn");
+      } else if (!state.cookieFile) {
+        showBanner(
+          "Cookie file path is missing. Click Cookie and enter the path to your etp_rt file.",
+          "err"
+        );
+      } else {
+        if (els.url) els.url.value = target.url;
+        state.url = target.url;
+        state.pendingSelectEpisodeId = epId;
+        await onInspect();
+      }
+      if (gen !== playCatalogGen) return;
+      await ensureAllSeasonEpisodesLoaded();
+      if (gen !== playCatalogGen) return;
+      var ep = catalogEpisodeById(epId);
+      if (ep) {
+        state.selectedEpisodeIds[ep.ID] = true;
+        if (ep.SeasonNumber != null) state.selectedSeason = ep.SeasonNumber;
+        renderSeasons();
+        renderSeasonHeading();
+        renderEpisodes();
+        openPlayOverlay(playMetaFromCatalogEpisode(ep, { filePath: "" }));
+      } else {
+        openPlayOverlay(cardMeta);
+      }
+    } catch (err) {
+      if (gen !== playCatalogGen) return;
+      logLine("Play catalog: " + errMessage(err), "warn");
+      openPlayOverlay(cardMeta);
+    }
+    updatePlayNextButton();
   }
 
   function scrollEpisodeIntoView(episodeId) {
@@ -2323,37 +2383,19 @@
   }
 
   function openDiscoverCard(card) {
-    var rawUrl = (card && card.openUrl) || "";
-    var seriesId =
-      (card && (card.seriesId || card.SeriesID || "")) || "";
-    seriesId = String(seriesId).trim();
-    // Prefer explicit episode id on card, else parse /watch/{id}/.
-    var epId = "";
-    if (card && card.id && /episode/i.test(String(card.type || ""))) {
-      epId = String(card.id);
-    }
-    if (!epId) epId = episodeIdFromOpenUrl(rawUrl);
-    // Full series catalog + select clicked episode (do NOT inspect bare /watch/ only).
-    var url = rawUrl;
-    if (seriesId) {
-      url = "https://www.crunchyroll.com/series/" + encodeURIComponent(seriesId);
-    } else if (epId) {
-      // Fallback: still try series-style if openUrl was watch-only without seriesId.
-      // Inspect of /watch/ returns a single-episode catalog — avoid that when possible.
-      url = rawUrl;
-    }
-    if (!url) {
+    var target = discoverCardInspectTarget(card);
+    if (!target.url) {
       showBanner("This title has no openable URL.", "warn");
       logLine("Open card blocked: missing openUrl", "warn");
       return;
     }
-    if (els.url) els.url.value = url;
-    state.url = url;
-    state.pendingSelectEpisodeId = epId || "";
+    if (els.url) els.url.value = target.url;
+    state.url = target.url;
+    state.pendingSelectEpisodeId = target.episodeId || "";
     logLine(
       "Open · " +
-        ((card && card.title) || url) +
-        (epId ? " (select " + epId + ")" : ""),
+        ((card && card.title) || target.url) +
+        (target.episodeId ? " (select " + target.episodeId + ")" : ""),
       "info",
       { quiet: true }
     );
@@ -2963,6 +3005,13 @@
       var msg = errMessage(err);
       showBanner("Could not load season " + seasonNumber + ": " + msg, "err");
       logLine("Season " + seasonNumber + " load failed: " + msg, "err");
+    }
+  }
+
+  async function ensureAllSeasonEpisodesLoaded() {
+    var seasons = seasonsFromCatalog(state.catalog);
+    for (var i = 0; i < seasons.length; i++) {
+      await ensureSeasonEpisodesLoaded(seasons[i]);
     }
   }
 
@@ -3742,21 +3791,25 @@
         break;
       }
     }
-    if (idx < 0) return null;
-    var cur = eps[idx];
-    var curSeason = Number(cur.SeasonNumber || cur.seasonNumber) || 0;
-    for (var j = idx + 1; j < eps.length; j++) {
-      var cand = eps[j];
-      var nextSeason = Number(cand.SeasonNumber || cand.seasonNumber) || 0;
-      if (nextSeason >= curSeason) return cand;
-    }
-    return null;
+    if (idx < 0 || idx + 1 >= eps.length) return null;
+    return eps[idx + 1];
+  }
+
+  function updatePlayNextButton() {
+    var btn = els.btnPlayNext;
+    if (!btn) return;
+    var curId = (playCurrentMeta && playCurrentMeta.episodeId) || "";
+    var next = nextCatalogEpisode(curId);
+    var disabled = !next;
+    btn.disabled = disabled;
+    btn.setAttribute("aria-disabled", disabled ? "true" : "false");
   }
 
   function onPlayNext() {
     var curId = (playCurrentMeta && playCurrentMeta.episodeId) || "";
     var next = nextCatalogEpisode(curId);
     if (!next) {
+      updatePlayNextButton();
       showBanner("No next episode", "warn");
       return;
     }

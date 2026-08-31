@@ -212,6 +212,8 @@ Play opens an **in-window cinema overlay** (libmpv) inside this app. It is not a
 4. Quality is **forced** — the same representation pick as download. Never ABR
 5. Watch progress is POSTed to Crunchyroll playheads **only on pause, close, or finish** (not while playing)
 
+The overlay has **no** ±10/30 skip chips.
+
 If the DLL is missing, the overlay shows `player library missing` and does not launch another app.
 
 **Widevine:** Home and subtitle-only indexing need no CDM. Play and full-media download need an operator-owned, lawfully provisioned device selected only via explicit environment variables or GUI prefs (`CRUNCHYROLL_WIDEVINE_DEVICE_FILE`, or the paired raw-file variables). Never use leaked, extracted, shared, or third-party credentials.
