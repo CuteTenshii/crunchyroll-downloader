@@ -1,5 +1,11 @@
 # Crunchyroll Downloader
 
+[![Tests](https://img.shields.io/github/actions/workflow/status/CuteTenshii/crunchyroll-downloader/tests.yml?branch=master&label=tests)](https://github.com/CuteTenshii/crunchyroll-downloader/actions/workflows/tests.yml)
+[![Latest release](https://img.shields.io/github/v/release/CuteTenshii/crunchyroll-downloader)](https://github.com/CuteTenshii/crunchyroll-downloader/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/CuteTenshii/crunchyroll-downloader/total)](https://github.com/CuteTenshii/crunchyroll-downloader/releases)
+[![Go version](https://img.shields.io/github/go-mod/go-version/CuteTenshii/crunchyroll-downloader)](go.mod)
+[![License](https://img.shields.io/github/license/CuteTenshii/crunchyroll-downloader)](LICENSE.txt)
+
 Downloads anime from Crunchyroll and outputs them in a MKV file.
 
 You won't be banned or anything, I downloaded all Kaguya-Sama seasons to test during 30 mins and everything went fine
@@ -34,18 +40,20 @@ Usage of ./crunchyroll-downloader:
         Audio language(s), comma-separated for multiple (e.g. "ja-JP,en-US"). First is the default track (default "ja-JP")
   -audio-quality string
         Audio quality (default "192k")
+  -cc-lang string
+        Closed caption language(s), comma-separated for multiple (e.g. "en-US"). Downloaded in addition to --subs-lang, not instead of it
+  -debug-manifest
+        Log raw episode playback JSON and manifest XML
   -etp-rt string
         The "etp_rt" cookie value of your account
+  -file string
+        Path to a text file with one URL per line
   -season int
         Season number. Not used if an episode link is entered
   -subs-lang string
         Subtitle language(s), comma-separated for multiple (e.g. "en-US,es-419"). First is the default track (default "en-US")
-  -cc-lang string
-        Closed caption language(s), comma-separated for multiple. Downloaded in addition to -subs-lang, not instead of it
   -url string
         URL of the episode/season to download
-  -file string
-        Path to a text file with one URL per line
   -video-quality string
         Video quality (default "1080p")
 ```
@@ -62,7 +70,7 @@ To download a specific episode:
 
 To batch download from a file (one URL per line):
 ```shell
-./crunchyroll-downloader --urls list.txt --etp-rt replace_this --subs-lang pt-BR
+./crunchyroll-downloader --file list.txt --etp-rt replace_this --subs-lang pt-BR
 ```
 
 To download multiple audio tracks and subtitles into a single file (the first of each is set as the default track). If any requested language is missing for an episode, that episode is skipped:
