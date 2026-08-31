@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"fmt"
 	"io"
 	"net/http"
@@ -141,19 +140,29 @@ func downloadParts(baseUrl, representationId *string, set *mpd.AdaptationSet) (s
 
 	fmt.Println("\nFinished downloading!")
 
-	var parts []byte
-	parts = append(parts, initData...)
-	for _, data := range results {
-		parts = append(parts, data...)
-	}
-
 	filename := getFilename(set, "")
+
+	// Stream encrypted data to disk instead of hoarding it in RAM
+	encFile, err := os.Create(filename + ".enc")
+	if err != nil {
+		return "", err
+	}
+	encFile.Write(initData)
+	for i, data := range results {
+		encFile.Write(data)
+		results[i] = nil // Free the RAM chunk by chunk instantly!
+	}
+	encFile.Seek(0, 0) // Rewind to the start for the decryptor
+	defer os.Remove(filename + ".enc")
+	defer encFile.Close()
+
 	file, err := os.Create(filename)
 	if err != nil {
 		return "", err
 	}
 	defer file.Close()
-	if err = widevine.DecryptMP4Auto(io.NopCloser(bytes.NewReader(parts)), keys, file); err != nil {
+
+	if err = widevine.DecryptMP4Auto(encFile, keys, file); err != nil {
 		return "", fmt.Errorf("widevine.DecryptMP4Auto: %w", err)
 	}
 
@@ -191,25 +200,8 @@ func downloadSubs(url, format string) string {
 }
 
 func downloadEpisode(baseContentId string, info EpisodeInfo, audioLangs, subsLangs, ccLangs []string, videoQuality, audioQuality *string) {
-	sanitize := func(s string) string {
-		if s == "" {
-			return "Unknown"
-		}
-
-		// Characters that are illegal in Windows filenames or break the final path
-		illegal := []string{"\\", "/", ":", "*", "?", "\"", "<", ">", "|", "'", "’", "`", "“", "”"}
-		res := s
-		for _, char := range illegal {
-			res = strings.ReplaceAll(res, char, "_")
-		}
-		for strings.Contains(res, "__") {
-			res = strings.ReplaceAll(res, "__", "_")
-		}
-		return strings.TrimRight(res, " .")
-	}
-
-	cleanSeriesTitle := sanitize(info.EpisodeMetadata.SeriesTitle)
-	cleanEpisodeTitle := sanitize(info.Title)
+	cleanSeriesTitle := sanitizeFilename(info.EpisodeMetadata.SeriesTitle)
+	cleanEpisodeTitle := sanitizeFilename(info.Title)
 
 	if _, err := os.Stat(cleanSeriesTitle); err != nil {
 		_ = os.MkdirAll(cleanSeriesTitle, 0777)
@@ -281,7 +273,7 @@ func downloadEpisode(baseContentId string, info EpisodeInfo, audioLangs, subsLan
 			deleteStream(id, sToken)
 		}
 		if r := recover(); r != nil {
-			print("Recovered from error:", r)
+			fmt.Println("Recovered from error:", r)
 		}
 	}()
 
