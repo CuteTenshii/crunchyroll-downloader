@@ -40,6 +40,8 @@ Usage of ./crunchyroll-downloader:
         Season number. Not used if an episode link is entered
   -subs-lang string
         Subtitle language(s), comma-separated for multiple (e.g. "en-US,es-419"). First is the default track (default "en-US")
+  -cc-lang string
+        Closed caption language(s), comma-separated for multiple. Downloaded in addition to -subs-lang, not instead of it
   -url string
         URL of the episode/season to download
   -file string

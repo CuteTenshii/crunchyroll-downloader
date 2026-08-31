@@ -12,6 +12,7 @@ var (
 	token         = ""
 	audioLang     = flag.String("audio-lang", "ja-JP", "Audio language(s), comma-separated for multiple (e.g. \"ja-JP,en-US\"). First is the default track")
 	subtitlesLang = flag.String("subs-lang", "en-US", "Subtitle language(s), comma-separated for multiple (e.g. \"en-US,es-419\"). First is the default track")
+	ccLang        = flag.String("cc-lang", "", "Closed caption language(s), comma-separated for multiple (e.g. \"en-US\"). Downloaded in addition to --subs-lang, not instead of it")
 	videoQuality  = flag.String("video-quality", "1080p", "Video quality")
 	audioQuality  = flag.String("audio-quality", "192k", "Audio quality")
 	seasonNumber  = flag.Int("season", 0, "Season number. Not used if an episode link is entered")
@@ -48,6 +49,7 @@ func processUrl(url string) {
 		audioLangs = []string{"ja-JP"}
 	}
 	subsLangs := parseLangs(*subtitlesLang)
+	ccLangs := parseLangs(*ccLang)
 
 	// The season/series API endpoints take a single preferred locale; use the
 	// primary (first) requested one. All dub versions are still listed per
@@ -60,7 +62,7 @@ func processUrl(url string) {
 
 	if contentType == "watch" {
 		info := getEpisodeInfo(contentId)
-		downloadEpisode(contentId, info, audioLangs, subsLangs, videoQuality, audioQuality)
+		downloadEpisode(contentId, info, audioLangs, subsLangs, ccLangs, videoQuality, audioQuality)
 	} else {
 		seasons := getSeasons(contentId, primaryAudio, primarySubs)
 
@@ -78,13 +80,13 @@ func processUrl(url string) {
 			}
 
 			episodes := getSeasonEpisodes(seasonId, primaryAudio, primarySubs)
-			downloadSeason(videoQuality, audioQuality, audioLangs, subsLangs, episodes)
+			downloadSeason(videoQuality, audioQuality, audioLangs, subsLangs, ccLangs, episodes)
 		} else {
 			print("No season number specified, downloading all seasons...\n")
 
 			for _, season := range seasons {
 				episodes := getSeasonEpisodes(season.ID, primaryAudio, primarySubs)
-				downloadSeason(videoQuality, audioQuality, audioLangs, subsLangs, episodes)
+				downloadSeason(videoQuality, audioQuality, audioLangs, subsLangs, ccLangs, episodes)
 			}
 		}
 	}
