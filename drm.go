@@ -168,6 +168,7 @@ func decryptMP4(initData []byte, media io.Reader, licenseKeys []*widevine.Key, o
 		return fmt.Errorf("read MP4 encryption info: %w", err)
 	}
 
+	var unmatched []string
 	for _, track := range decryptInfo.TrackInfos {
 		if track.Sinf == nil || track.Sinf.Schi == nil || track.Sinf.Schi.Tenc == nil {
 			continue
@@ -179,8 +180,12 @@ func decryptMP4(initData []byte, media io.Reader, licenseKeys []*widevine.Key, o
 				return widevine.DecryptMP4(media, key.Key, output)
 			}
 		}
-		return fmt.Errorf("no license key found for MP4 KID %x", kid)
+		// Keep looking: a later track may still match a key in the license.
+		unmatched = append(unmatched, fmt.Sprintf("%x", kid))
 	}
 
+	if len(unmatched) > 0 {
+		return fmt.Errorf("no license key found for MP4 KID(s) %s", strings.Join(unmatched, ", "))
+	}
 	return errors.New("MP4 has no encrypted tracks")
 }
