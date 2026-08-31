@@ -3676,6 +3676,7 @@
       if (e.key === "Escape") closeAccountMenu();
       if (e.key !== " " && e.code !== "Space") return;
       if (!isPlayOverlayOpen()) return;
+      if (e.repeat) return;
       if (isTypingTarget(document.activeElement)) return;
       e.preventDefault();
       togglePlayOverlayIcon();

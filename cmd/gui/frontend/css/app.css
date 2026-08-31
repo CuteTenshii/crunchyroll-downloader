@@ -2751,6 +2751,7 @@ textarea.cr-input {
 
 #page-play.is-idle .play-chrome {
   opacity: 0;
+  pointer-events: none;
 }
 
 #page-play .play-top-fade,
