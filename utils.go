@@ -65,18 +65,20 @@ var languageCodes = map[string]string{
 	"th-TH":  "tha",
 }
 
-// sanitizeFilename removes illegal OS characters and formats the string safely
+var (
+	// Characters that are illegal in Windows filenames or break the final path.
+	illegalFilenameChars = regexp.MustCompile(`[\\/:*?"<>|'’\x60“”]`)
+	underscoreRuns       = regexp.MustCompile(`_+`)
+)
+
+// sanitizeFilename replaces characters that cannot appear in a filename with
+// underscores, collapses the resulting runs, and trims trailing spaces and dots
+// that Windows silently strips. Empty input yields "Unknown".
 func sanitizeFilename(name string) string {
 	if name == "" {
 		return "Unknown"
 	}
-	// Replace illegal characters and quotes with an underscore
-	re := regexp.MustCompile(`[\\/:*?"<>|'’\x60“”]`)
-	res := re.ReplaceAllString(name, "_")
-
-	// Collapse multiple consecutive underscores into a single one
-	reCollapse := regexp.MustCompile(`_+`)
-	res = reCollapse.ReplaceAllString(res, "_")
-
+	res := illegalFilenameChars.ReplaceAllString(name, "_")
+	res = underscoreRuns.ReplaceAllString(res, "_")
 	return strings.TrimRight(res, " .")
 }
