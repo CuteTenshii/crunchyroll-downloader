@@ -44,6 +44,10 @@ type App struct {
 	playSessionCancel context.CancelFunc
 	playBufferEnd     float64
 	playDurationHint  float64
+	playPendingSeek   float64 // 0 = none; set when PlaySeek is past BufferEndSec
+	playLastPos       float64
+	playLastDur       float64
+	playLastEOF       bool
 }
 
 // NewApp constructs an empty App; prefs load on startup.

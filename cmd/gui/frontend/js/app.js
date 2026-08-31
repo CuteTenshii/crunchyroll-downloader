@@ -94,6 +94,8 @@
   var playStopPromise = Promise.resolve();
   var playDuration = 0;
   var playBufferEnd = 0;
+  var playSeekTarget = 0;
+  var playLastPos = 0;
   var playResumeHandled = false;
   var playEventsUnsub = null;
   var els = {};
@@ -963,10 +965,21 @@
 
   function applyPlayState(ev) {
     if (!ev || typeof ev !== "object") return;
-    var pos = Number(ev.position != null ? ev.position : ev.Position) || 0;
-    var dur = Number(ev.duration != null ? ev.duration : ev.Duration) || 0;
-    var paused = !!(ev.paused != null ? ev.paused : ev.Paused);
-    var eof = !!(ev.eof != null ? ev.eof : ev.Eof);
+    var hasPos = ev.position != null || ev.Position != null;
+    var pos = hasPos ? Number(ev.position != null ? ev.position : ev.Position) : playLastPos;
+    if (isNaN(pos)) pos = playLastPos;
+    if (hasPos) playLastPos = pos;
+    var hasDur = ev.duration != null || ev.Duration != null;
+    var dur = hasDur ? Number(ev.duration != null ? ev.duration : ev.Duration) : playDuration;
+    if (isNaN(dur) || dur < 0) dur = playDuration;
+    var paused = playOverlayPlaying ? false : true;
+    if (ev.paused != null || ev.Paused != null) {
+      paused = !!(ev.paused != null ? ev.paused : ev.Paused);
+    }
+    var eof = false;
+    if (ev.eof != null || ev.Eof != null) {
+      eof = !!(ev.eof != null ? ev.eof : ev.Eof);
+    }
     var bufRaw = ev.bufferEnd != null ? ev.bufferEnd : ev.BufferEnd;
     if (bufRaw != null && bufRaw !== "") {
       playBufferEnd = Number(bufRaw) || 0;
@@ -985,8 +998,10 @@
       }
       els.playBuf.style.width = bufPct + "%";
     }
-    if (playBufferEnd > 0 && pos <= playBufferEnd + 0.05) {
-      showPlayWait(false);
+    if (playSeekTarget > 0) {
+      var bufReady = playBufferEnd >= playSeekTarget - 0.05;
+      var nearSeek = Math.abs(pos - playSeekTarget) <= 0.5;
+      if (bufReady || nearSeek) showPlayWait(false);
     }
     playOverlayPlaying = !paused && !eof;
     setPlayToggleIcon(playOverlayPlaying);
@@ -1004,9 +1019,21 @@
     }
     playResumeHandled = true;
     var ok = window.confirm("Resume from " + formatPlayClock(sec) + "?");
+    requestPlaySeek(ok ? sec : 0);
+  }
+
+  function requestPlaySeek(sec) {
+    sec = Number(sec) || 0;
+    if (sec < 0) sec = 0;
+    playSeekTarget = sec;
+    if (playBufferEnd > 0 && sec > playBufferEnd) {
+      showPlayWait(true);
+    } else {
+      showPlayWait(false);
+    }
     var app = goApp();
     if (!app || typeof app.PlaySeek !== "function") return;
-    Promise.resolve(app.PlaySeek(ok ? sec : 0)).catch(function () {
+    Promise.resolve(app.PlaySeek(sec)).catch(function () {
       /* ignore */
     });
   }
@@ -1017,15 +1044,7 @@
     if (rect.width <= 0) return;
     var frac = (e.clientX - rect.left) / rect.width;
     frac = Math.max(0, Math.min(1, frac));
-    var sec = frac * playDuration;
-    if (playBufferEnd > 0 && sec > playBufferEnd) {
-      showPlayWait(true);
-    }
-    var app = goApp();
-    if (!app || typeof app.PlaySeek !== "function") return;
-    Promise.resolve(app.PlaySeek(sec)).catch(function () {
-      /* ignore */
-    });
+    requestPlaySeek(frac * playDuration);
   }
 
   function subscribePlayEvents() {
@@ -1087,6 +1106,9 @@
     playStopPromise = stop;
     return stop.then(function () {
       setPlayStageError("");
+      playSeekTarget = 0;
+      playLastPos = 0;
+      playBufferEnd = 0;
       showPlayWait(false);
     });
   }
@@ -1107,6 +1129,8 @@
     if (els.playTime) els.playTime.textContent = "0:00 / 0:00";
     playDuration = 0;
     playBufferEnd = 0;
+    playSeekTarget = 0;
+    playLastPos = 0;
     playResumeHandled = false;
     playOverlayPlaying = false;
     setPlayToggleIcon(false);
@@ -3955,10 +3979,7 @@
     if (els.btnPlayReplay) {
       els.btnPlayReplay.addEventListener("click", function () {
         var app = goApp();
-        if (!app || typeof app.PlaySeek !== "function") return;
-        Promise.resolve(app.PlaySeek(0)).catch(function () {
-          /* ignore */
-        });
+        requestPlaySeek(0);
         wakePlayChrome();
       });
     }

@@ -326,10 +326,14 @@ func (a *App) StartPlay(req PlayRequest) error {
 		return nil
 	}
 
+	a.playPendingSeek = 0
+	a.playLastPos = 0
+	a.playLastEOF = false
 	if progSess != nil {
 		a.playSession = progSess
 		a.playBufferEnd = progSess.BufferedEnd()
 		a.playDurationHint = progSess.Duration()
+		a.playLastDur = progSess.Duration()
 	}
 
 	if a.playHost == nil {
@@ -454,7 +458,7 @@ func (a *App) PlayPause() error {
 
 // PlaySeek seeks the current file to seconds (absolute).
 // When a progressive session is active and sec is past the contiguous buffer,
-// workers are retargeted and mpv is not seeked until the prefix catches up.
+// workers are retargeted and the seek is stored until BufferEndSec catches up.
 func (a *App) PlaySeek(seconds float64) error {
 	a.playMu.Lock()
 	defer a.playMu.Unlock()
@@ -462,10 +466,33 @@ func (a *App) PlaySeek(seconds float64) error {
 		return missingPlayerErr()
 	}
 	if a.playSession != nil && seconds > a.playSession.BufferedEnd() {
+		a.playPendingSeek = seconds
 		a.playSession.SeekTarget(seconds)
 		return nil
 	}
+	a.playPendingSeek = 0
 	return a.playHost.Seek(seconds)
+}
+
+// applyPendingSeekLocked seeks mpv once the contiguous-from-0 buffer covers
+// playPendingSeek. Caller must hold playMu.
+func (a *App) applyPendingSeekLocked() {
+	if a.playHost == nil || a.playPendingSeek <= 0 {
+		return
+	}
+	buf := a.playBufferEnd
+	if a.playSession != nil {
+		buf = a.playSession.BufferedEnd()
+		a.playBufferEnd = buf
+	}
+	if buf < a.playPendingSeek {
+		return
+	}
+	if err := a.playHost.Seek(a.playPendingSeek); err != nil {
+		return
+	}
+	a.playLastPos = a.playPendingSeek
+	a.playPendingSeek = 0
 }
 
 // PlaySetVolume sets mpv volume to pct (0–100).
@@ -495,12 +522,6 @@ func (a *App) clearPlayLocked() error {
 		a.playSessionCancel()
 		a.playSessionCancel = nil
 	}
-	if a.playSession != nil {
-		_ = a.playSession.Close()
-		a.playSession = nil
-	}
-	a.playBufferEnd = 0
-	a.playDurationHint = 0
 	var err error
 	if a.playHost != nil {
 		_ = a.playHost.Pause(true)
@@ -510,6 +531,22 @@ func (a *App) clearPlayLocked() error {
 	if derr := a.destroyPlaySurfaceLocked(); derr != nil && err == nil {
 		err = derr
 	}
+	if a.playSession != nil {
+		cerr := a.playSession.Close()
+		a.playSession = nil
+		if cerr != nil {
+			a.logPlaySessionErr(cerr)
+			if err == nil {
+				err = cerr
+			}
+		}
+	}
+	a.playBufferEnd = 0
+	a.playDurationHint = 0
+	a.playPendingSeek = 0
+	a.playLastPos = 0
+	a.playLastDur = 0
+	a.playLastEOF = false
 	a.playPaused = true
 	a.playEpisodeID = ""
 	a.playLocale = ""
@@ -571,9 +608,19 @@ func (a *App) emitPlayState(wailsCtx context.Context, host MpvHost) {
 	if a.playDurationHint > dur {
 		dur = a.playDurationHint
 	}
+	a.applyPendingSeekLocked()
+	if p, perr := host.Position(); perr == nil {
+		pos = p
+	}
+	a.playLastPos = pos
+	a.playLastDur = dur
+	a.playLastEOF = eof
 	bufEnd := a.playBufferEnd
 	if a.playSession == nil {
 		bufEnd = dur
+	} else {
+		bufEnd = a.playSession.BufferedEnd()
+		a.playBufferEnd = bufEnd
 	}
 	payload := map[string]any{
 		"position":  pos,
@@ -661,23 +708,61 @@ func (a *App) onPlayProgress(p engine.PlayProgress) {
 		if p.DurationSec > a.playDurationHint {
 			a.playDurationHint = p.DurationSec
 		}
-		ctx := a.ctx
-		paused := a.playPaused
-		a.playMu.Unlock()
-		if ctx == nil {
-			return
+		a.applyPendingSeekLocked()
+		pos := a.playLastPos
+		dur := a.playLastDur
+		if a.playDurationHint > dur {
+			dur = a.playDurationHint
 		}
+		paused := a.playPaused
+		eof := a.playLastEOF
+		if a.playHost != nil {
+			if got, err := a.playHost.Position(); err == nil {
+				pos = got
+				a.playLastPos = got
+			}
+			if got, err := a.playHost.Duration(); err == nil && got > dur {
+				dur = got
+			}
+			if r, ok := a.playHost.(mpvStateReader); ok {
+				paused, eof = r.playFlags()
+				a.playPaused = paused
+				a.playLastEOF = eof
+			}
+		}
+		if p.DurationSec > dur {
+			dur = p.DurationSec
+		}
+		a.playLastDur = dur
+		ctx := a.ctx
 		payload := map[string]any{
-			"bufferEnd": p.BufferEndSec,
-			"duration":  p.DurationSec,
+			"position":  pos,
+			"duration":  dur,
 			"paused":    paused,
-			"eof":       false,
+			"eof":       eof,
+			"bufferEnd": a.playBufferEnd,
 		}
 		if p.Err != nil {
 			payload["error"] = p.Err.Error()
 		}
+		a.playMu.Unlock()
+		if ctx == nil {
+			return
+		}
 		wailsruntime.EventsEmit(ctx, "play-state", payload)
 	}()
+}
+
+func (a *App) logPlaySessionErr(err error) {
+	if err == nil || a.ctx == nil {
+		return
+	}
+	wailsruntime.EventsEmit(a.ctx, "progress", engine.ProgressEvent{
+		Phase:    engine.PhaseIdle,
+		Message:  "play session close: " + err.Error(),
+		Level:    "warn",
+		Fraction: -1,
+	})
 }
 
 func (a *App) logPlayheadErr(err error) {

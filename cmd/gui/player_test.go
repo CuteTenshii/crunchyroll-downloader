@@ -317,6 +317,9 @@ func TestPlaySeekRetargetsWhenAheadOfBuffer(t *testing.T) {
 	if h.pos != 1 {
 		t.Fatalf("mpv seeked to %v while past buffer", h.pos)
 	}
+	if a.playPendingSeek != 40 {
+		t.Fatalf("pending=%v want 40", a.playPendingSeek)
+	}
 
 	if err := a.PlaySeek(5); err != nil {
 		t.Fatal(err)
@@ -324,6 +327,91 @@ func TestPlaySeekRetargetsWhenAheadOfBuffer(t *testing.T) {
 	if h.pos != 5 {
 		t.Fatalf("mpv pos=%v want 5", h.pos)
 	}
+	if a.playPendingSeek != 0 {
+		t.Fatalf("pending=%v want 0 after in-buffer seek", a.playPendingSeek)
+	}
+}
+
+func TestPlaySeekPendingAppliedWhenBufferCatchesUp(t *testing.T) {
+	h := &scriptedHost{pos: 1, dur: 100}
+	sess := &fakePlaySess{end: 10}
+	a := NewApp()
+	a.playHost = h
+	a.playSession = sess
+	a.playLastPos = 1
+
+	if err := a.PlaySeek(40); err != nil {
+		t.Fatal(err)
+	}
+	if h.pos != 1 {
+		t.Fatalf("mpv seeked early to %v", h.pos)
+	}
+
+	sess.end = 40
+	a.onPlayProgress(engine.PlayProgress{BufferEndSec: 40, DurationSec: 100})
+
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		a.playMu.Lock()
+		pending := a.playPendingSeek
+		pos := h.pos
+		last := a.playLastPos
+		a.playMu.Unlock()
+		if pending == 0 && pos == 40 && last == 40 {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("pending=%v pos=%v last=%v want seek 40", a.playPendingSeek, h.pos, a.playLastPos)
+}
+
+func TestEmitPlayStateAppliesPendingSeek(t *testing.T) {
+	h := &scriptedHost{pos: 8, dur: 100}
+	sess := &fakePlaySess{end: 10}
+	a := NewApp()
+	a.playHost = h
+	a.playSession = sess
+	a.playLastPos = 8
+
+	if err := a.PlaySeek(40); err != nil {
+		t.Fatal(err)
+	}
+	sess.end = 41
+	a.emitPlayState(nil, h)
+	if h.pos != 40 {
+		t.Fatalf("mpv pos=%v want 40 after buffer catch-up", h.pos)
+	}
+	if a.playPendingSeek != 0 {
+		t.Fatalf("pending=%v want 0", a.playPendingSeek)
+	}
+	if a.playLastPos != 40 {
+		t.Fatalf("lastPos=%v want 40", a.playLastPos)
+	}
+}
+
+func TestOnPlayProgressKeepsLastPosition(t *testing.T) {
+	h := &scriptedHost{pos: 12.5, dur: 100, paused: false}
+	sess := &fakePlaySess{end: 20}
+	a := NewApp()
+	a.playHost = h
+	a.playSession = sess
+	a.playLastPos = 12.5
+	a.playPaused = false
+
+	a.onPlayProgress(engine.PlayProgress{BufferEndSec: 24, DurationSec: 100})
+
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		a.playMu.Lock()
+		last := a.playLastPos
+		buf := a.playBufferEnd
+		a.playMu.Unlock()
+		if last == 12.5 && buf == 24 {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("lastPos=%v bufferEnd=%v", a.playLastPos, a.playBufferEnd)
 }
 
 func TestStopPlayClosesProgressiveSession(t *testing.T) {
@@ -341,6 +429,50 @@ func TestStopPlayClosesProgressiveSession(t *testing.T) {
 	}
 	if a.playSession != nil {
 		t.Fatal("playSession still set")
+	}
+}
+
+type orderHost struct {
+	scriptedHost
+	order *[]string
+}
+
+func (o *orderHost) Destroy() error {
+	*o.order = append(*o.order, "destroy")
+	return o.scriptedHost.Destroy()
+}
+
+type orderSess struct {
+	fakePlaySess
+	order *[]string
+}
+
+func (o *orderSess) Close() error {
+	*o.order = append(*o.order, "close")
+	return o.fakePlaySess.Close()
+}
+
+func TestStopPlayDestroysHostBeforeSessionClose(t *testing.T) {
+	var order []string
+	h := &orderHost{order: &order}
+	sess := &orderSess{order: &order, fakePlaySess: fakePlaySess{end: 8}}
+	a := NewApp()
+	a.playHost = h
+	a.playGen = 1
+	a.playSession = sess
+	if err := a.StopPlay(); err != nil {
+		t.Fatal(err)
+	}
+	want := "destroy,close"
+	got := strings.Join(order, ",")
+	if got != want {
+		t.Fatalf("order=%q want %q", got, want)
+	}
+	if !sess.closed {
+		t.Fatal("session not closed")
+	}
+	if h.destroys != 1 {
+		t.Fatalf("destroys=%d", h.destroys)
 	}
 }
 
