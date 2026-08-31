@@ -89,6 +89,8 @@
 
   var prefsTimer = null;
   var progressUnsub = null;
+  var playIdleTimer = null;
+  var playOverlayPlaying = false;
   var els = {};
 
   function $(id) {
@@ -103,6 +105,15 @@
       inspect: $("btn-inspect"),
       download: $("btn-download"),
       downloadAdv: $("btn-download-adv"),
+      btnPlaySelected: $("btn-play-selected"),
+      playPage: $("page-play"),
+      btnPlayBack: $("btn-play-back"),
+      btnPlayToggle: $("btn-play-toggle"),
+      playTitle: $("play-title"),
+      playShow: $("play-show"),
+      playLock: $("play-lock"),
+      playTime: $("play-time"),
+      playStage: $("play-stage"),
       output: $("output-dir"),
       outputBtn: $("btn-output"),
       mediaHero: $("media-hero"),
@@ -738,6 +749,7 @@
   }
 
   function setShellPage(page) {
+    closePlayOverlay();
     var map = {
       home: { title: "Home", el: els.viewHome, nav: els.navHome },
       download: { title: "Downloads", el: els.pageDownload, nav: els.navDownload },
@@ -780,6 +792,90 @@
         /* leave user preference */
       }
     }
+  }
+
+  function isPlayOverlayOpen() {
+    return !!(els.playPage && !els.playPage.hidden);
+  }
+
+  function isTypingTarget(el) {
+    if (!el) return false;
+    var tag = el.tagName;
+    if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return true;
+    if (el.isContentEditable) return true;
+    return false;
+  }
+
+  function setPlayToggleIcon(playing) {
+    var icon = $("play-icon");
+    if (icon) {
+      icon.innerHTML = playing
+        ? '<path d="M6 5h4v14H6zm8 0h4v14h-4z"/>'
+        : '<path d="M8 5v14l11-7z"/>';
+    }
+    if (els.btnPlayToggle) {
+      var label = playing ? "Pause" : "Play";
+      els.btnPlayToggle.setAttribute("aria-label", label);
+      els.btnPlayToggle.title = label;
+    }
+  }
+
+  function wakePlayChrome() {
+    if (!els.playPage || els.playPage.hidden) return;
+    els.playPage.classList.remove("is-idle");
+    if (playIdleTimer) clearTimeout(playIdleTimer);
+    playIdleTimer = setTimeout(function () {
+      if (els.playPage && !els.playPage.hidden) {
+        els.playPage.classList.add("is-idle");
+      }
+    }, 2800);
+  }
+
+  function togglePlayOverlayIcon() {
+    if (!isPlayOverlayOpen()) return;
+    playOverlayPlaying = !playOverlayPlaying;
+    setPlayToggleIcon(playOverlayPlaying);
+    wakePlayChrome();
+  }
+
+  function closePlayOverlay() {
+    if (playIdleTimer) {
+      clearTimeout(playIdleTimer);
+      playIdleTimer = null;
+    }
+    playOverlayPlaying = false;
+    setPlayToggleIcon(false);
+    if (!els.playPage) return;
+    els.playPage.hidden = true;
+    els.playPage.classList.remove("is-idle");
+    els.playPage.setAttribute("aria-hidden", "true");
+  }
+
+  function playShowLabel(meta) {
+    var code =
+      "S" + pad2(meta && meta.seasonNumber) + "E" + pad2(meta && meta.episodeNumber);
+    var series = (meta && meta.seriesTitle) || "";
+    return series ? series + " · " + code : code;
+  }
+
+  function openPlayOverlay(meta) {
+    meta = meta || {};
+    if (!els.playPage) return;
+    if (els.playTitle) els.playTitle.textContent = meta.episodeTitle || "Untitled";
+    if (els.playShow) els.playShow.textContent = playShowLabel(meta);
+    if (els.playLock) els.playLock.textContent = "1080p locked";
+    if (els.playTime) els.playTime.textContent = "0:00 / 0:00";
+    playOverlayPlaying = false;
+    setPlayToggleIcon(false);
+    els.playPage.hidden = false;
+    els.playPage.setAttribute("aria-hidden", "false");
+    els.playPage.classList.remove("is-idle");
+    try {
+      els.playPage.focus();
+    } catch (e) {
+      /* ignore */
+    }
+    wakePlayChrome();
   }
 
   /** Extract episode content id from a /watch/{id}/… URL. */
@@ -3219,6 +3315,39 @@
     };
   }
 
+  function catalogEpisodeById(id) {
+    var eps = (state.catalog && state.catalog.Episodes) || [];
+    for (var i = 0; i < eps.length; i++) {
+      if ((eps[i].ID || eps[i].id) === id) return eps[i];
+    }
+    return null;
+  }
+
+  function onPlaySelected() {
+    if (!state.catalog || !state.catalog.Episodes || !state.catalog.Episodes.length) {
+      showBanner("Inspect a series or episode before playing.", "warn");
+      return;
+    }
+    var ids = selectedEpisodeIdsInCatalogOrder();
+    if (!ids.length) {
+      showBanner("Select at least one episode before playing.", "warn");
+      return;
+    }
+    var ep = catalogEpisodeById(ids[0]);
+    if (!ep) {
+      showBanner("Selected episode is not in the catalog.", "warn");
+      return;
+    }
+    openPlayOverlay({
+      seriesTitle:
+        ep.SeriesTitle || (state.catalog && state.catalog.DisplayTitle) || "",
+      episodeTitle: ep.Title || "Untitled",
+      seasonNumber: ep.SeasonNumber,
+      episodeNumber: ep.EpisodeNumber,
+      episodeId: ep.ID,
+    });
+  }
+
   async function onDownload() {
     clearBanner();
 
@@ -3545,10 +3674,29 @@
     });
     document.addEventListener("keydown", function (e) {
       if (e.key === "Escape") closeAccountMenu();
+      if (e.key !== " " && e.code !== "Space") return;
+      if (!isPlayOverlayOpen()) return;
+      if (isTypingTarget(document.activeElement)) return;
+      e.preventDefault();
+      togglePlayOverlayIcon();
     });
     if (els.outputBtn) els.outputBtn.addEventListener("click", onOutputBrowse);
     if (els.download) els.download.addEventListener("click", onDownload);
     if (els.downloadAdv) els.downloadAdv.addEventListener("click", onDownload);
+    if (els.btnPlaySelected) {
+      els.btnPlaySelected.addEventListener("click", onPlaySelected);
+    }
+    if (els.btnPlayBack) {
+      els.btnPlayBack.addEventListener("click", closePlayOverlay);
+    }
+    if (els.btnPlayToggle) {
+      els.btnPlayToggle.addEventListener("click", function () {
+        togglePlayOverlayIcon();
+      });
+    }
+    if (els.playPage) {
+      els.playPage.addEventListener("mousemove", wakePlayChrome);
+    }
     if (els.selectAll) {
       els.selectAll.addEventListener("click", onSelectAllEpisodes);
     }
