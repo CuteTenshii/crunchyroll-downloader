@@ -100,6 +100,9 @@
   var playEventsUnsub = null;
   var playCurrentMeta = null;
   var playCatalogGen = 0;
+  var playVolume = 100;
+  var playSpeed = 1;
+  var playVolDragging = false;
   var els = {};
 
   function $(id) {
@@ -131,7 +134,12 @@
       playBuf: $("play-buf"),
       playProg: $("play-prog"),
       playDot: $("play-dot"),
-      playVolRange: document.querySelector("#play-vol input[type=range]"),
+      playVolLabel: $("play-vol-label"),
+      playVolTrack: $("play-vol-track"),
+      playVolFill: $("play-vol-fill"),
+      playVolKnob: $("play-vol-knob"),
+      btnPlaySpeed: $("btn-play-speed"),
+      playSpeedMenu: $("play-speed-menu"),
       output: $("output-dir"),
       outputBtn: $("btn-output"),
       mediaHero: $("media-hero"),
@@ -955,8 +963,11 @@
       })
       .then(function () {
         layoutPlayStage();
+        applyPlayVolume(playVolume, true);
+        applyPlaySpeed(playSpeed);
       })
       .catch(function (err) {
+        showPlayWait(false);
         var msg = playErrText(err);
         if (msg.indexOf("player library missing") !== -1) {
           setPlayStageError(msg);
@@ -974,6 +985,57 @@
   function showPlayWait(on) {
     if (!els.playWait) return;
     els.playWait.hidden = !on;
+  }
+
+  function formatPlaySpeed(rate) {
+    if (rate === 1) return "1x";
+    var s = String(rate);
+    if (s.indexOf(".") === -1) return s + "x";
+    return s.replace(/0+$/, "").replace(/\.$/, "") + "x";
+  }
+
+  function setPlayVolumeUI(pct) {
+    pct = Math.max(0, Math.min(100, Number(pct) || 0));
+    playVolume = pct;
+    if (els.playVolLabel) els.playVolLabel.textContent = String(Math.round(pct));
+    if (els.playVolFill) els.playVolFill.style.height = pct + "%";
+    if (els.playVolKnob) els.playVolKnob.style.bottom = "calc(" + pct + "% - 6px)";
+    if (els.playVolTrack) els.playVolTrack.setAttribute("aria-valuenow", String(Math.round(pct)));
+  }
+
+  function volumePctFromEvent(e, track) {
+    var y = e.clientY;
+    if (e.touches && e.touches[0]) y = e.touches[0].clientY;
+    var r = track.getBoundingClientRect();
+    if (!r.height) return playVolume;
+    return Math.max(0, Math.min(100, ((r.bottom - y) / r.height) * 100));
+  }
+
+  function applyPlayVolume(pct, push) {
+    setPlayVolumeUI(pct);
+    if (!push) return;
+    var app = goApp();
+    if (!app || typeof app.PlaySetVolume !== "function") return;
+    Promise.resolve(app.PlaySetVolume(Math.round(playVolume))).catch(function () {
+      /* ignore */
+    });
+  }
+
+  function applyPlaySpeed(rate) {
+    playSpeed = rate;
+    if (els.btnPlaySpeed) els.btnPlaySpeed.textContent = formatPlaySpeed(rate);
+    var items = els.playSpeedMenu
+      ? els.playSpeedMenu.querySelectorAll(".play-speed-item")
+      : [];
+    for (var i = 0; i < items.length; i++) {
+      var on = Number(items[i].getAttribute("data-speed")) === rate;
+      items[i].classList.toggle("is-on", on);
+    }
+    var app = goApp();
+    if (!app || typeof app.PlaySetSpeed !== "function") return;
+    Promise.resolve(app.PlaySetSpeed(rate)).catch(function () {
+      /* ignore */
+    });
   }
 
   function applyPlayState(ev) {
@@ -1015,6 +1077,8 @@
       var bufReady = playBufferEnd >= playSeekTarget - 0.05;
       var nearSeek = Math.abs(pos - playSeekTarget) <= 0.5;
       if (bufReady || nearSeek) showPlayWait(false);
+    } else if (dur > 0 || (hasPos && pos > 0)) {
+      showPlayWait(false);
     }
     playOverlayPlaying = !paused && !eof;
     setPlayToggleIcon(playOverlayPlaying);
@@ -1161,7 +1225,7 @@
     playOverlayPlaying = false;
     setPlayToggleIcon(false);
     if (els.playBuf) els.playBuf.style.width = "0%";
-    showPlayWait(false);
+    showPlayWait(true);
     if (els.playProg) els.playProg.style.width = "0%";
     if (els.playDot) els.playDot.style.left = "0%";
     els.playPage.hidden = false;
@@ -1276,7 +1340,7 @@
         updatePlayNextButton();
       });
     }
-    openPlayOverlay(cardMeta, { start: false });
+    openPlayOverlay(cardMeta);
     return loadSeriesCatalogForPlay(target, epId, cardMeta, gen);
   }
 
@@ -1305,14 +1369,10 @@
         renderSeasons();
         renderSeasonHeading();
         renderEpisodes();
-        openPlayOverlay(playMetaFromCatalogEpisode(ep, { filePath: "" }));
-      } else {
-        openPlayOverlay(cardMeta);
       }
     } catch (err) {
       if (gen !== playCatalogGen) return;
       logLine("Play catalog: " + errMessage(err), "warn");
-      openPlayOverlay(cardMeta);
     }
     updatePlayNextButton();
   }
@@ -4196,17 +4256,45 @@
     if (els.playTimeline) {
       els.playTimeline.addEventListener("click", seekPlayFromTimeline);
     }
-    if (els.playVolRange) {
-      els.playVolRange.addEventListener("input", function () {
-        var pct = parseInt(els.playVolRange.value, 10);
-        if (isNaN(pct)) pct = 0;
-        var label = els.playVolRange.previousElementSibling;
-        if (label && label.tagName === "SPAN") label.textContent = String(pct);
-        var app = goApp();
-        if (!app || typeof app.PlaySetVolume !== "function") return;
-        Promise.resolve(app.PlaySetVolume(pct)).catch(function () {
-          /* ignore */
-        });
+    if (els.playVolTrack) {
+      var onVolMove = function (e) {
+        if (!playVolDragging) return;
+        e.preventDefault();
+        var pt = e.touches ? e.touches[0] || e.changedTouches[0] : e;
+        applyPlayVolume(volumePctFromEvent(pt, els.playVolTrack), true);
+      };
+      var onVolUp = function () {
+        playVolDragging = false;
+        window.removeEventListener("pointermove", onVolMove);
+        window.removeEventListener("pointerup", onVolUp);
+        window.removeEventListener("touchmove", onVolMove);
+        window.removeEventListener("touchend", onVolUp);
+      };
+      els.playVolTrack.addEventListener("pointerdown", function (e) {
+        playVolDragging = true;
+        applyPlayVolume(volumePctFromEvent(e, els.playVolTrack), true);
+        window.addEventListener("pointermove", onVolMove);
+        window.addEventListener("pointerup", onVolUp);
+      });
+      els.playVolTrack.addEventListener("keydown", function (e) {
+        var next = playVolume;
+        if (e.key === "ArrowUp" || e.key === "ArrowRight") next += 5;
+        else if (e.key === "ArrowDown" || e.key === "ArrowLeft") next -= 5;
+        else if (e.key === "Home") next = 100;
+        else if (e.key === "End") next = 0;
+        else return;
+        e.preventDefault();
+        applyPlayVolume(next, true);
+      });
+      setPlayVolumeUI(playVolume);
+    }
+    if (els.playSpeedMenu) {
+      els.playSpeedMenu.addEventListener("click", function (e) {
+        var btn = e.target.closest ? e.target.closest(".play-speed-item") : null;
+        if (!btn) return;
+        e.preventDefault();
+        applyPlaySpeed(Number(btn.getAttribute("data-speed")) || 1);
+        wakePlayChrome();
       });
     }
     if (els.playPage) {

@@ -86,6 +86,7 @@ func (c *countingHost) Seek(float64) error         { return nil }
 func (c *countingHost) Position() (float64, error) { return 0, nil }
 func (c *countingHost) Duration() (float64, error) { return 0, nil }
 func (c *countingHost) SetVolume(int) error        { return nil }
+func (c *countingHost) SetSpeed(float64) error     { return nil }
 func (c *countingHost) Destroy() error {
 	c.destroys++
 	return nil
@@ -170,6 +171,7 @@ func (s *scriptedHost) Seek(seconds float64) error { s.pos = seconds; return nil
 func (s *scriptedHost) Position() (float64, error) { return s.pos, nil }
 func (s *scriptedHost) Duration() (float64, error) { return s.dur, nil }
 func (s *scriptedHost) SetVolume(int) error        { return nil }
+func (s *scriptedHost) SetSpeed(float64) error     { return nil }
 func (s *scriptedHost) Destroy() error             { s.destroys++; return nil }
 func (s *scriptedHost) playFlags() (paused, eof bool) {
 	return s.paused, s.eof

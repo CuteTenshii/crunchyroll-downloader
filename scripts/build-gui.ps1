@@ -17,6 +17,14 @@ if (Test-Path $goBin) {
 $root = Split-Path -Parent $PSScriptRoot
 Set-Location $root
 
+$fetch = Join-Path $PSScriptRoot "fetch-libmpv.ps1"
+if (Test-Path $fetch) {
+    & $fetch
+    if ($LASTEXITCODE -ne 0) {
+        Write-Warning "libmpv fetch failed; Play will show 'player library missing' until libmpv-2.dll is next to the exe"
+    }
+}
+
 Write-Host "Building GUI -> $Out (tags: desktop,production)"
 go build -tags "desktop,production" -ldflags "-w -s -H windowsgui" -o $Out ./cmd/gui
 if ($LASTEXITCODE -ne 0) {

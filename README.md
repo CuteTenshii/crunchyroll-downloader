@@ -206,7 +206,7 @@ Use **Cookie** for a one-off path, or save it as a named cookie profile from Acc
 
 Play opens an **in-window cinema overlay** (libmpv) inside this app. It is not a second player window and does not wrap crunchyroll.com.
 
-1. Place `libmpv-2.dll` next to the GUI executable
+1. Place `libmpv-2.dll` next to the GUI executable (or run `.\scripts\fetch-libmpv.ps1`, which the GUI build script also calls)
 2. From **Home → Continue Watching**, use **Play** to start the episode (progressive download if no completed MKV is on disk). Clicking the rest of the card still **Inspects** for Download
 3. From **Downloads**, **Play** uses the selected episode
 4. Quality is **forced** — the same representation pick as download. Never ABR

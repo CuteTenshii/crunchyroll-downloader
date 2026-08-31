@@ -312,7 +312,20 @@ func (h *windowsMpvHost) SetVolume(percent int) error {
 		percent = 100
 	}
 	v := float64(percent)
-	return h.setPropertyLocked("volume", mpvFormatDouble, unsafe.Pointer(&v))
+	err := h.setPropertyLocked("volume", mpvFormatDouble, unsafe.Pointer(&v))
+	runtime.KeepAlive(v)
+	return err
+}
+
+func (h *windowsMpvHost) SetSpeed(rate float64) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if rate <= 0 {
+		rate = 1
+	}
+	err := h.setPropertyLocked("speed", mpvFormatDouble, unsafe.Pointer(&rate))
+	runtime.KeepAlive(rate)
+	return err
 }
 
 func (h *windowsMpvHost) Destroy() error {

@@ -25,6 +25,7 @@ type MpvHost interface {
 	Position() (float64, error)
 	Duration() (float64, error)
 	SetVolume(percent int) error
+	SetSpeed(rate float64) error
 	Destroy() error
 }
 
@@ -108,6 +109,7 @@ func (missingMpvHost) Seek(float64) error         { return missingPlayerErr() }
 func (missingMpvHost) Position() (float64, error) { return 0, missingPlayerErr() }
 func (missingMpvHost) Duration() (float64, error) { return 0, missingPlayerErr() }
 func (missingMpvHost) SetVolume(int) error        { return missingPlayerErr() }
+func (missingMpvHost) SetSpeed(float64) error     { return missingPlayerErr() }
 func (missingMpvHost) Destroy() error             { return nil }
 func (missingMpvHost) playFlags() (paused, eof bool) {
 	return true, false
@@ -516,6 +518,19 @@ func (a *App) PlaySetVolume(pct int) error {
 		return missingPlayerErr()
 	}
 	return a.playHost.SetVolume(pct)
+}
+
+// PlaySetSpeed sets mpv playback rate (1 = normal).
+func (a *App) PlaySetSpeed(rate float64) error {
+	a.playMu.Lock()
+	defer a.playMu.Unlock()
+	if a.playHost == nil {
+		return missingPlayerErr()
+	}
+	if rate <= 0 {
+		rate = 1
+	}
+	return a.playHost.SetSpeed(rate)
 }
 
 // PlayLayout moves the child HWND to the CSS-pixel play-stage rect.

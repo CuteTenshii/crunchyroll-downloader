@@ -44,13 +44,13 @@ func TestPlayBufferReadyThreshold(t *testing.T) {
 	if playBufferReady(0, 0) {
 		t.Fatal("empty buffer is not ready")
 	}
-	if !playBufferReady(4, 1) {
-		t.Fatal("4s contiguous is ready")
+	if !playBufferReady(0.5, 0) {
+		t.Fatal("0.5s contiguous is ready")
 	}
-	if !playBufferReady(3.9, 3) {
-		t.Fatal("3 media segments is ready")
+	if !playBufferReady(0.1, 1) {
+		t.Fatal("first media segment is ready")
 	}
-	if playBufferReady(3.9, 2) {
+	if playBufferReady(0.4, 0) {
 		t.Fatal("under both thresholds is not ready")
 	}
 }

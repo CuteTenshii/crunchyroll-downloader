@@ -15,8 +15,8 @@ import (
 )
 
 const (
-	playReadySeconds  = 4.0
-	playReadySegments = 3
+	playReadySeconds  = 0.5
+	playReadySegments = 1
 	playingFileName   = "playing.mp4"
 	audioFileName     = "audio.mp4"
 	initFileName      = "init.mp4"
@@ -25,7 +25,7 @@ const (
 )
 
 // PlayProgress is emitted as the progressive buffer grows. Ready is set once
-// when BufferEndSec >= 4s or 3 contiguous media segments are present.
+// when BufferEndSec >= 0.5s or the first contiguous media segment is present.
 type PlayProgress struct {
 	BufferEndSec float64
 	DurationSec  float64

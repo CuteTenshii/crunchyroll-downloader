@@ -2967,15 +2967,95 @@ textarea.cr-input {
 
 #page-play .play-vol-pop span {
   font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  min-width: 2em;
+  text-align: center;
 }
 
-#page-play .play-vol-pop input[type="range"] {
-  -webkit-appearance: none;
-  appearance: none;
+#page-play .play-vol-track {
+  position: relative;
+  width: 18px;
+  height: 88px;
+  cursor: pointer;
+  touch-action: none;
+}
+
+#page-play .play-vol-track::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 0;
+  bottom: 0;
   width: 4px;
-  height: 72px;
-  background: linear-gradient(to top, #ff6b00 95%, rgba(255, 255, 255, 0.25) 95%);
+  margin-left: -2px;
   border-radius: 4px;
+  background: rgba(255, 255, 255, 0.25);
+}
+
+#page-play .play-vol-fill {
+  position: absolute;
+  left: 50%;
+  bottom: 0;
+  width: 4px;
+  height: 100%;
+  margin-left: -2px;
+  border-radius: 4px;
+  background: #ff6b00;
+  pointer-events: none;
+}
+
+#page-play .play-vol-knob {
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% - 6px);
+  width: 12px;
+  height: 12px;
+  margin-left: -6px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.35);
+  pointer-events: none;
+}
+
+#page-play .play-speed-wrap {
+  position: relative;
+}
+
+#page-play .play-speed-menu {
+  position: absolute;
+  right: 0;
+  bottom: 36px;
+  display: none;
+  flex-direction: column;
+  min-width: 72px;
+  padding: 6px;
+  background: rgba(20, 20, 20, 0.94);
+  border-radius: 8px;
+  z-index: 2;
+}
+
+#page-play .play-speed-wrap:hover .play-speed-menu,
+#page-play .play-speed-wrap:focus-within .play-speed-menu {
+  display: flex;
+}
+
+#page-play .play-speed-item {
+  background: none;
+  border: 0;
+  color: #fff;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+  text-align: left;
+  padding: 6px 8px;
+  border-radius: 6px;
+  opacity: 0.85;
+}
+
+#page-play .play-speed-item:hover,
+#page-play .play-speed-item.is-on {
+  background: rgba(255, 107, 0, 0.22);
+  opacity: 1;
 }
 
 #page-play .play-time {

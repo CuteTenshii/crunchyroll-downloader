@@ -20,6 +20,9 @@ crunchyroll-downloader-gui.exe
 *.exe
 cmd/gui/build/
 gui.exe
+libmpv-2.dll
+libmpv*.dll
+.tmp-libmpv/
 
 crunchyroll-downloader.m*
 crunchyroll-downloader.media*
