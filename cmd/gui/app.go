@@ -31,6 +31,13 @@ type App struct {
 	playChild  uintptr
 	playPaused bool
 	playGen    uint64
+
+	playEpisodeID string
+	playLocale    string
+	playAudioLang string
+	playAccountID string
+	playDebounce  *engine.PlayheadDebouncer
+	playEOFPosted bool
 }
 
 // NewApp constructs an empty App; prefs load on startup.

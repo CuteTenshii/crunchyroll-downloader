@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestPlayheadPOSTBody(t *testing.T) {
@@ -133,5 +134,48 @@ func TestPlayheadPOSTNegativeClampedToZero(t *testing.T) {
 	}
 	if got.Playhead != 0 {
 		t.Fatalf("playhead %v, want 0", got.Playhead)
+	}
+}
+
+func TestPlayheadDebounceSameSecond(t *testing.T) {
+	d := NewPlayheadDebouncer(time.Second)
+	if !d.ShouldPost("id", 10) {
+		t.Fatal("first should post")
+	}
+	if d.ShouldPost("id", 10) {
+		t.Fatal("duplicate within window")
+	}
+}
+
+func TestPlayheadDebounceDifferentSecond(t *testing.T) {
+	d := NewPlayheadDebouncer(time.Second)
+	if !d.ShouldPost("id", 10) {
+		t.Fatal("first should post")
+	}
+	if !d.ShouldPost("id", 11) {
+		t.Fatal("different second should post")
+	}
+}
+
+func TestPlayheadDebounceAfterWindow(t *testing.T) {
+	now := time.Unix(1_000, 0)
+	d := NewPlayheadDebouncer(time.Second)
+	d.now = func() time.Time { return now }
+	if !d.ShouldPost("id", 10) {
+		t.Fatal("first should post")
+	}
+	now = now.Add(time.Second)
+	if !d.ShouldPost("id", 10) {
+		t.Fatal("after window expires should post again")
+	}
+}
+
+func TestPlayheadDebounceDifferentContentID(t *testing.T) {
+	d := NewPlayheadDebouncer(time.Second)
+	if !d.ShouldPost("id", 10) {
+		t.Fatal("first should post")
+	}
+	if !d.ShouldPost("other", 10) {
+		t.Fatal("different content id should post")
 	}
 }

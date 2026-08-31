@@ -92,6 +92,9 @@
   var playIdleTimer = null;
   var playOverlayPlaying = false;
   var playStopPromise = Promise.resolve();
+  var playDuration = 0;
+  var playResumeHandled = false;
+  var playEventsUnsub = null;
   var els = {};
 
   function $(id) {
@@ -110,12 +113,18 @@
       playPage: $("page-play"),
       btnPlayBack: $("btn-play-back"),
       btnPlayToggle: $("btn-play-toggle"),
+      btnPlayReplay: $("btn-play-replay"),
       playTitle: $("play-title"),
       playShow: $("play-show"),
       playLock: $("play-lock"),
       playTime: $("play-time"),
       playStage: $("play-stage"),
       playError: $("play-error"),
+      playTimeline: $("play-timeline"),
+      playBuf: $("play-buf"),
+      playProg: $("play-prog"),
+      playDot: $("play-dot"),
+      playVolRange: document.querySelector("#play-vol input[type=range]"),
       output: $("output-dir"),
       outputBtn: $("btn-output"),
       mediaHero: $("media-hero"),
@@ -236,6 +245,37 @@
   function pad2(n) {
     var v = Number(n) || 0;
     return v < 10 ? "0" + v : String(v);
+  }
+
+  function formatPlayClock(sec) {
+    sec = Math.max(0, Math.floor(Number(sec) || 0));
+    var h = Math.floor(sec / 3600);
+    var m = Math.floor((sec % 3600) / 60);
+    var s = sec % 60;
+    var ss = pad2(s);
+    if (h > 0) return h + ":" + pad2(m) + ":" + ss;
+    return m + ":" + ss;
+  }
+
+  function firstSelectedAudioLang() {
+    var keys = Object.keys(state.selectedAudio || {}).filter(function (k) {
+      return state.selectedAudio[k];
+    });
+    return keys[0] || "ja-JP";
+  }
+
+  function buildPlayRequest(meta) {
+    meta = meta || {};
+    return {
+      episodeId: meta.episodeId || meta.episodeID || "",
+      seriesTitle: meta.seriesTitle || "",
+      episodeTitle: meta.episodeTitle || "",
+      seasonNumber: Number(meta.seasonNumber) || 0,
+      episodeNumber: Number(meta.episodeNumber) || 0,
+      filePath: meta.filePath || "",
+      audioLang: meta.audioLang || firstSelectedAudioLang(),
+      locale: meta.locale || state.locale || "pt-BR",
+    };
   }
 
   function epCode(ep) {
@@ -835,9 +875,17 @@
 
   function togglePlayOverlayIcon() {
     if (!isPlayOverlayOpen()) return;
+    wakePlayChrome();
+    var app = goApp();
+    if (app && typeof app.PlayPause === "function") {
+      Promise.resolve(app.PlayPause()).catch(function (err) {
+        var msg = playErrText(err);
+        if (msg) logLine("Play pause: " + msg, "warn");
+      });
+      return;
+    }
     playOverlayPlaying = !playOverlayPlaying;
     setPlayToggleIcon(playOverlayPlaying);
-    wakePlayChrome();
   }
 
   function playErrText(err) {
@@ -873,19 +921,20 @@
     }
   }
 
-  function startPlaySurface() {
+  function startPlaySurface(req) {
     var app = goApp();
     if (!app || typeof app.StartPlay !== "function") {
       setPlayStageError("player library missing");
       return Promise.resolve();
     }
+    req = req || {};
     return Promise.resolve(playStopPromise)
       .catch(function () {
         /* ignore in-flight stop errors */
       })
       .then(function () {
         layoutPlayStage();
-        return Promise.resolve(app.StartPlay(""));
+        return Promise.resolve(app.StartPlay(req));
       })
       .then(function () {
         layoutPlayStage();
@@ -894,12 +943,102 @@
         var msg = playErrText(err);
         if (msg.indexOf("player library missing") !== -1) {
           setPlayStageError(msg);
+        } else if (msg.indexOf("no local file") !== -1) {
+          setPlayStageError(msg);
+          showBanner(msg, "warn");
         } else if (msg) {
           setPlayStageError(msg);
         } else {
           setPlayStageError("player library missing");
         }
       });
+  }
+
+  function applyPlayState(ev) {
+    if (!ev || typeof ev !== "object") return;
+    var pos = Number(ev.position != null ? ev.position : ev.Position) || 0;
+    var dur = Number(ev.duration != null ? ev.duration : ev.Duration) || 0;
+    var paused = !!(ev.paused != null ? ev.paused : ev.Paused);
+    var eof = !!(ev.eof != null ? ev.eof : ev.Eof);
+    playDuration = dur;
+    if (els.playTime) {
+      els.playTime.textContent = formatPlayClock(pos) + " / " + formatPlayClock(dur);
+    }
+    var pct = dur > 0 ? Math.max(0, Math.min(100, (pos / dur) * 100)) : 0;
+    if (els.playProg) els.playProg.style.width = pct + "%";
+    if (els.playDot) els.playDot.style.left = pct + "%";
+    if (els.playBuf) els.playBuf.style.width = "100%";
+    playOverlayPlaying = !paused && !eof;
+    setPlayToggleIcon(playOverlayPlaying);
+  }
+
+  function onPlayReadyEvent(ev) {
+    if (playResumeHandled) return;
+    var sec = 0;
+    if (ev && typeof ev === "object") {
+      sec = Number(ev.resumeSeconds != null ? ev.resumeSeconds : ev.ResumeSeconds) || 0;
+    }
+    if (!(sec > 0)) {
+      playResumeHandled = true;
+      return;
+    }
+    playResumeHandled = true;
+    var ok = window.confirm("Resume from " + formatPlayClock(sec) + "?");
+    var app = goApp();
+    if (!app || typeof app.PlaySeek !== "function") return;
+    Promise.resolve(app.PlaySeek(ok ? sec : 0)).catch(function () {
+      /* ignore */
+    });
+  }
+
+  function seekPlayFromTimeline(e) {
+    if (!els.playTimeline || playDuration <= 0) return;
+    var rect = els.playTimeline.getBoundingClientRect();
+    if (rect.width <= 0) return;
+    var frac = (e.clientX - rect.left) / rect.width;
+    frac = Math.max(0, Math.min(1, frac));
+    var app = goApp();
+    if (!app || typeof app.PlaySeek !== "function") return;
+    Promise.resolve(app.PlaySeek(frac * playDuration)).catch(function () {
+      /* ignore */
+    });
+  }
+
+  function subscribePlayEvents() {
+    if (playEventsUnsub) return;
+    try {
+      if (window.runtime && typeof window.runtime.EventsOn === "function") {
+        var offState = window.runtime.EventsOn("play-state", applyPlayState);
+        var offReady = window.runtime.EventsOn("play-ready", onPlayReadyEvent);
+        playEventsUnsub = function () {
+          try {
+            if (typeof offState === "function") offState();
+          } catch (e1) {
+            /* ignore */
+          }
+          try {
+            if (typeof offReady === "function") offReady();
+          } catch (e2) {
+            /* ignore */
+          }
+        };
+        return;
+      }
+    } catch (e) {
+      /* ignore */
+    }
+    setTimeout(function () {
+      if (playEventsUnsub) return;
+      try {
+        if (window.runtime && typeof window.runtime.EventsOn === "function") {
+          window.runtime.EventsOn("play-state", applyPlayState);
+          window.runtime.EventsOn("play-ready", onPlayReadyEvent);
+          playEventsUnsub = function () {};
+        }
+      } catch (e2) {
+        /* ignore */
+      }
+    }, 250);
   }
 
   function closePlayOverlay() {
@@ -941,8 +1080,13 @@
     if (els.playShow) els.playShow.textContent = playShowLabel(meta);
     if (els.playLock) els.playLock.textContent = "1080p locked";
     if (els.playTime) els.playTime.textContent = "0:00 / 0:00";
+    playDuration = 0;
+    playResumeHandled = false;
     playOverlayPlaying = false;
     setPlayToggleIcon(false);
+    if (els.playBuf) els.playBuf.style.width = "100%";
+    if (els.playProg) els.playProg.style.width = "0%";
+    if (els.playDot) els.playDot.style.left = "0%";
     els.playPage.hidden = false;
     els.playPage.setAttribute("aria-hidden", "false");
     els.playPage.classList.remove("is-idle");
@@ -954,7 +1098,7 @@
     setPlayStageError("");
     wakePlayChrome();
     requestAnimationFrame(function () {
-      startPlaySurface();
+      startPlaySurface(buildPlayRequest(meta));
     });
   }
 
@@ -3420,11 +3564,17 @@
     }
     openPlayOverlay({
       seriesTitle:
-        ep.SeriesTitle || (state.catalog && state.catalog.DisplayTitle) || "",
-      episodeTitle: ep.Title || "Untitled",
-      seasonNumber: ep.SeasonNumber,
-      episodeNumber: ep.EpisodeNumber,
-      episodeId: ep.ID,
+        ep.SeriesTitle ||
+        ep.seriesTitle ||
+        (state.catalog && state.catalog.DisplayTitle) ||
+        "",
+      episodeTitle: ep.Title || ep.title || "Untitled",
+      seasonNumber: ep.SeasonNumber || ep.seasonNumber,
+      episodeNumber: ep.EpisodeNumber || ep.episodeNumber,
+      episodeId: ep.ID || ep.id,
+      filePath: "",
+      audioLang: firstSelectedAudioLang(),
+      locale: state.locale || "pt-BR",
     });
   }
 
@@ -3775,6 +3925,32 @@
         togglePlayOverlayIcon();
       });
     }
+    if (els.btnPlayReplay) {
+      els.btnPlayReplay.addEventListener("click", function () {
+        var app = goApp();
+        if (!app || typeof app.PlaySeek !== "function") return;
+        Promise.resolve(app.PlaySeek(0)).catch(function () {
+          /* ignore */
+        });
+        wakePlayChrome();
+      });
+    }
+    if (els.playTimeline) {
+      els.playTimeline.addEventListener("click", seekPlayFromTimeline);
+    }
+    if (els.playVolRange) {
+      els.playVolRange.addEventListener("input", function () {
+        var pct = parseInt(els.playVolRange.value, 10);
+        if (isNaN(pct)) pct = 0;
+        var label = els.playVolRange.previousElementSibling;
+        if (label && label.tagName === "SPAN") label.textContent = String(pct);
+        var app = goApp();
+        if (!app || typeof app.PlaySetVolume !== "function") return;
+        Promise.resolve(app.PlaySetVolume(pct)).catch(function () {
+          /* ignore */
+        });
+      });
+    }
     if (els.playPage) {
       els.playPage.addEventListener("mousemove", wakePlayChrome);
     }
@@ -3888,6 +4064,7 @@
     setMode("normal");
     setShellPage("home");
     subscribeProgress();
+    subscribePlayEvents();
     await loadPreferences();
     updateAccountChrome();
     // After prefs (cookie path), load Discover if still on Home.

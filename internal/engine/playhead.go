@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
+	"time"
 )
 
 const playFinishRatio = 0.95
@@ -82,4 +84,45 @@ func PostPlayheadWithBase(base, accountID, contentID string, playheadSec float64
 
 func GetPlayheads(accountID string, contentIDs []string) (map[string]PlayheadInfo, error) {
 	return fetchPlayheads(accountID, contentIDs)
+}
+
+// PlayheadDebouncer skips a duplicate playhead POST for the same content id
+// and whole second within window (default 1s).
+type PlayheadDebouncer struct {
+	window  time.Duration
+	now     func() time.Time
+	mu      sync.Mutex
+	lastID  string
+	lastSec int64
+	lastAt  time.Time
+}
+
+func NewPlayheadDebouncer(window time.Duration) *PlayheadDebouncer {
+	if window <= 0 {
+		window = time.Second
+	}
+	return &PlayheadDebouncer{
+		window: window,
+		now:    time.Now,
+	}
+}
+
+func (d *PlayheadDebouncer) ShouldPost(contentID string, seconds float64) bool {
+	if d == nil {
+		return true
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.now == nil {
+		d.now = time.Now
+	}
+	now := d.now()
+	sec := int64(seconds)
+	if d.lastID == contentID && d.lastSec == sec && !d.lastAt.IsZero() && now.Sub(d.lastAt) < d.window {
+		return false
+	}
+	d.lastID = contentID
+	d.lastSec = sec
+	d.lastAt = now
+	return true
 }

@@ -17,7 +17,7 @@ func TestStubNewMpvHost(t *testing.T) {
 	}
 
 	a := NewApp()
-	if err := a.StartPlay(""); !libmpvError(err) {
+	if err := a.StartPlay(PlayRequest{}); !libmpvError(err) {
 		t.Fatalf("StartPlay: %v", err)
 	}
 }
