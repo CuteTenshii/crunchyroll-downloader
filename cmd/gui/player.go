@@ -282,7 +282,7 @@ func (a *App) StartPlay(req PlayRequest) error {
 				cfg := runtimeConfigFromPrefs(prefs)
 				pctx, pcancel := context.WithCancel(context.Background())
 				a.playMu.Lock()
-				if a.playAbandoned >= mine {
+				if a.playGen != mine || a.playAbandoned >= mine {
 					a.playMu.Unlock()
 					pcancel()
 					commitPrev()
@@ -300,7 +300,9 @@ func (a *App) StartPlay(req PlayRequest) error {
 					}
 					pcancel()
 					a.playMu.Lock()
-					a.playSessionCancel = nil
+					if a.playGen == mine {
+						a.playSessionCancel = nil
+					}
 					a.playMu.Unlock()
 					commitPrev()
 					return nil
@@ -308,7 +310,7 @@ func (a *App) StartPlay(req PlayRequest) error {
 				if perr != nil {
 					pcancel()
 					a.playMu.Lock()
-					if a.playSessionCancel != nil {
+					if a.playGen == mine {
 						a.playSessionCancel = nil
 					}
 					a.playMu.Unlock()
@@ -330,7 +332,7 @@ func (a *App) StartPlay(req PlayRequest) error {
 	}
 
 	a.playMu.Lock()
-	if a.playAbandoned >= mine {
+	if a.playGen != mine || a.playAbandoned >= mine {
 		a.playMu.Unlock()
 		if progSess != nil {
 			_ = progSess.Close()
@@ -409,7 +411,7 @@ func (a *App) StartPlay(req PlayRequest) error {
 
 func (a *App) playAbandonedLocked(mine uint64) bool {
 	a.playMu.Lock()
-	ok := a.playAbandoned >= mine
+	ok := a.playGen != mine || a.playAbandoned >= mine
 	a.playMu.Unlock()
 	return ok
 }

@@ -950,3 +950,83 @@ func TestStopPlayAbandonsInFlightStartPlay(t *testing.T) {
 		t.Fatalf("posts=%d", n)
 	}
 }
+
+func TestStaleStartPlayDoesNotReplaceNewerSession(t *testing.T) {
+	stubPlayheadNetwork(t)
+	dir1 := t.TempDir()
+	dir2 := t.TempDir()
+	for _, dir := range []string{dir1, dir2} {
+		if err := os.WriteFile(filepath.Join(dir, "playing.mp4"), []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	sess1 := &engine.PlaySession{EpisodeID: "old", Dir: dir1, BufferEndSec: 4}
+	sess2 := &engine.PlaySession{EpisodeID: "new", Dir: dir2, BufferEndSec: 6}
+
+	started := make(chan struct{})
+	release := make(chan struct{})
+	origProg := startProgressivePlay
+	startProgressivePlay = func(ctx context.Context, episodeID string, cfg engine.RuntimeConfig, emit func(engine.PlayProgress)) (*engine.PlaySession, error) {
+		if episodeID == "old" {
+			close(started)
+			<-release
+			return sess1, nil
+		}
+		return sess2, nil
+	}
+	t.Cleanup(func() { startProgressivePlay = origProg })
+
+	origFactory := mpvHostFactory
+	mpvHostFactory = func() (MpvHost, error) { return &scriptedHost{}, nil }
+	t.Cleanup(func() { mpvHostFactory = origFactory })
+
+	a := NewApp()
+	a.prefs.CookieFile = "cookie.txt"
+	a.prefs.OutputDir = t.TempDir()
+
+	err1 := make(chan error, 1)
+	go func() {
+		err1 <- a.StartPlay(PlayRequest{
+			EpisodeID:     "old",
+			SeriesTitle:   "Show",
+			SeasonNumber:  1,
+			EpisodeNumber: 1,
+		})
+	}()
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("first StartPlay did not reach progressive")
+	}
+
+	err2 := a.StartPlay(PlayRequest{
+		EpisodeID:     "new",
+		SeriesTitle:   "Show",
+		SeasonNumber:  1,
+		EpisodeNumber: 2,
+	})
+	if err2 != nil && !libmpvError(err2) {
+		t.Fatalf("newer StartPlay: %v", err2)
+	}
+	newer := a.playSession
+
+	close(release)
+	select {
+	case err := <-err1:
+		if err != nil {
+			t.Fatalf("stale StartPlay: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("stale StartPlay did not return")
+	}
+
+	if a.playSession == sess1 {
+		t.Fatal("stale StartPlay replaced newer playSession")
+	}
+	if a.playSession != newer {
+		t.Fatal("newer playSession changed after stale StartPlay returned")
+	}
+	if _, err := os.Stat(dir1); !os.IsNotExist(err) {
+		t.Fatalf("stale session dir still present: %v", err)
+	}
+}
