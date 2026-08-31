@@ -13,21 +13,50 @@ func TestPlayheadPOSTBody(t *testing.T) {
 		ContentID string  `json:"content_id"`
 		Playhead  float64 `json:"playhead"`
 	}
+	var method, path, locale, audio, auth, contentType, userAgent string
+	var decodeErr error
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			t.Fatalf("method %s", r.Method)
-		}
-		if !strings.Contains(r.URL.Path, "/playheads") {
-			t.Fatalf("path %s", r.URL.Path)
-		}
-		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
-			t.Fatal(err)
-		}
+		method = r.Method
+		path = r.URL.Path
+		locale = r.URL.Query().Get("locale")
+		audio = r.URL.Query().Get("preferred_audio_language")
+		auth = r.Header.Get("Authorization")
+		contentType = r.Header.Get("Content-Type")
+		userAgent = r.Header.Get("User-Agent")
+		decodeErr = json.NewDecoder(r.Body).Decode(&got)
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer srv.Close()
+	oldToken := token
+	token = "test-token"
+	defer func() { token = oldToken }()
 	if err := PostPlayheadWithBase(srv.URL, "acct", "GWep", 372.5, "pt-BR", "ja-JP"); err != nil {
 		t.Fatal(err)
+	}
+	if method != http.MethodPost {
+		t.Fatalf("method %s", method)
+	}
+	if !strings.Contains(path, "/content/v2/acct/playheads") {
+		t.Fatalf("path %s", path)
+	}
+	if locale != "pt-BR" {
+		t.Fatalf("locale %q", locale)
+	}
+	if audio != "ja-JP" {
+		t.Fatalf("preferred_audio_language %q", audio)
+	}
+	if !strings.HasPrefix(auth, "Bearer ") {
+		t.Fatalf("Authorization %q", auth)
+	}
+	if contentType != "application/json" {
+		t.Fatalf("Content-Type %q", contentType)
+	}
+	wantUA := "Mozilla/5.0 (X11; Linux x86_64; rv:147.0) Gecko/20100101 Firefox/147.0"
+	if userAgent != wantUA {
+		t.Fatalf("User-Agent %q", userAgent)
+	}
+	if decodeErr != nil {
+		t.Fatal(decodeErr)
 	}
 	if got.ContentID != "GWep" || got.Playhead != 372.5 {
 		t.Fatalf("%+v", got)
@@ -53,5 +82,49 @@ func TestGetPlayheadsEmptyIDs(t *testing.T) {
 	}
 	if len(got) != 0 {
 		t.Fatalf("%+v", got)
+	}
+}
+
+func TestPlayheadPOSTHTTP500(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+	err := PostPlayheadWithBase(srv.URL, "acct", "GWep", 1, "pt-BR", "ja-JP")
+	if err == nil || !strings.Contains(err.Error(), "playhead POST HTTP 500") {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestPlayheadRequiresAccountAndContentID(t *testing.T) {
+	if err := PostPlayheadWithBase("http://127.0.0.1:1", "", "GWep", 1, "pt-BR", "ja-JP"); err == nil {
+		t.Fatal("expected error for empty account")
+	}
+	if err := PostPlayheadWithBase("http://127.0.0.1:1", "acct", "", 1, "pt-BR", "ja-JP"); err == nil {
+		t.Fatal("expected error for empty content id")
+	}
+	if err := PostPlayheadWithBase("http://127.0.0.1:1", "  ", "id", 1, "pt-BR", "ja-JP"); err == nil {
+		t.Fatal("expected error for whitespace account")
+	}
+}
+
+func TestPlayheadPOSTNegativeClampedToZero(t *testing.T) {
+	var got struct {
+		Playhead float64 `json:"playhead"`
+	}
+	var decodeErr error
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		decodeErr = json.NewDecoder(r.Body).Decode(&got)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+	if err := PostPlayheadWithBase(srv.URL, "acct", "GWep", -12, "pt-BR", "ja-JP"); err != nil {
+		t.Fatal(err)
+	}
+	if decodeErr != nil {
+		t.Fatal(decodeErr)
+	}
+	if got.Playhead != 0 {
+		t.Fatalf("playhead %v, want 0", got.Playhead)
 	}
 }
