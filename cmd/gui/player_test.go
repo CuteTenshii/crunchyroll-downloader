@@ -59,7 +59,91 @@ func TestStartPlayFactoryError(t *testing.T) {
 	if !libmpvError(err) {
 		t.Fatalf("StartPlay: %v", err)
 	}
+	if a.playGen != 1 {
+		t.Fatalf("playGen=%d want 1", a.playGen)
+	}
 	if err := a.StopPlay(); err != nil {
 		t.Fatalf("StopPlay: %v", err)
+	}
+}
+
+type countingHost struct {
+	destroys int
+}
+
+func (c *countingHost) Attach(uintptr) error       { return nil }
+func (c *countingHost) LoadFile(string) error      { return nil }
+func (c *countingHost) Pause(bool) error           { return nil }
+func (c *countingHost) Seek(float64) error         { return nil }
+func (c *countingHost) Position() (float64, error) { return 0, nil }
+func (c *countingHost) Duration() (float64, error) { return 0, nil }
+func (c *countingHost) SetVolume(int) error        { return nil }
+func (c *countingHost) Destroy() error {
+	c.destroys++
+	return nil
+}
+
+func TestStopPlayMatchingGenDestroysHost(t *testing.T) {
+	h := &countingHost{}
+	a := NewApp()
+	a.playHost = h
+	a.playGen = 2
+	if err := a.StopPlay(); err != nil {
+		t.Fatalf("StopPlay: %v", err)
+	}
+	if h.destroys != 1 {
+		t.Fatalf("destroys=%d want 1", h.destroys)
+	}
+	if a.playHost != nil {
+		t.Fatal("host still set")
+	}
+}
+
+func TestStopPlayStaleGenIsNoop(t *testing.T) {
+	old := &countingHost{}
+	a := NewApp()
+	a.playHost = old
+	a.playGen = 4
+
+	a.playMu.Lock()
+	gen := a.playGen
+	a.playMu.Unlock()
+
+	newer := &countingHost{}
+	a.playMu.Lock()
+	a.playGen++
+	a.playHost = newer
+	a.playMu.Unlock()
+
+	if err := a.clearPlayIfGen(gen); err != nil {
+		t.Fatalf("clearPlayIfGen: %v", err)
+	}
+	if old.destroys != 0 || newer.destroys != 0 {
+		t.Fatalf("stale stop destroyed hosts old=%d new=%d", old.destroys, newer.destroys)
+	}
+	if a.playHost != newer {
+		t.Fatal("new session host was cleared")
+	}
+}
+
+func TestStartPlayBumpsGenBeforeFactoryError(t *testing.T) {
+	orig := mpvHostFactory
+	mpvHostFactory = func() (MpvHost, error) { return nil, missingPlayerErr() }
+	defer func() { mpvHostFactory = orig }()
+
+	a := NewApp()
+	a.playGen = 7
+	stale := a.playGen
+	if err := a.StartPlay(""); !libmpvError(err) {
+		t.Fatalf("StartPlay: %v", err)
+	}
+	if a.playGen <= stale {
+		t.Fatalf("playGen=%d not greater than stale %d", a.playGen, stale)
+	}
+	if err := a.clearPlayIfGen(stale); err != nil {
+		t.Fatalf("stale clear: %v", err)
+	}
+	if a.playGen != stale+1 {
+		t.Fatalf("playGen=%d want %d", a.playGen, stale+1)
 	}
 }

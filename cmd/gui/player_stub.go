@@ -14,7 +14,8 @@ func (a *App) movePlaySurfaceLocked() error {
 	return nil
 }
 
-func (a *App) destroyPlaySurfaceLocked() {
+func (a *App) destroyPlaySurfaceLocked() error {
 	a.playChild = 0
 	a.playParent = 0
+	return nil
 }

@@ -91,6 +91,7 @@
   var progressUnsub = null;
   var playIdleTimer = null;
   var playOverlayPlaying = false;
+  var playStopPromise = Promise.resolve();
   var els = {};
 
   function $(id) {
@@ -873,13 +874,19 @@
   }
 
   function startPlaySurface() {
-    layoutPlayStage();
     var app = goApp();
     if (!app || typeof app.StartPlay !== "function") {
       setPlayStageError("player library missing");
-      return;
+      return Promise.resolve();
     }
-    Promise.resolve(app.StartPlay(""))
+    return Promise.resolve(playStopPromise)
+      .catch(function () {
+        /* ignore in-flight stop errors */
+      })
+      .then(function () {
+        layoutPlayStage();
+        return Promise.resolve(app.StartPlay(""));
+      })
       .then(function () {
         layoutPlayStage();
       })
@@ -902,17 +909,22 @@
     }
     playOverlayPlaying = false;
     setPlayToggleIcon(false);
+    if (els.playPage) {
+      els.playPage.hidden = true;
+      els.playPage.classList.remove("is-idle");
+      els.playPage.setAttribute("aria-hidden", "true");
+    }
+    var stop = Promise.resolve();
     var app = goApp();
     if (app && typeof app.StopPlay === "function") {
-      Promise.resolve(app.StopPlay()).catch(function () {
+      stop = Promise.resolve(app.StopPlay()).catch(function () {
         /* ignore */
       });
     }
-    setPlayStageError("");
-    if (!els.playPage) return;
-    els.playPage.hidden = true;
-    els.playPage.classList.remove("is-idle");
-    els.playPage.setAttribute("aria-hidden", "true");
+    playStopPromise = stop;
+    return stop.then(function () {
+      setPlayStageError("");
+    });
   }
 
   function playShowLabel(meta) {

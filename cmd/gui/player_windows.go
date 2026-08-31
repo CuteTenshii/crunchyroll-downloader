@@ -3,6 +3,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -36,6 +37,8 @@ const (
 	hwndTop      = 0
 	blackBrush   = 4
 	wmEraseBkgnd = 0x0014
+	wmPlayJob    = 0x8001 // WM_APP+1
+	pmNoRemove   = 0
 )
 
 var (
@@ -43,23 +46,53 @@ var (
 	kernel32 = windows.NewLazySystemDLL("kernel32.dll")
 	gdi32    = windows.NewLazySystemDLL("gdi32.dll")
 
-	procCreateWindowExW  = user32.NewProc("CreateWindowExW")
-	procRegisterClassExW = user32.NewProc("RegisterClassExW")
-	procDefWindowProcW   = user32.NewProc("DefWindowProcW")
-	procDestroyWindow    = user32.NewProc("DestroyWindow")
-	procMoveWindow       = user32.NewProc("MoveWindow")
-	procSetWindowPos     = user32.NewProc("SetWindowPos")
-	procFindWindowW      = user32.NewProc("FindWindowW")
-	procGetDpiForWindow  = user32.NewProc("GetDpiForWindow")
-	procIsWindow         = user32.NewProc("IsWindow")
-	procGetModuleHandleW = kernel32.NewProc("GetModuleHandleW")
-	procGetStockObject   = gdi32.NewProc("GetStockObject")
+	procCreateWindowExW    = user32.NewProc("CreateWindowExW")
+	procRegisterClassExW   = user32.NewProc("RegisterClassExW")
+	procDefWindowProcW     = user32.NewProc("DefWindowProcW")
+	procDestroyWindow      = user32.NewProc("DestroyWindow")
+	procMoveWindow         = user32.NewProc("MoveWindow")
+	procSetWindowPos       = user32.NewProc("SetWindowPos")
+	procFindWindowW        = user32.NewProc("FindWindowW")
+	procGetDpiForWindow    = user32.NewProc("GetDpiForWindow")
+	procIsWindow           = user32.NewProc("IsWindow")
+	procPeekMessageW       = user32.NewProc("PeekMessageW")
+	procGetMessageW        = user32.NewProc("GetMessageW")
+	procTranslateMessage   = user32.NewProc("TranslateMessage")
+	procDispatchMessageW   = user32.NewProc("DispatchMessageW")
+	procPostThreadMessageW = user32.NewProc("PostThreadMessageW")
+	procGetModuleHandleW   = kernel32.NewProc("GetModuleHandleW")
+	procGetCurrentThreadId = kernel32.NewProc("GetCurrentThreadId")
+	procGetStockObject     = gdi32.NewProc("GetStockObject")
 
 	playClassUTF16 = windows.StringToUTF16Ptr(playClassNameStr)
 	playWndProcCb  = syscall.NewCallback(playSurfaceWndProc)
 	playClassOnce  sync.Once
 	playClassErr   error
+
+	hwndPumpOnce  sync.Once
+	hwndPumpReady = make(chan struct{})
+	hwndTID       uint32
+	hwndJobMu     sync.Mutex
+	hwndJobs      []hwndJob
 )
+
+type winPOINT struct {
+	X, Y int32
+}
+
+type winMSG struct {
+	Hwnd    windows.HWND
+	Message uint32
+	WParam  uintptr
+	LParam  uintptr
+	Time    uint32
+	Pt      winPOINT
+}
+
+type hwndJob struct {
+	fn   func() error
+	done chan error
+}
 
 type wndClassEx struct {
 	Size       uint32
@@ -184,8 +217,10 @@ func (h *windowsMpvHost) Attach(hwnd uintptr) error {
 		return missingPlayerErr()
 	}
 	if h.handle != 0 {
-		h.wid = hwnd
-		return nil
+		if h.wid == hwnd {
+			return nil
+		}
+		h.terminateLocked()
 	}
 	r, _, _ := h.procs.create.Call()
 	if r == 0 {
@@ -533,6 +568,75 @@ func raisePlaySurface(hwnd windows.HWND) {
 	)
 }
 
+func startHWNDPump() {
+	hwndPumpOnce.Do(func() {
+		go hwndPumpLoop()
+		<-hwndPumpReady
+	})
+}
+
+func hwndPumpLoop() {
+	runtime.LockOSThread()
+	var msg winMSG
+	procPeekMessageW.Call(uintptr(unsafe.Pointer(&msg)), 0, 0, 0, pmNoRemove)
+	r, _, _ := procGetCurrentThreadId.Call()
+	hwndTID = uint32(r)
+	close(hwndPumpReady)
+
+	for {
+		got, _, _ := procGetMessageW.Call(uintptr(unsafe.Pointer(&msg)), 0, 0, 0)
+		if int32(got) <= 0 {
+			return
+		}
+		if msg.Message == wmPlayJob {
+			runHWNDJobs()
+			continue
+		}
+		procTranslateMessage.Call(uintptr(unsafe.Pointer(&msg)))
+		procDispatchMessageW.Call(uintptr(unsafe.Pointer(&msg)))
+	}
+}
+
+func runHWNDJobs() {
+	hwndJobMu.Lock()
+	jobs := hwndJobs
+	hwndJobs = nil
+	hwndJobMu.Unlock()
+	for _, job := range jobs {
+		err := func() (err error) {
+			defer func() {
+				if rec := recover(); rec != nil {
+					err = fmt.Errorf("play hwnd job panic: %v", rec)
+				}
+			}()
+			return job.fn()
+		}()
+		job.done <- err
+	}
+}
+
+func runOnHWNDThread(fn func() error) error {
+	startHWNDPump()
+	job := hwndJob{fn: fn, done: make(chan error, 1)}
+	hwndJobMu.Lock()
+	hwndJobs = append(hwndJobs, job)
+	hwndJobMu.Unlock()
+	posted, _, err := procPostThreadMessageW.Call(uintptr(hwndTID), wmPlayJob, 0, 0)
+	if posted == 0 {
+		hwndJobMu.Lock()
+		kept := hwndJobs[:0]
+		for _, j := range hwndJobs {
+			if j.done != job.done {
+				kept = append(kept, j)
+			}
+		}
+		hwndJobs = kept
+		hwndJobMu.Unlock()
+		return fmt.Errorf("post play hwnd job: %v", err)
+	}
+	return <-job.done
+}
+
 func (a *App) ensurePlaySurfaceLocked() (uintptr, error) {
 	parent := windows.HWND(a.playParent)
 	if !isWindow(parent) {
@@ -542,14 +646,27 @@ func (a *App) ensurePlaySurfaceLocked() (uintptr, error) {
 	if parent == 0 {
 		return 0, missingPlayerErr()
 	}
-	x, y, w, h := clientPixels(parent, a.playRect)
-	if a.playChild != 0 && isWindow(windows.HWND(a.playChild)) {
-		_ = a.movePlaySurfaceLocked()
-		return a.playChild, nil
-	}
-	if err := registerPlayClass(); err != nil {
+	rect := a.playRect
+	err := runOnHWNDThread(func() error {
+		return a.ensurePlaySurfaceOnPump(parent, rect)
+	})
+	if err != nil {
 		return 0, err
 	}
+	if a.playChild == 0 {
+		return 0, missingPlayerErr()
+	}
+	return a.playChild, nil
+}
+
+func (a *App) ensurePlaySurfaceOnPump(parent windows.HWND, rect PlayStageRect) error {
+	if a.playChild != 0 && isWindow(windows.HWND(a.playChild)) {
+		return a.movePlaySurfaceOnPump(parent, windows.HWND(a.playChild), rect)
+	}
+	if err := registerPlayClass(); err != nil {
+		return err
+	}
+	x, y, w, h := clientPixels(parent, rect)
 	inst, _, _ := procGetModuleHandleW.Call(0)
 	style := uintptr(wsChild | wsVisible | wsClipSiblings | wsClipChildren)
 	r, _, lastErr := procCreateWindowExW.Call(
@@ -564,28 +681,50 @@ func (a *App) ensurePlaySurfaceLocked() (uintptr, error) {
 		0,
 	)
 	if r == 0 {
-		return 0, lastErr
+		return lastErr
 	}
 	a.playChild = r
 	raisePlaySurface(windows.HWND(r))
-	return a.playChild, nil
+	return nil
 }
 
 func (a *App) movePlaySurfaceLocked() error {
-	hwnd := windows.HWND(a.playChild)
+	if a.playChild == 0 {
+		return nil
+	}
 	parent := windows.HWND(a.playParent)
+	child := windows.HWND(a.playChild)
+	rect := a.playRect
+	return runOnHWNDThread(func() error {
+		return a.movePlaySurfaceOnPump(parent, child, rect)
+	})
+}
+
+func (a *App) movePlaySurfaceOnPump(parent, hwnd windows.HWND, rect PlayStageRect) error {
 	if hwnd == 0 || !isWindow(hwnd) {
 		return nil
 	}
-	x, y, w, h := clientPixels(parent, a.playRect)
+	x, y, w, h := clientPixels(parent, rect)
 	procMoveWindow.Call(uintptr(hwnd), u32(x), u32(y), u32(w), u32(h), 1)
 	raisePlaySurface(hwnd)
 	return nil
 }
 
-func (a *App) destroyPlaySurfaceLocked() {
-	if a.playChild != 0 {
-		procDestroyWindow.Call(a.playChild)
-		a.playChild = 0
+func (a *App) destroyPlaySurfaceLocked() error {
+	if a.playChild == 0 {
+		return nil
 	}
+	return runOnHWNDThread(func() error {
+		hwnd := a.playChild
+		r, _, err := procDestroyWindow.Call(hwnd)
+		if r != 0 {
+			a.playChild = 0
+			return nil
+		}
+		if !isWindow(windows.HWND(hwnd)) {
+			a.playChild = 0
+			return nil
+		}
+		return err
+	})
 }

@@ -70,6 +70,7 @@ func (missingMpvHost) playFlags() (paused, eof bool) {
 func (a *App) StartPlay(path string) error {
 	a.playMu.Lock()
 	defer a.playMu.Unlock()
+	a.playGen++
 
 	if a.playHost == nil {
 		host, err := mpvHostFactory()
@@ -101,10 +102,22 @@ func (a *App) StartPlay(path string) error {
 	return nil
 }
 
-// StopPlay tears down the host, child HWND, and play-state ticker.
+// StopPlay tears down the host, child HWND, and play-state ticker for the
+// generation captured at call start. A later StartPlay bumps playGen so a
+// delayed StopPlay cannot destroy the new session.
 func (a *App) StopPlay() error {
 	a.playMu.Lock()
+	gen := a.playGen
+	a.playMu.Unlock()
+	return a.clearPlayIfGen(gen)
+}
+
+func (a *App) clearPlayIfGen(gen uint64) error {
+	a.playMu.Lock()
 	defer a.playMu.Unlock()
+	if a.playGen != gen {
+		return nil
+	}
 	return a.clearPlayLocked()
 }
 
@@ -162,7 +175,9 @@ func (a *App) clearPlayLocked() error {
 		err = a.playHost.Destroy()
 		a.playHost = nil
 	}
-	a.destroyPlaySurfaceLocked()
+	if derr := a.destroyPlaySurfaceLocked(); derr != nil && err == nil {
+		err = derr
+	}
 	a.playPaused = true
 	return err
 }

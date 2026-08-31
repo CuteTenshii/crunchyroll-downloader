@@ -30,6 +30,7 @@ type App struct {
 	playParent uintptr
 	playChild  uintptr
 	playPaused bool
+	playGen    uint64
 }
 
 // NewApp constructs an empty App; prefs load on startup.
