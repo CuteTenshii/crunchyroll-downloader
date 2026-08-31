@@ -841,6 +841,22 @@ func TestResolveLocalMKVPrefersSeriesFolderNotSubstring(t *testing.T) {
 	}
 }
 
+func TestResolveLocalMKVDoesNotPickOtherSeries(t *testing.T) {
+	root := t.TempDir()
+	elfen := filepath.Join(root, "Elfen Lied")
+	if err := os.MkdirAll(elfen, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	decoy := filepath.Join(elfen, "Elfen Lied S01E01 - X [1080p].mkv")
+	if err := os.WriteFile(decoy, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := resolveLocalMKV(root, "Skeleton in Another World", 1, 1)
+	if err == nil || !strings.Contains(err.Error(), "no local file") {
+		t.Fatalf("err=%v, must not play a different series", err)
+	}
+}
+
 func TestPlayPauseFailedPostThenStopRetries(t *testing.T) {
 	sink := stubPlayheadNetwork(t)
 	calls := 0

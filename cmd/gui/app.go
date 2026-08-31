@@ -59,6 +59,9 @@ func NewApp() *App {
 func (a *App) startup(ctx context.Context) {
 	// Keep the Wails context for EventsEmit; job cancel is stored separately on a.cancel.
 	a.ctx = ctx
+	playEscapeFn = func() {
+		wailsruntime.EventsEmit(ctx, "play-escape", true)
+	}
 	path, err := engine.DefaultPreferencesPath()
 	if err != nil {
 		return

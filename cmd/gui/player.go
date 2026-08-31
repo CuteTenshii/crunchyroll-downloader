@@ -71,6 +71,7 @@ var (
 	playPostPlayhead     = engine.PostPlayhead
 	resolvePlayFile      = resolveLocalMKV
 	startProgressivePlay = engine.StartProgressivePlay
+	playEscapeFn         func()
 )
 
 // playBufferSession is the progressive-play control surface used by StartPlay,
@@ -172,12 +173,27 @@ func resolveLocalMKV(outputDir, seriesTitle string, season, episode int) (string
 	}
 	if seriesHint != "" {
 		for _, m := range matches {
-			if filepath.Base(filepath.Dir(m)) == seriesHint {
+			if mkvMatchesSeries(m, seriesHint) {
 				return m, nil
 			}
 		}
+		// Never fall back to another show's SxxExx (e.g. Elfen Lied vs Skeleton).
+		return "", fmt.Errorf("no local file")
+	}
+	if len(matches) != 1 {
+		return "", fmt.Errorf("no local file")
 	}
 	return matches[0], nil
+}
+
+func mkvMatchesSeries(path, seriesHint string) bool {
+	hint := strings.TrimSpace(seriesHint)
+	if hint == "" {
+		return true
+	}
+	dir := filepath.Base(filepath.Dir(path))
+	name := filepath.Base(path)
+	return dir == hint || strings.HasPrefix(name, hint+" ")
 }
 
 // StartPlay authenticates, resolves a completed MKV, attaches the in-window

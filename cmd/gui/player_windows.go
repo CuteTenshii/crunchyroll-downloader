@@ -34,11 +34,15 @@ const (
 	swpNoActivate = 0x0010
 	swpShowWindow = 0x0040
 
-	hwndTop      = 0
-	blackBrush   = 4
-	wmEraseBkgnd = 0x0014
-	wmPlayJob    = 0x8001 // WM_APP+1
-	pmNoRemove   = 0
+	hwndBottom     = 1
+	blackBrush     = 4
+	wmEraseBkgnd   = 0x0014
+	wmNCHitTest    = 0x0084
+	wmKeyDown      = 0x0100
+	vkEscape       = 0x1B
+	htTransparent  = ^uintptr(0) // (HWND)(LONG_PTR)-1
+	wmPlayJob      = 0x8001      // WM_APP+1
+	pmNoRemove     = 0
 )
 
 var (
@@ -503,11 +507,28 @@ func mpvStatus(r uintptr) int {
 }
 
 func playSurfaceWndProc(hwnd, msg, wParam, lParam uintptr) uintptr {
-	if uint32(msg) == wmEraseBkgnd {
+	switch uint32(msg) {
+	case wmNCHitTest:
+		// Clicks and hover must reach the WebView chrome (back, timeline), not mpv.
+		return htTransparent
+	case wmKeyDown:
+		if wParam == vkEscape {
+			notifyPlayEscape()
+			return 0
+		}
+	case wmEraseBkgnd:
 		return 1
 	}
 	r, _, _ := procDefWindowProcW.Call(hwnd, msg, wParam, lParam)
 	return r
+}
+
+func notifyPlayEscape() {
+	fn := playEscapeFn
+	if fn == nil {
+		return
+	}
+	go fn()
 }
 
 func registerPlayClass() error {
@@ -582,9 +603,10 @@ func raisePlaySurface(hwnd windows.HWND) {
 	if hwnd == 0 {
 		return
 	}
+	// Keep the video pane *under* WebView2 so HTML chrome receives mouse/keyboard.
 	procSetWindowPos.Call(
 		uintptr(hwnd),
-		hwndTop,
+		hwndBottom,
 		0, 0, 0, 0,
 		swpNoMove|swpNoSize|swpShowWindow|swpNoActivate,
 	)

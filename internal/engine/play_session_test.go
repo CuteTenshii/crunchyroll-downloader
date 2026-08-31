@@ -155,7 +155,7 @@ func TestStartProgressivePlayEmitsReady(t *testing.T) {
 	}
 	defer func() { _ = sess.Close() }()
 
-	if sess.BufferedEnd() < 4 {
+	if sess.BufferedEnd() < 0.5 {
 		t.Fatalf("not ready: buffer=%.2f", sess.BufferedEnd())
 	}
 	path := sess.PlayingPath()

@@ -2722,11 +2722,16 @@ textarea.cr-input {
 }
 
 /* ── Play overlay (cinema chrome; scoped so shell .spacer/.track/.ctrl stay intact) ── */
+body.is-playing .shell {
+  visibility: hidden;
+  pointer-events: none;
+}
+
 #page-play.page-play {
   position: fixed;
   inset: 0;
   z-index: 80;
-  background: #000;
+  background: transparent;
   color: #fff;
   overflow: hidden;
   outline: none;
@@ -2740,7 +2745,7 @@ textarea.cr-input {
 #page-play .play-stage {
   position: absolute;
   inset: 0;
-  background: #000;
+  background: transparent;
   display: grid;
   place-items: center;
 }

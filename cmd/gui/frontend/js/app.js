@@ -1130,6 +1130,9 @@
       if (window.runtime && typeof window.runtime.EventsOn === "function") {
         var offState = window.runtime.EventsOn("play-state", applyPlayState);
         var offReady = window.runtime.EventsOn("play-ready", onPlayReadyEvent);
+        var offEsc = window.runtime.EventsOn("play-escape", function () {
+          closePlayOverlay();
+        });
         playEventsUnsub = function () {
           try {
             if (typeof offState === "function") offState();
@@ -1139,6 +1142,11 @@
           try {
             if (typeof offReady === "function") offReady();
           } catch (e2) {
+            /* ignore */
+          }
+          try {
+            if (typeof offEsc === "function") offEsc();
+          } catch (e3) {
             /* ignore */
           }
         };
@@ -1153,6 +1161,9 @@
         if (window.runtime && typeof window.runtime.EventsOn === "function") {
           window.runtime.EventsOn("play-state", applyPlayState);
           window.runtime.EventsOn("play-ready", onPlayReadyEvent);
+          window.runtime.EventsOn("play-escape", function () {
+            closePlayOverlay();
+          });
           playEventsUnsub = function () {};
         }
       } catch (e2) {
@@ -1174,6 +1185,7 @@
       els.playPage.classList.remove("is-idle");
       els.playPage.setAttribute("aria-hidden", "true");
     }
+    if (document.body) document.body.classList.remove("is-playing");
     var stop = Promise.resolve();
     var app = goApp();
     if (app && typeof app.StopPlay === "function") {
@@ -1231,6 +1243,7 @@
     els.playPage.hidden = false;
     els.playPage.setAttribute("aria-hidden", "false");
     els.playPage.classList.remove("is-idle");
+    if (document.body) document.body.classList.add("is-playing");
     try {
       els.playPage.focus();
     } catch (e) {
@@ -4221,7 +4234,15 @@
       closeAccountMenu();
     });
     document.addEventListener("keydown", function (e) {
-      if (e.key === "Escape") closeAccountMenu();
+      if (e.key === "Escape") {
+        if (isPlayOverlayOpen()) {
+          e.preventDefault();
+          closePlayOverlay();
+          return;
+        }
+        closeAccountMenu();
+        return;
+      }
       if (e.key !== " " && e.code !== "Space") return;
       if (!isPlayOverlayOpen()) return;
       if (e.repeat) return;
