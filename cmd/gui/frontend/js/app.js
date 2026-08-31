@@ -98,6 +98,7 @@
   var playLastPos = 0;
   var playResumeHandled = false;
   var playEventsUnsub = null;
+  var playCurrentMeta = null;
   var els = {};
 
   function $(id) {
@@ -117,6 +118,7 @@
       btnPlayBack: $("btn-play-back"),
       btnPlayToggle: $("btn-play-toggle"),
       btnPlayReplay: $("btn-play-replay"),
+      btnPlayNext: $("btn-play-next"),
       playTitle: $("play-title"),
       playShow: $("play-show"),
       playLock: $("play-lock"),
@@ -1115,6 +1117,7 @@
     }
     playStopPromise = stop;
     return stop.then(function () {
+      playCurrentMeta = null;
       setPlayStageError("");
       playSeekTarget = 0;
       playLastPos = 0;
@@ -1132,6 +1135,13 @@
 
   function openPlayOverlay(meta) {
     meta = meta || {};
+    playCurrentMeta = {
+      episodeId: meta.episodeId || meta.episodeID || "",
+      seriesTitle: meta.seriesTitle || "",
+      episodeTitle: meta.episodeTitle || "",
+      seasonNumber: Number(meta.seasonNumber) || 0,
+      episodeNumber: Number(meta.episodeNumber) || 0,
+    };
     if (!els.playPage) return;
     if (els.playTitle) els.playTitle.textContent = meta.episodeTitle || "Untitled";
     if (els.playShow) els.playShow.textContent = playShowLabel(meta);
@@ -1168,6 +1178,80 @@
     url = String(url || "");
     var m = url.match(/\/watch\/([^/?#]+)/i);
     return m && m[1] ? m[1] : "";
+  }
+
+  function episodeIdFromCard(card) {
+    if (!card) return "";
+    if (card.id && /episode/i.test(String(card.type || ""))) {
+      return String(card.id);
+    }
+    var fromUrl = episodeIdFromOpenUrl(card.openUrl || "");
+    if (fromUrl) return fromUrl;
+    if (card.id && !/series|movie_listing/i.test(String(card.type || ""))) {
+      return String(card.id);
+    }
+    return "";
+  }
+
+  function parseCardSeasonEpisode(card) {
+    var sub = (card && card.subtitle) || "";
+    var m = String(sub).match(/S(\d+)\s*E(\d+)/i);
+    if (m) {
+      return { seasonNumber: Number(m[1]) || 0, episodeNumber: Number(m[2]) || 0 };
+    }
+    m = String(sub).match(/\bE(\d+)/i);
+    if (m) {
+      return { seasonNumber: 0, episodeNumber: Number(m[1]) || 0 };
+    }
+    return { seasonNumber: 0, episodeNumber: 0 };
+  }
+
+  function playMetaFromCatalogEpisode(ep, extras) {
+    extras = extras || {};
+    ep = ep || {};
+    return {
+      seriesTitle:
+        ep.SeriesTitle ||
+        ep.seriesTitle ||
+        (state.catalog && state.catalog.DisplayTitle) ||
+        extras.seriesTitle ||
+        "",
+      episodeTitle: ep.Title || ep.title || extras.episodeTitle || "Untitled",
+      seasonNumber: ep.SeasonNumber || ep.seasonNumber || extras.seasonNumber || 0,
+      episodeNumber: ep.EpisodeNumber || ep.episodeNumber || extras.episodeNumber || 0,
+      episodeId: ep.ID || ep.id || extras.episodeId || "",
+      filePath: extras.filePath != null ? extras.filePath : "",
+      audioLang: extras.audioLang || firstSelectedAudioLang(),
+      locale: extras.locale || state.locale || "pt-BR",
+    };
+  }
+
+  function playFromDiscoverCard(card, evt) {
+    if (evt) {
+      evt.preventDefault();
+      evt.stopPropagation();
+    }
+    var epId = episodeIdFromCard(card);
+    if (!epId) {
+      showBanner("This title has no playable episode.", "warn");
+      return;
+    }
+    var ep = catalogEpisodeById(epId);
+    if (ep) {
+      openPlayOverlay(playMetaFromCatalogEpisode(ep, { filePath: "" }));
+      return;
+    }
+    var se = parseCardSeasonEpisode(card);
+    openPlayOverlay({
+      seriesTitle: (card && card.title) || "",
+      episodeTitle: (card && (card.episodeTitle || card.subtitle)) || "Untitled",
+      seasonNumber: se.seasonNumber,
+      episodeNumber: se.episodeNumber,
+      episodeId: epId,
+      filePath: "",
+      audioLang: firstSelectedAudioLang(),
+      locale: state.locale || "pt-BR",
+    });
   }
 
   function scrollEpisodeIntoView(episodeId) {
@@ -1345,9 +1429,8 @@
   }
 
   function landscapeCardButton(card) {
-    var btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "home-cw-card";
+    var el = document.createElement("article");
+    el.className = "home-cw-card";
     var seriesName = card.title || card.id || "Untitled";
     var epLabel = "";
     if (card.episodeTitle) {
@@ -1357,10 +1440,11 @@
     } else if (card.subtitle) {
       epLabel = card.subtitle;
     }
-    btn.title = seriesName + (epLabel ? " · " + epLabel : "");
-    btn.dataset.openUrl = card.openUrl || "";
-    btn.dataset.id = card.id || "";
-    btn.dataset.seriesId = card.seriesId || "";
+    el.title = seriesName + (epLabel ? " · " + epLabel : "");
+    el.dataset.openUrl = card.openUrl || "";
+    el.dataset.id = card.id || "";
+    el.dataset.seriesId = card.seriesId || "";
+    el.tabIndex = 0;
 
     var artUrl = card.wideUrl || card.posterUrl || "";
     var art = makeArtEl("home-cw-art", artUrl, "No art");
@@ -1379,23 +1463,45 @@
       rem.textContent = card.remainingLabel;
       art.appendChild(rem);
     }
-    btn.appendChild(art);
+    var playEpId = episodeIdFromCard(card);
+    if (playEpId) {
+      var playBtn = document.createElement("button");
+      playBtn.type = "button";
+      playBtn.className = "cr-btn cr-btn-primary sm play-icon-btn";
+      playBtn.title = "Play";
+      playBtn.setAttribute("aria-label", "Play");
+      playBtn.textContent = "Play";
+      playBtn.addEventListener("click", function (e) {
+        playFromDiscoverCard(card, e);
+      });
+      art.appendChild(playBtn);
+    }
+    el.appendChild(art);
 
     // CR layout: series name UPPERCASE (small) + episode title (larger).
     var showTitle = document.createElement("div");
     showTitle.className = "home-cw-show";
     showTitle.textContent = seriesName;
-    btn.appendChild(showTitle);
+    el.appendChild(showTitle);
 
     var epTitle = document.createElement("div");
     epTitle.className = "home-cw-ep";
     epTitle.textContent = epLabel || seriesName;
-    btn.appendChild(epTitle);
+    el.appendChild(epTitle);
 
-    btn.addEventListener("click", function () {
+    el.addEventListener("click", function (e) {
+      if (e.target && e.target.closest && e.target.closest(".play-icon-btn, .cr-btn")) {
+        return;
+      }
       openDiscoverCard(card);
     });
-    return btn;
+    el.addEventListener("keydown", function (e) {
+      if (e.key !== "Enter" && e.key !== " ") return;
+      if (e.target !== el) return;
+      e.preventDefault();
+      openDiscoverCard(card);
+    });
+    return el;
   }
 
   var heroCarouselTimers = [];
@@ -3623,19 +3729,54 @@
       showBanner("Selected episode is not in the catalog.", "warn");
       return;
     }
-    openPlayOverlay({
-      seriesTitle:
-        ep.SeriesTitle ||
-        ep.seriesTitle ||
-        (state.catalog && state.catalog.DisplayTitle) ||
-        "",
-      episodeTitle: ep.Title || ep.title || "Untitled",
-      seasonNumber: ep.SeasonNumber || ep.seasonNumber,
-      episodeNumber: ep.EpisodeNumber || ep.episodeNumber,
-      episodeId: ep.ID || ep.id,
-      filePath: "",
-      audioLang: firstSelectedAudioLang(),
-      locale: state.locale || "pt-BR",
+    openPlayOverlay(playMetaFromCatalogEpisode(ep, { filePath: "" }));
+  }
+
+  function nextCatalogEpisode(episodeId) {
+    var eps = (state.catalog && state.catalog.Episodes) || [];
+    if (!episodeId || !eps.length) return null;
+    var idx = -1;
+    for (var i = 0; i < eps.length; i++) {
+      if ((eps[i].ID || eps[i].id) === episodeId) {
+        idx = i;
+        break;
+      }
+    }
+    if (idx < 0) return null;
+    var cur = eps[idx];
+    var curSeason = Number(cur.SeasonNumber || cur.seasonNumber) || 0;
+    for (var j = idx + 1; j < eps.length; j++) {
+      var cand = eps[j];
+      var nextSeason = Number(cand.SeasonNumber || cand.seasonNumber) || 0;
+      if (nextSeason >= curSeason) return cand;
+    }
+    return null;
+  }
+
+  function onPlayNext() {
+    var curId = (playCurrentMeta && playCurrentMeta.episodeId) || "";
+    var next = nextCatalogEpisode(curId);
+    if (!next) {
+      showBanner("No next episode", "warn");
+      return;
+    }
+    var meta = playMetaFromCatalogEpisode(next, { filePath: "" });
+    var stop = Promise.resolve(playStopPromise).catch(function () {
+      /* ignore in-flight stop errors */
+    });
+    var app = goApp();
+    if (app && typeof app.StopPlay === "function") {
+      stop = stop
+        .then(function () {
+          return Promise.resolve(app.StopPlay());
+        })
+        .catch(function () {
+          /* ignore stop errors before the next StartPlay */
+        });
+    }
+    playStopPromise = stop;
+    return stop.then(function () {
+      openPlayOverlay(meta);
     });
   }
 
@@ -3992,6 +4133,9 @@
         requestPlaySeek(0);
         wakePlayChrome();
       });
+    }
+    if (els.btnPlayNext) {
+      els.btnPlayNext.addEventListener("click", onPlayNext);
     }
     if (els.playTimeline) {
       els.playTimeline.addEventListener("click", seekPlayFromTimeline);

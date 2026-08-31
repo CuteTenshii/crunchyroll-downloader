@@ -202,6 +202,20 @@ Use **Cookie** for a one-off path, or save it as a named cookie profile from Acc
 4. **Select** what you want (episodes, audio, subs, quality)
 5. Press **Download**
 
+### GUI Play
+
+Play opens an **in-window cinema overlay** (libmpv) inside this app. It is not a second player window and does not wrap crunchyroll.com.
+
+1. Place `libmpv-2.dll` next to the GUI executable
+2. From **Home → Continue Watching**, use **Play** to start the episode (progressive download if no completed MKV is on disk). Clicking the rest of the card still **Inspects** for Download
+3. From **Downloads**, **Play** uses the selected episode
+4. Quality is **forced** — the same representation pick as download. Never ABR
+5. Watch progress is POSTed to Crunchyroll playheads **only on pause, close, or finish** (not while playing)
+
+If the DLL is missing, the overlay shows `player library missing` and does not launch another app.
+
+**Widevine:** Home and subtitle-only indexing need no CDM. Play and full-media download need an operator-owned, lawfully provisioned device selected only via explicit environment variables or GUI prefs (`CRUNCHYROLL_WIDEVINE_DEVICE_FILE`, or the paired raw-file variables). Never use leaked, extracted, shared, or third-party credentials.
+
 ### GUI defaults (first run / after Inspect)
 
 | Setting | Default |

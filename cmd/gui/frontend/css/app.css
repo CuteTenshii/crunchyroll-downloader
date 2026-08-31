@@ -1457,6 +1457,7 @@ button {
 .home-cw-card {
   flex: 0 0 264px;
   width: 264px;
+  margin: 0;
   border: 0;
   padding: 0;
   background: transparent;
@@ -1525,6 +1526,13 @@ button {
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
+}
+
+.home-cw-art .cr-btn {
+  position: absolute;
+  left: 6px;
+  bottom: 16px;
+  z-index: 3;
 }
 
 .home-cw-meta {
