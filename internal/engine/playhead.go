@@ -1,0 +1,138 @@
+package engine
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"strings"
+	"sync"
+	"time"
+)
+
+const playFinishRatio = 0.95
+
+func IsPlayFinished(positionSec, durationSec float64) bool {
+	if durationSec <= 0 {
+		return false
+	}
+	return positionSec >= durationSec*playFinishRatio
+}
+
+func FinishPlayheadSeconds(durationSec float64) float64 {
+	if durationSec < 0 {
+		return 0
+	}
+	return durationSec
+}
+
+type playheadPOSTBody struct {
+	ContentID string  `json:"content_id"`
+	Playhead  float64 `json:"playhead"`
+}
+
+func PostPlayhead(accountID, contentID string, playheadSec float64, locale, audioLang string) error {
+	return PostPlayheadWithBase("https://www.crunchyroll.com", accountID, contentID, playheadSec, locale, audioLang)
+}
+
+func PostPlayheadWithBase(base, accountID, contentID string, playheadSec float64, locale, audioLang string) error {
+	accountID = strings.TrimSpace(accountID)
+	contentID = strings.TrimSpace(contentID)
+	if accountID == "" || contentID == "" {
+		return fmt.Errorf("playhead requires account and content id")
+	}
+	if playheadSec < 0 {
+		playheadSec = 0
+	}
+	locale = normalizeDiscoverLocale(locale)
+	q := url.Values{}
+	if locale != "" {
+		q.Set("locale", locale)
+	}
+	if strings.TrimSpace(audioLang) != "" {
+		q.Set("preferred_audio_language", audioLang)
+	}
+	endpoint := strings.TrimRight(base, "/") + "/content/v2/" + url.PathEscape(accountID) + "/playheads"
+	if enc := q.Encode(); enc != "" {
+		endpoint += "?" + enc
+	}
+	payload, err := json.Marshal(playheadPOSTBody{ContentID: contentID, Playhead: playheadSec})
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequest(http.MethodPost, endpoint, bytes.NewReader(payload))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("User-Agent", "Mozilla/5.0 (X11; Linux x86_64; rv:147.0) Gecko/20100101 Firefox/147.0")
+	resp, err := DoRequest(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("playhead POST HTTP %d", resp.StatusCode)
+	}
+	return nil
+}
+
+func GetPlayheads(accountID string, contentIDs []string) (map[string]PlayheadInfo, error) {
+	return fetchPlayheads(accountID, contentIDs)
+}
+
+// PlayheadDebouncer skips a duplicate playhead POST for the same content id
+// and whole second within window (default 1s).
+type PlayheadDebouncer struct {
+	window  time.Duration
+	now     func() time.Time
+	mu      sync.Mutex
+	lastID  string
+	lastSec int64
+	lastAt  time.Time
+}
+
+func NewPlayheadDebouncer(window time.Duration) *PlayheadDebouncer {
+	if window <= 0 {
+		window = time.Second
+	}
+	return &PlayheadDebouncer{
+		window: window,
+		now:    time.Now,
+	}
+}
+
+func (d *PlayheadDebouncer) ShouldPost(contentID string, seconds float64) bool {
+	if d == nil {
+		return true
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.now == nil {
+		d.now = time.Now
+	}
+	sec := int64(seconds)
+	if d.lastID == contentID && d.lastSec == sec && !d.lastAt.IsZero() && d.now().Sub(d.lastAt) < d.window {
+		return false
+	}
+	return true
+}
+
+func (d *PlayheadDebouncer) MarkPosted(contentID string, seconds float64) {
+	if d == nil {
+		return
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.now == nil {
+		d.now = time.Now
+	}
+	d.lastID = contentID
+	d.lastSec = int64(seconds)
+	d.lastAt = d.now()
+}

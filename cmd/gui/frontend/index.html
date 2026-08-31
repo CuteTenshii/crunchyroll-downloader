@@ -1,0 +1,532 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Crunchyroll Downloader</title>
+  <link rel="stylesheet" href="css/fonts.css" />
+  <link rel="stylesheet" href="css/app.css" />
+</head>
+<body>
+  <div class="app shell">
+    <!-- ── Left sidebar ── -->
+    <aside class="sidebar" aria-label="Primary">
+      <div class="sidebar-brand" id="brand-home" role="button" tabindex="0" title="Home">
+        <div class="brand-mark" aria-hidden="true">CR</div>
+        <div class="sidebar-brand-text">
+          <div class="sidebar-brand-title">Crunchyroll Downloader</div>
+          <div class="sidebar-brand-sub">Local utility</div>
+        </div>
+      </div>
+
+      <nav class="sidebar-nav" role="navigation">
+        <button type="button" class="sidebar-item is-active" id="nav-home" data-page="home">
+          <span class="sidebar-ico" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none"><path d="M4 10.5L12 4l8 6.5V20a1 1 0 0 1-1 1h-5v-6H10v6H5a1 1 0 0 1-1-1v-9.5z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>
+          </span>
+          <span>Home</span>
+        </button>
+        <button type="button" class="sidebar-item" id="nav-download" data-page="download">
+          <span class="sidebar-ico" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none"><path d="M12 4v10m0 0l-4-4m4 4l4-4M5 18h14" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </span>
+          <span>Downloads</span>
+        </button>
+        <button type="button" class="sidebar-item" id="nav-queue" data-page="queue">
+          <span class="sidebar-ico" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none"><path d="M5 7h14M5 12h14M5 17h10" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+          </span>
+          <span>Queue</span>
+        </button>
+        <button type="button" class="sidebar-item" id="nav-history" data-page="history">
+          <span class="sidebar-ico" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none"><circle cx="12" cy="12" r="8" stroke="currentColor" stroke-width="1.7"/><path d="M12 8v5l3 2" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+          </span>
+          <span>History</span>
+        </button>
+        <button type="button" class="sidebar-item" id="nav-settings" data-page="settings">
+          <span class="sidebar-ico" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none"><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.7"/><path d="M12 3.5v2.2M12 18.3v2.2M4.9 6.5l1.6 1.6M17.5 15.9l1.6 1.6M3.5 12h2.2M18.3 12h2.2M4.9 17.5l1.6-1.6M17.5 8.1l1.6-1.6" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+          </span>
+          <span>Settings</span>
+        </button>
+      </nav>
+
+      <div class="sidebar-foot">
+        <div class="sidebar-status">
+          <span class="sidebar-status-dot" aria-hidden="true"></span>
+          <div>
+            <div class="sidebar-status-title" id="sidebar-status-title">Ready</div>
+            <div class="sidebar-status-sub" id="sidebar-status-sub">Local · authorized account only</div>
+          </div>
+        </div>
+      </div>
+    </aside>
+
+    <!-- ── Main column ── -->
+    <div class="shell-main">
+      <header class="topbar">
+        <div class="topbar-left">
+          <h1 class="topbar-title" id="topbar-title">Home</h1>
+        </div>
+        <div class="topbar-right">
+          <button type="button" class="cr-btn cr-btn-ghost sm" id="btn-cookie-home" title="Set etp_rt cookie file path">Cookie</button>
+          <button type="button" class="cr-btn cr-btn-ghost sm" id="btn-cookie" title="Set etp_rt cookie file path">Cookie file</button>
+          <div class="account-wrap" id="account-wrap">
+            <button
+              type="button"
+              class="account-btn"
+              id="btn-account"
+              title="Cookie profiles and CR multiprofile"
+              aria-haspopup="menu"
+              aria-expanded="false"
+            >
+              <span class="account-avatar" id="account-avatar" aria-hidden="true">?</span>
+              <span class="account-meta">
+                <span class="account-name" id="account-name">Account</span>
+                <span class="account-sub" id="account-sub">No profile</span>
+              </span>
+              <span class="account-chev" aria-hidden="true">▾</span>
+            </button>
+            <div class="account-menu" id="account-menu" role="menu" hidden></div>
+          </div>
+          <div class="mode-toggle" role="tablist" aria-label="Mode" id="mode-toggle">
+            <button type="button" class="mode-btn is-on" id="mode-normal" data-mode="normal" role="tab" aria-selected="true">Normal</button>
+            <button type="button" class="mode-btn" id="mode-advanced" data-mode="advanced" role="tab" aria-selected="false">Advanced</button>
+          </div>
+        </div>
+      </header>
+
+      <div id="banner" class="banner err" role="alert" hidden>
+        <span class="banner-dot" aria-hidden="true"></span>
+        <div class="banner-body" id="banner-text"></div>
+        <button type="button" class="banner-close" id="banner-close" aria-label="Dismiss">×</button>
+      </div>
+
+      <div class="shell-content" id="shell-content">
+        <!-- HOME -->
+        <div id="view-home" class="page page-home is-on" role="tabpanel" aria-label="Home">
+          <div id="home-chrome" class="home-chrome">
+            <div class="toolbar home-toolbar">
+              <input
+                class="cr-input"
+                type="search"
+                id="home-search"
+                placeholder="Search series and movies…"
+                spellcheck="false"
+                autocomplete="off"
+              />
+              <button type="button" class="cr-btn cr-btn-primary" id="btn-home-search">Search</button>
+              <button type="button" class="cr-btn cr-btn-ghost" id="btn-home-refresh" title="Reload home feed">Refresh</button>
+            </div>
+          </div>
+          <div id="home-status" class="home-status muted-hint">Set a cookie file, then load your Discover feed.</div>
+          <div id="home-search-results" class="home-search-results" hidden>
+            <div class="home-rail-title">Search results</div>
+            <div id="home-search-grid" class="home-card-grid"></div>
+          </div>
+          <div id="home-feed" class="home-feed" aria-label="Discover feed"></div>
+          <div class="home-more-wrap" id="home-more-wrap" hidden>
+            <button type="button" class="cr-btn cr-btn-ghost" id="btn-home-more">Load more</button>
+          </div>
+        </div>
+
+        <!-- DOWNLOADS -->
+        <div class="page page-download" id="page-download" hidden>
+          <!-- Top context card: URL + series -->
+          <section class="dl-context-card" id="download-chrome">
+            <div class="dl-context-fields">
+              <input
+                class="cr-input"
+                type="text"
+                id="url"
+                placeholder="Paste a Crunchyroll series/episode URL…"
+                spellcheck="false"
+                autocomplete="off"
+              />
+              <button type="button" class="cr-btn cr-btn-primary" id="btn-inspect">Inspect</button>
+            </div>
+            <div id="media-hero" class="media-hero" hidden>
+              <img id="media-poster" class="media-poster" alt="" />
+              <div class="media-hero-text">
+                <div class="media-hero-kicker" id="media-kicker">Series</div>
+                <div class="media-hero-title" id="media-title">—</div>
+              </div>
+            </div>
+          </section>
+
+          <div class="main-pane" id="main-pane">
+            <div id="view-normal" class="view is-on" role="tabpanel">
+              <div class="cols dl-cols">
+                <section class="panel panel-elevated">
+                  <div class="panel-head">
+                    <span class="panel-title">Seasons &amp; Episodes</span>
+                  </div>
+                  <span class="cr-label">Seasons</span>
+                  <div id="season-chips" class="chip-row">
+                    <span class="muted-hint">Inspect a series to load seasons</span>
+                  </div>
+
+                  <div id="season-heading" class="season-heading" hidden>
+                    <span id="season-heading-text" class="season-heading-text"></span>
+                  </div>
+
+                  <div class="row-between">
+                    <span class="cr-label">Episodes</span>
+                    <button type="button" class="cr-chip cr-chip-action" id="select-all-eps">Select all</button>
+                  </div>
+                  <div id="episode-list" class="check-list">
+                    <span class="muted-hint">No catalog yet</span>
+                  </div>
+                </section>
+
+                <section class="panel panel-elevated">
+                  <div class="panel-head">
+                    <span class="panel-title">Audio &amp; Subtitles</span>
+                  </div>
+                  <span class="cr-label">Audio</span>
+                  <div id="audio-list" class="check-list compact">
+                    <span class="muted-hint">Available after Inspect</span>
+                  </div>
+
+                  <span class="cr-label" style="margin-top: 14px">Subtitles</span>
+                  <div id="sub-list" class="check-list compact">
+                    <button type="button" class="cr-check is-on" data-sub="none" id="sub-none-default">
+                      <span class="cr-box" aria-hidden="true">
+                        <svg class="cr-tick" viewBox="0 0 12 12" fill="none">
+                          <path d="M2.2 6.2L4.8 8.8L9.8 3.2" stroke="#0c0a09" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>
+                      </span>
+                      <span class="cr-check-label">No subtitles</span>
+                    </button>
+                  </div>
+                </section>
+
+                <section class="panel panel-elevated">
+                  <div class="panel-head">
+                    <span class="panel-title">Options</span>
+                  </div>
+                  <span class="cr-label">Video quality</span>
+                  <div class="cr-dd" id="dd-video" data-value="max">
+                    <button type="button" class="cr-dd-btn" aria-haspopup="listbox" aria-expanded="false">
+                      <span class="cr-dd-value">max</span>
+                      <span class="cr-dd-chevron" aria-hidden="true"></span>
+                    </button>
+                    <div class="cr-dd-menu" role="listbox">
+                      <button type="button" class="cr-dd-item is-active" data-val="max">max</button>
+                    </div>
+                  </div>
+
+                  <span class="cr-label" style="margin-top: 14px">Audio quality</span>
+                  <div class="cr-dd" id="dd-audio" data-value="max">
+                    <button type="button" class="cr-dd-btn" aria-haspopup="listbox" aria-expanded="false">
+                      <span class="cr-dd-value">max</span>
+                      <span class="cr-dd-chevron" aria-hidden="true"></span>
+                    </button>
+                    <div class="cr-dd-menu" role="listbox">
+                      <button type="button" class="cr-dd-item is-active" data-val="max">max</button>
+                    </div>
+                  </div>
+
+                  <span class="cr-label" style="margin-top: 14px">Output folder</span>
+                  <div class="output-row">
+                    <input class="cr-input is-muted" type="text" id="output-dir" value="./Downloads" spellcheck="false" />
+                    <button type="button" class="cr-btn cr-btn-ghost" id="btn-output" title="Browse for output folder">…</button>
+                  </div>
+
+                  <div class="spacer"></div>
+                  <div class="dl-actions">
+                    <button type="button" class="cr-btn cr-btn-ghost" id="btn-play-selected">Play</button>
+                    <button type="button" class="cr-btn-download" id="btn-download">Download Selected</button>
+                  </div>
+                </section>
+              </div>
+            </div>
+
+            <div id="view-advanced" class="view" role="tabpanel" hidden>
+              <p class="cr-hint adv-lead">
+                Advanced keeps everything from Normal, and adds power-user tools. Defaults still apply until you change them (saved as preferences).
+              </p>
+              <div class="cols dl-cols">
+                <section class="panel panel-elevated">
+                  <span class="cr-label">Closed captions (CC)</span>
+                  <p class="cr-hint">Downloaded in addition to subtitles. Default: none.</p>
+                  <div id="cc-list" class="check-list compact">
+                    <button type="button" class="cr-check is-on" data-cc="none" id="cc-none-default">
+                      <span class="cr-box" aria-hidden="true">
+                        <svg class="cr-tick" viewBox="0 0 12 12" fill="none">
+                          <path d="M2.2 6.2L4.8 8.8L9.8 3.2" stroke="#0c0a09" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>
+                      </span>
+                      <span class="cr-check-label">No CC</span>
+                    </button>
+                  </div>
+
+                  <span class="cr-label" style="margin-top: 14px">Batch URLs</span>
+                  <p class="cr-hint">One URL per line, or pick a list file.</p>
+                  <textarea
+                    class="cr-input cr-textarea"
+                    id="batch-urls"
+                    rows="4"
+                    spellcheck="false"
+                    placeholder="https://www.crunchyroll.com/watch/…&#10;https://www.crunchyroll.com/series/…"
+                  ></textarea>
+                  <button type="button" class="cr-btn cr-btn-ghost" id="btn-batch-file" style="margin-top: 8px; width: 100%">Load .txt list…</button>
+                </section>
+
+                <section class="panel panel-elevated">
+                  <span class="cr-label">Widevine device</span>
+                  <p class="cr-hint">Paths only — secrets stay in files. Env vars also work.</p>
+                  <div class="cr-field">
+                    <span class="cr-label cr-label-sm">Device .wvd</span>
+                    <div class="output-row">
+                      <input class="cr-input sm" type="text" id="wvd-path" placeholder="Optional single .wvd path" spellcheck="false" />
+                      <button type="button" class="cr-btn cr-btn-ghost" id="btn-wvd" title="Set .wvd path">…</button>
+                    </div>
+                  </div>
+                  <div class="cr-field">
+                    <span class="cr-label cr-label-sm">client_id.bin</span>
+                    <div class="output-row">
+                      <input class="cr-input sm" type="text" id="client-id-path" placeholder="Optional client_id.bin path" spellcheck="false" />
+                      <button type="button" class="cr-btn cr-btn-ghost" id="btn-client-id" title="Set client_id.bin path">…</button>
+                    </div>
+                  </div>
+                  <div class="cr-field">
+                    <span class="cr-label cr-label-sm">private_key.pem</span>
+                    <div class="output-row">
+                      <input class="cr-input sm" type="text" id="private-key-path" placeholder="Optional private_key.pem path" spellcheck="false" />
+                      <button type="button" class="cr-btn cr-btn-ghost" id="btn-private-key" title="Set private_key.pem path">…</button>
+                    </div>
+                  </div>
+
+                  <span class="cr-label" style="margin-top: 6px">Probe &amp; languages</span>
+                  <div class="cr-toggle-row">
+                    <div>
+                      <div class="cr-toggle-title">Probe every selected episode</div>
+                      <div class="cr-hint" style="margin: 0">Slower · more accurate langs per ep</div>
+                    </div>
+                    <button type="button" class="cr-switch" id="sw-probe-every" aria-label="Probe every episode" aria-pressed="false"></button>
+                  </div>
+                  <div class="cr-toggle-row">
+                    <div>
+                      <div class="cr-toggle-title">Debug manifest logging</div>
+                      <div class="cr-hint" style="margin: 0">Verbose playback / MPD logs</div>
+                    </div>
+                    <button type="button" class="cr-switch" id="sw-debug-manifest" aria-label="Debug manifest" aria-pressed="false"></button>
+                  </div>
+                  <div class="cr-toggle-row">
+                    <div>
+                      <div class="cr-toggle-title">Strict languages</div>
+                      <div class="cr-hint" style="margin: 0">Stop queue on missing locales</div>
+                    </div>
+                    <button type="button" class="cr-switch" id="sw-strict-langs" aria-label="Strict languages" aria-pressed="false"></button>
+                  </div>
+                </section>
+
+                <section class="panel panel-elevated">
+                  <span class="cr-label">Retries &amp; circuit</span>
+                  <div class="cr-row">
+                    <div class="cr-field">
+                      <span class="cr-label cr-label-sm">4294 retries</span>
+                      <input class="cr-num" type="number" id="num-4294-retries" value="2" min="0" max="5" />
+                    </div>
+                    <div class="cr-field">
+                      <span class="cr-label cr-label-sm">Backoff (sec)</span>
+                      <input class="cr-num" type="number" id="num-4294-backoff" value="8" min="1" max="60" />
+                    </div>
+                  </div>
+                  <div class="cr-row">
+                    <div class="cr-field">
+                      <span class="cr-label cr-label-sm">Circuit limit</span>
+                      <input class="cr-num" type="number" id="num-circuit-limit" value="3" min="1" max="10" />
+                    </div>
+                    <div class="cr-field">
+                      <span class="cr-label cr-label-sm">Index window</span>
+                      <input class="cr-num" type="number" id="num-index-window" value="25" min="1" max="100" />
+                    </div>
+                  </div>
+
+                  <span class="cr-label" style="margin-top: 4px">Subtitle index tools</span>
+                  <p class="cr-hint">Series URLs only. No video download.</p>
+                  <div class="adv-btn-stack">
+                    <button type="button" class="cr-btn cr-btn-ghost" id="btn-build-catalog" style="width: 100%">Build catalog (--index)</button>
+                    <button type="button" class="cr-btn cr-btn-ghost" id="btn-index-subs" style="width: 100%">Index subtitles (--index-subs)</button>
+                  </div>
+
+                  <div class="spacer"></div>
+                  <button type="button" class="cr-btn-download" id="btn-download-adv">Download Selected</button>
+                </section>
+              </div>
+            </div>
+          </div>
+
+          <!-- Bottom activity card with tabs -->
+          <section class="activity-card" id="activity-dock">
+            <div class="activity-card-head">
+              <div class="activity-tabs" role="tablist" aria-label="Activity panels">
+                <button type="button" class="activity-tab is-on" id="tab-activity" data-tab="activity" role="tab" aria-selected="true">Activity</button>
+                <button type="button" class="activity-tab" id="tab-queue" data-tab="queue" role="tab" aria-selected="false">Queue</button>
+                <button type="button" class="activity-tab" id="tab-progress" data-tab="progress" role="tab" aria-selected="false">Progress</button>
+              </div>
+              <div class="activity-card-actions">
+                <span class="activity-card-summary" id="activity-summary">
+                  <span id="queue-summary">No jobs</span>
+                  <span class="activity-dock-sep" aria-hidden="true">·</span>
+                  <span id="progress-summary">Idle</span>
+                </span>
+                <button type="button" class="cr-btn cr-btn-ghost sm" id="btn-clear-activity" title="Clear activity log">Clear</button>
+                <button
+                  type="button"
+                  class="cr-btn cr-btn-ghost sm"
+                  id="btn-toggle-activity"
+                  aria-expanded="true"
+                  aria-controls="activity-dock-body"
+                  title="Collapse activity"
+                >Hide</button>
+              </div>
+            </div>
+            <div class="activity-dock-body" id="activity-dock-body">
+              <div class="activity-tab-panel is-on" id="panel-activity" data-tab-panel="activity">
+                <div id="activity" class="activity-log" aria-live="polite">
+                  <div class="ok">● Ready</div>
+                  <div>Waiting for URL + cookie file…</div>
+                </div>
+              </div>
+              <div class="activity-tab-panel" id="panel-queue" data-tab-panel="queue" hidden>
+                <div id="queue" class="queue-box">No jobs yet</div>
+              </div>
+              <div class="activity-tab-panel" id="panel-progress" data-tab-panel="progress" hidden>
+                <div class="progress-wrap">
+                  <div class="progress-meta">
+                    <span id="progress-label">Progress</span>
+                    <span id="progress-value">—</span>
+                  </div>
+                  <div class="progress-bar" id="progress-bar"><i id="progress-fill"></i></div>
+                </div>
+              </div>
+            </div>
+            <!-- Legacy hook targets kept for JS that still toggles collapsed -->
+            <span id="activity-hint" hidden>Hide</span>
+          </section>
+        </div>
+
+        <!-- QUEUE (focus activity) -->
+        <div class="page page-simple" id="page-queue" hidden>
+          <div class="simple-card panel-elevated">
+            <h2 class="panel-title">Queue</h2>
+            <p class="cr-hint">Live queue also appears in the Downloads activity panel. Open Downloads to run jobs.</p>
+            <button type="button" class="cr-btn cr-btn-primary" id="btn-goto-download-from-queue">Open Downloads</button>
+          </div>
+        </div>
+
+        <!-- HISTORY -->
+        <div class="page page-simple" id="page-history" hidden>
+          <div class="simple-card panel-elevated">
+            <h2 class="panel-title">History</h2>
+            <p class="cr-hint">
+              Watch history lives on Home under Continue Watching. Full offline download history can be added later.
+            </p>
+            <button type="button" class="cr-btn cr-btn-primary" id="btn-goto-home-from-history">Open Home</button>
+          </div>
+        </div>
+
+        <!-- SETTINGS -->
+        <div class="page page-simple" id="page-settings" hidden>
+          <div class="simple-card panel-elevated">
+            <h2 class="panel-title">Settings</h2>
+            <p class="cr-hint">
+              Cookie profiles, Normal/Advanced mode, Widevine paths, and index tools are available from the top bar
+              and Advanced mode on Downloads.
+            </p>
+            <div class="settings-actions">
+              <button type="button" class="cr-btn cr-btn-ghost" id="btn-settings-cookie">Cookie file…</button>
+              <button type="button" class="cr-btn cr-btn-primary" id="btn-goto-download-settings">Open Downloads (Advanced)</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="page-play" class="page-play" hidden tabindex="-1" role="dialog" aria-modal="true" aria-label="Play">
+    <div id="play-stage" class="play-stage">
+      <div id="play-video" class="play-video"></div>
+      <span class="play-stage-label" id="play-error">libmpv surface</span>
+      <span class="play-wait" id="play-wait" hidden>Buffering…</span>
+    </div>
+    <div class="play-chrome" id="play-chrome">
+      <div class="play-top-fade"></div>
+      <div class="play-bot-fade"></div>
+      <div class="play-top-row">
+        <button type="button" class="play-icon-btn" id="btn-play-back" title="Back" aria-label="Back">
+          <svg viewBox="0 0 24 24" width="22" height="22" fill="none" aria-hidden="true">
+            <path d="M15 5l-7 7 7 7" stroke="#fff" stroke-width="2" stroke-linecap="round"/>
+          </svg>
+        </button>
+        <div class="play-ep-meta">
+          <div class="play-show" id="play-show"></div>
+          <div class="play-title" id="play-title"></div>
+        </div>
+        <span class="play-lock" id="play-lock">1080p locked</span>
+      </div>
+      <div class="play-bottom">
+        <div class="play-timeline" id="play-timeline">
+          <div class="play-track">
+            <div class="play-buf" id="play-buf"></div>
+            <div class="play-prog" id="play-prog"></div>
+            <div class="play-dot" id="play-dot"></div>
+          </div>
+        </div>
+        <div class="play-ctrl">
+          <button type="button" class="play-icon-btn" id="btn-play-replay" title="Replay" aria-label="Replay">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5V2L8 6l4 4V7a5 5 0 1 1-5 5H5a7 7 0 1 0 7-7z"/></svg>
+          </button>
+          <button type="button" class="play-icon-btn" id="btn-play-toggle" title="Play" aria-label="Play">
+            <svg viewBox="0 0 24 24" id="play-icon" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>
+          </button>
+          <div class="play-vol-wrap" id="play-vol">
+            <button type="button" class="play-icon-btn" id="btn-play-vol" title="Volume" aria-label="Volume">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 9v6h4l5 4V5L9 9H5zm11.5 3a3.5 3.5 0 0 0-2-3.16v6.32A3.5 3.5 0 0 0 16.5 12z"/></svg>
+            </button>
+            <div class="play-vol-pop">
+              <span id="play-vol-label">100</span>
+              <div class="play-vol-track" id="play-vol-track" role="slider" aria-valuemin="0" aria-valuemax="100" aria-valuenow="100" aria-label="Volume" tabindex="0">
+                <i class="play-vol-fill" id="play-vol-fill"></i>
+                <b class="play-vol-knob" id="play-vol-knob"></b>
+              </div>
+            </div>
+          </div>
+          <span class="play-time" id="play-time">0:00 / 0:00</span>
+          <span class="play-spacer"></span>
+          <button type="button" class="play-icon-btn" id="btn-play-next" title="Next" aria-label="Next">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg>
+          </button>
+          <button type="button" class="play-icon-btn" id="btn-play-cc" title="Subtitles" aria-label="Subtitles">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 4H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2zM4 12h4v2H4v-2zm10 6H4v-2h10v2zm6 0h-4v-2h4v2zm0-4H10v-2h10v2z"/></svg>
+          </button>
+          <div class="play-speed-wrap" id="play-speed-wrap">
+            <button type="button" class="play-icon-btn" id="btn-play-speed" title="Speed" aria-label="Playback speed">1x</button>
+            <div class="play-speed-menu" id="play-speed-menu" role="menu" aria-label="Playback speed">
+              <button type="button" class="play-speed-item" data-speed="0.5" role="menuitem">0.5x</button>
+              <button type="button" class="play-speed-item" data-speed="0.75" role="menuitem">0.75x</button>
+              <button type="button" class="play-speed-item is-on" data-speed="1" role="menuitem">1x</button>
+              <button type="button" class="play-speed-item" data-speed="1.25" role="menuitem">1.25x</button>
+              <button type="button" class="play-speed-item" data-speed="1.5" role="menuitem">1.5x</button>
+              <button type="button" class="play-speed-item" data-speed="1.75" role="menuitem">1.75x</button>
+              <button type="button" class="play-speed-item" data-speed="2" role="menuitem">2x</button>
+            </div>
+          </div>
+          <button type="button" class="play-icon-btn" id="btn-play-settings" title="Settings" aria-label="Settings">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19.14 12.94c.04-.31.06-.63.06-.94s-.02-.63-.06-.94l2.03-1.58a.5.5 0 0 0 .12-.64l-1.92-3.32a.5.5 0 0 0-.6-.22l-2.39.96a7.03 7.03 0 0 0-1.63-.94l-.36-2.54A.5.5 0 0 0 13.9 2h-3.8a.5.5 0 0 0-.49.42l-.36 2.54c-.59.24-1.13.55-1.63.94l-2.39-.96a.5.5 0 0 0-.6.22L2.71 8.48a.5.5 0 0 0 .12.64L4.86 10.7c-.04.31-.06.63-.06.94s.02.63.06.94l-2.03 1.58a.5.5 0 0 0-.12.64l1.92 3.32c.14.24.43.34.7.22l2.39-.96c.5.39 1.04.7 1.63.94l.36 2.54c.05.24.25.42.49.42h3.8c.24 0 .44-.18.49-.42l.36-2.54c.59-.24 1.13-.55 1.63-.94l2.39.96c.27.11.56.02.7-.22l1.92-3.32a.5.5 0 0 0-.12-.64l-2.03-1.58zM12 15.5A3.5 3.5 0 1 1 12 8.5a3.5 3.5 0 0 1 0 7z"/></svg>
+          </button>
+          <button type="button" class="play-icon-btn" id="btn-play-fs" title="Fullscreen" aria-label="Fullscreen">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 14H5v5h5v-2H7v-3zm12 0h-2v3h-3v2h5v-5zM7 7h3V5H5v5h2V7zm10 0v3h2V5h-5v2h3z"/></svg>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="js/app.js"></script>
+</body>
+</html>

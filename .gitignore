@@ -7,3 +7,27 @@ client_id.bin
 private_key.pem
 
 *.mkv
+
+# Credentials — never commit
+etp_rt.txt
+.env
+crunchyroll-downloader
+crunchyroll-downloader.exe
+crunchyroll-downloader-gui.exe
+*_index.json
+
+# Built binaries / Wails output
+*.exe
+cmd/gui/build/
+gui.exe
+libmpv-2.dll
+libmpv*.dll
+.tmp-libmpv/
+
+crunchyroll-downloader.m*
+crunchyroll-downloader.media*
+*_index*.json
+*_indexer_*.log
+One Piece_subs/
+
+.superpowers/

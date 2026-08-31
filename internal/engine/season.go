@@ -1,4 +1,4 @@
-package main
+package engine
 
 import (
 	"encoding/json"
@@ -19,7 +19,10 @@ type SeasonEpisode struct {
 	SeriesTitle        string        `json:"series_title"`
 	AudioLocale        string        `json:"audio_locale"`
 	Title              string        `json:"title"`
+	Description        string        `json:"description"`
 	AvailabilityStarts string        `json:"availability_starts"`
+	// Images is present on CMS episode list payloads; used for UI thumbnails only.
+	Images CRImages `json:"images"`
 }
 
 func getSeasonEpisodes(contentId string, audio_locale string, sub_locale string) []SeasonEpisode {
@@ -61,6 +64,11 @@ type Seasons struct {
 type Season struct {
 	ID           string `json:"id"`
 	SeasonNumber int    `json:"season_number"`
+	// Title is Crunchyroll's display name for the season (often custom, e.g.
+	// "The Promised Neverland" or "Season 2 Part 2"), not just "Season N".
+	Title string `json:"title"`
+	// SeasonDisplayNumber is the human-facing season label when present (e.g. "1", "2.5").
+	SeasonDisplayNumber string `json:"season_display_number"`
 }
 
 func getSeasons(contentId string, audioLocale string, subLocale string) []Season {

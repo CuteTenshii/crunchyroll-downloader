@@ -1,4 +1,4 @@
-package main
+package engine
 
 import (
 	"fmt"
@@ -10,6 +10,8 @@ import (
 	"github.com/unki2aut/go-mpd"
 )
 
+var manifestHTTPClient = &http.Client{Timeout: providerHTTPTimeout}
+
 func parseManifest(url string) *mpd.MPD {
 	req, err := http.NewRequest(http.MethodGet, url, nil)
 	if err != nil {
@@ -17,7 +19,7 @@ func parseManifest(url string) *mpd.MPD {
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("User-Agent", "Mozilla/5.0 (X11; Linux x86_64; rv:147.0) Gecko/20100101 Firefox/147.0")
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := manifestHTTPClient.Do(req)
 	if err != nil {
 		panic(err)
 	}
@@ -30,7 +32,7 @@ func parseManifest(url string) *mpd.MPD {
 	mpd := new(mpd.MPD)
 	mpd.Decode(body)
 
-	if *debug {
+	if activeConfig.DebugManifest {
 		fmt.Printf("\n%s\n", string(body))
 	}
 
@@ -38,13 +40,40 @@ func parseManifest(url string) *mpd.MPD {
 }
 
 func getBaseUrl(set *mpd.AdaptationSet, isVideoSet bool, quality string) (*string, *string) {
-	for _, representation := range set.Representations {
+	var bestVideo *mpd.Representation
+	var bestVideoHeight uint64
+	var bestAudio *mpd.Representation
+	var bestAudioBandwidth uint64
+	wantMax := strings.EqualFold(strings.TrimSpace(quality), "max")
+	requestedVideoHeight, requestedVideoHeightErr := strconv.ParseUint(strings.TrimSuffix(quality, "p"), 10, 64)
+
+	for representationIndex := range set.Representations {
+		representation := &set.Representations[representationIndex]
 		if isVideoSet {
-			toInt, _ := strconv.ParseInt(strings.ReplaceAll(quality, "p", ""), 10, 64)
-			if *representation.Height == uint64(toInt) {
+			if representation.Height == nil || len(representation.BaseURL) == 0 || representation.ID == nil {
+				continue
+			}
+			if !wantMax && requestedVideoHeightErr == nil && *representation.Height == requestedVideoHeight {
 				return &representation.BaseURL[0].Value, representation.ID
 			}
+			if *representation.Height > bestVideoHeight {
+				bestVideo = representation
+				bestVideoHeight = *representation.Height
+			}
 		} else {
+			if representation.ID == nil || len(representation.BaseURL) == 0 {
+				continue
+			}
+			// Track highest-bandwidth audio for "max" quality selection.
+			if representation.Bandwidth != nil && *representation.Bandwidth > bestAudioBandwidth {
+				bestAudio = representation
+				bestAudioBandwidth = *representation.Bandwidth
+			} else if bestAudio == nil {
+				bestAudio = representation
+			}
+			if wantMax {
+				continue
+			}
 			if strings.Contains(*representation.ID, "audio/") {
 				if strings.Contains(*representation.ID, quality) {
 					return &representation.BaseURL[0].Value, representation.ID
@@ -63,10 +92,29 @@ func getBaseUrl(set *mpd.AdaptationSet, isVideoSet bool, quality string) (*strin
 			}
 		}
 	}
+	if isVideoSet && bestVideo != nil {
+		if wantMax {
+			fmt.Printf("Video quality max → %dp (%s)\n", bestVideoHeight, *bestVideo.ID)
+		} else {
+			fmt.Printf("Video quality %s not found, deferring to %dp (%s)\n", quality, bestVideoHeight, *bestVideo.ID)
+		}
+		return &bestVideo.BaseURL[0].Value, bestVideo.ID
+	}
+	if !isVideoSet && bestAudio != nil {
+		if wantMax {
+			fmt.Printf("Audio quality max → %s\n", *bestAudio.ID)
+		} else {
+			fmt.Printf("Audio quality %s not found, deferring to %s\n", quality, *bestAudio.ID)
+		}
+		return &bestAudio.BaseURL[0].Value, bestAudio.ID
+	}
 	if len(set.Representations) == 0 {
 		return nil, nil
 	}
 	firstRep := set.Representations[0]
+	if len(firstRep.BaseURL) == 0 || firstRep.ID == nil {
+		return nil, nil
+	}
 	fmt.Printf("Audio quality %s not found, deferring to %s\n", quality, *firstRep.ID)
 	return &firstRep.BaseURL[0].Value, firstRep.ID
 }
