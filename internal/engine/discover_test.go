@@ -560,7 +560,7 @@ func TestMapHomeFeedEntrySimilarToFromLink(t *testing.T) {
 
 func TestApplyPlayheadProgressOmitsWhenDurationUnknown(t *testing.T) {
 	cards := []DiscoverCard{{ID: "GWDU82Z05", Title: "Ep"}}
-	ph := map[string]playheadInfo{
+	ph := map[string]PlayheadInfo{
 		"GWDU82Z05": {Playhead: 120, FullyWatched: false},
 	}
 	// No duration for this content id.
@@ -570,7 +570,7 @@ func TestApplyPlayheadProgressOmitsWhenDurationUnknown(t *testing.T) {
 	}
 
 	// Fully watched still sets progress without duration.
-	ph["GWDU82Z05"] = playheadInfo{Playhead: 120, FullyWatched: true}
+	ph["GWDU82Z05"] = PlayheadInfo{Playhead: 120, FullyWatched: true}
 	applyPlayheadProgress(cards, ph, map[string]int64{})
 	if cards[0].Progress == nil || *cards[0].Progress != 1 {
 		t.Fatalf("fully watched should set progress=1, got %v", cards[0].Progress)

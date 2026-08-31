@@ -232,12 +232,12 @@ func resolveBrowseEndpoint(link, locale string, n int) (string, error) {
 	), nil
 }
 
-type playheadInfo struct {
+type PlayheadInfo struct {
 	Playhead     float64 // seconds
 	FullyWatched bool
 }
 
-func fetchPlayheads(accountID string, contentIDs []string) (map[string]playheadInfo, error) {
+func fetchPlayheads(accountID string, contentIDs []string) (map[string]PlayheadInfo, error) {
 	clean := make([]string, 0, len(contentIDs))
 	seen := map[string]struct{}{}
 	for _, id := range contentIDs {
@@ -254,7 +254,7 @@ func fetchPlayheads(accountID string, contentIDs []string) (map[string]playheadI
 	if len(clean) == 0 {
 		return nil, nil
 	}
-	out := map[string]playheadInfo{}
+	out := map[string]PlayheadInfo{}
 	const batch = 50
 	for i := 0; i < len(clean); i += batch {
 		j := i + batch
@@ -286,8 +286,8 @@ func fetchPlayheads(accountID string, contentIDs []string) (map[string]playheadI
 // parsePlayheadsResponse maps content_id → playhead info.
 // Shape: { "data": [ { "content_id", "playhead", "fully_watched" } ] }
 // or object map under data.
-func parsePlayheadsResponse(body []byte) (map[string]playheadInfo, error) {
-	out := map[string]playheadInfo{}
+func parsePlayheadsResponse(body []byte) (map[string]PlayheadInfo, error) {
+	out := map[string]PlayheadInfo{}
 	var asList struct {
 		Data []struct {
 			ContentID    string  `json:"content_id"`
@@ -301,7 +301,7 @@ func parsePlayheadsResponse(body []byte) (map[string]playheadInfo, error) {
 			if id == "" {
 				continue
 			}
-			out[id] = playheadInfo{Playhead: row.Playhead, FullyWatched: row.FullyWatched}
+			out[id] = PlayheadInfo{Playhead: row.Playhead, FullyWatched: row.FullyWatched}
 		}
 		return out, nil
 	}
@@ -320,7 +320,7 @@ func parsePlayheadsResponse(body []byte) (map[string]playheadInfo, error) {
 		if id == "" {
 			continue
 		}
-		out[id] = playheadInfo{Playhead: row.Playhead, FullyWatched: row.FullyWatched}
+		out[id] = PlayheadInfo{Playhead: row.Playhead, FullyWatched: row.FullyWatched}
 	}
 	return out, nil
 }
@@ -471,7 +471,7 @@ func imagesFromHistoryPanel(raw, panel json.RawMessage) CRImages {
 	return holder.Images
 }
 
-func applyPlayheadProgress(cards []DiscoverCard, ph map[string]playheadInfo, durations map[string]int64) {
+func applyPlayheadProgress(cards []DiscoverCard, ph map[string]PlayheadInfo, durations map[string]int64) {
 	if len(ph) == 0 {
 		return
 	}
