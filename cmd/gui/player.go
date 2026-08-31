@@ -58,6 +58,7 @@ type playheadPost struct {
 	seconds   float64
 	locale    string
 	audioLang string
+	debounce  *engine.PlayheadDebouncer
 }
 
 var mpvHostFactory = newMpvHost
@@ -67,6 +68,7 @@ var (
 	playGetPlayheads = engine.GetPlayheads
 	playAccountIDFn  = engine.GetAccountID
 	playPostPlayhead = engine.PostPlayhead
+	resolvePlayFile  = resolveLocalMKV
 )
 
 func missingPlayerErr() error {
@@ -120,12 +122,16 @@ func playSeriesDirHint(seriesTitle string) string {
 	return strings.TrimRight(s, " .")
 }
 
+func mkvMatchesEpisode(name string, season, episode int) bool {
+	token := fmt.Sprintf("S%02dE%02d", season, episode)
+	return strings.Contains(name, " "+token+" ") || strings.Contains(name, token+" -")
+}
+
 func resolveLocalMKV(outputDir, seriesTitle string, season, episode int) (string, error) {
 	root := strings.TrimSpace(outputDir)
 	if root == "" {
 		root = "./Downloads"
 	}
-	needle := fmt.Sprintf("S%02dE%02d", season, episode)
 	seriesHint := playSeriesDirHint(seriesTitle)
 
 	var matches []string
@@ -137,7 +143,7 @@ func resolveLocalMKV(outputDir, seriesTitle string, season, episode int) (string
 		if !strings.EqualFold(filepath.Ext(name), ".mkv") {
 			return nil
 		}
-		if !strings.Contains(name, needle) {
+		if !mkvMatchesEpisode(name, season, episode) {
 			return nil
 		}
 		matches = append(matches, path)
@@ -148,7 +154,7 @@ func resolveLocalMKV(outputDir, seriesTitle string, season, episode int) (string
 	}
 	if seriesHint != "" {
 		for _, m := range matches {
-			if strings.Contains(filepath.Base(m), seriesHint) || strings.Contains(m, seriesHint) {
+			if filepath.Base(filepath.Dir(m)) == seriesHint {
 				return m, nil
 			}
 		}
@@ -178,16 +184,34 @@ func (a *App) StartPlay(req PlayRequest) error {
 		}
 	}
 
+	a.playMu.Lock()
+	a.playGen++
+	mine := a.playGen
+	prev, doPrev := a.queuePlayheadLocked()
+	a.playMu.Unlock()
+
+	commitPrev := func() { a.commitPlayhead(prev, doPrev) }
+	if a.playAbandonedLocked(mine) {
+		commitPrev()
+		return nil
+	}
+
 	cookie := strings.TrimSpace(prefs.CookieFile)
 	if episodeID != "" {
 		if cookie == "" {
+			commitPrev()
 			return fmt.Errorf("cookie file path is not configured")
 		}
 		if err := playAuthenticate(cookie); err != nil {
+			commitPrev()
 			return err
 		}
 	} else if cookie != "" {
 		_ = playAuthenticate(cookie)
+	}
+	if a.playAbandonedLocked(mine) {
+		commitPrev()
+		return nil
 	}
 
 	resumeSeconds := 0.0
@@ -211,8 +235,9 @@ func (a *App) StartPlay(req PlayRequest) error {
 			if outDir == "" {
 				outDir = "./Downloads"
 			}
-			found, err := resolveLocalMKV(outDir, req.SeriesTitle, req.SeasonNumber, req.EpisodeNumber)
+			found, err := resolvePlayFile(outDir, req.SeriesTitle, req.SeasonNumber, req.EpisodeNumber)
 			if err != nil || found == "" {
+				commitPrev()
 				return fmt.Errorf("no local file")
 			}
 			path = found
@@ -220,19 +245,23 @@ func (a *App) StartPlay(req PlayRequest) error {
 	} else {
 		st, err := os.Stat(path)
 		if err != nil || st.IsDir() {
+			commitPrev()
 			return fmt.Errorf("no local file")
 		}
 	}
 
 	a.playMu.Lock()
-	prev, doPrev := a.queuePlayheadLocked()
-	a.playGen++
+	if a.playAbandoned >= mine {
+		a.playMu.Unlock()
+		commitPrev()
+		return nil
+	}
 
 	if a.playHost == nil {
 		host, err := mpvHostFactory()
 		if err != nil {
 			a.playMu.Unlock()
-			a.commitPlayhead(prev, doPrev)
+			commitPrev()
 			return missingPlayerErr()
 		}
 		a.playHost = host
@@ -242,13 +271,13 @@ func (a *App) StartPlay(req PlayRequest) error {
 	if err != nil {
 		_ = a.clearPlayLocked()
 		a.playMu.Unlock()
-		a.commitPlayhead(prev, doPrev)
+		commitPrev()
 		return missingPlayerErr()
 	}
 	if err := a.playHost.Attach(hwnd); err != nil {
 		_ = a.clearPlayLocked()
 		a.playMu.Unlock()
-		a.commitPlayhead(prev, doPrev)
+		commitPrev()
 		if libmpvError(err) {
 			return err
 		}
@@ -257,7 +286,7 @@ func (a *App) StartPlay(req PlayRequest) error {
 	if path != "" {
 		if err := a.playHost.LoadFile(path); err != nil {
 			a.playMu.Unlock()
-			a.commitPlayhead(prev, doPrev)
+			commitPrev()
 			return err
 		}
 		a.playPaused = false
@@ -275,7 +304,7 @@ func (a *App) StartPlay(req PlayRequest) error {
 	ctx := a.ctx
 	a.playMu.Unlock()
 
-	a.commitPlayhead(prev, doPrev)
+	commitPrev()
 	if ctx != nil {
 		wailsruntime.EventsEmit(ctx, "play-ready", map[string]any{
 			"resumeSeconds": resumeSeconds,
@@ -284,11 +313,19 @@ func (a *App) StartPlay(req PlayRequest) error {
 	return nil
 }
 
+func (a *App) playAbandonedLocked(mine uint64) bool {
+	a.playMu.Lock()
+	ok := a.playAbandoned >= mine
+	a.playMu.Unlock()
+	return ok
+}
+
 // StopPlay tears down the host, child HWND, and play-state ticker for the
 // generation captured at call start. A later StartPlay bumps playGen so a
 // delayed StopPlay cannot destroy the new session.
 func (a *App) StopPlay() error {
 	a.playMu.Lock()
+	a.playAbandoned = a.playGen
 	gen := a.playGen
 	a.playMu.Unlock()
 	return a.clearPlayIfGen(gen)
@@ -490,6 +527,7 @@ func (a *App) queuePlayheadLocked() (playheadPost, bool) {
 		seconds:   pos,
 		locale:    a.playLocale,
 		audioLang: a.playAudioLang,
+		debounce:  a.playDebounce,
 	}, true
 }
 
@@ -500,8 +538,12 @@ func (a *App) commitPlayhead(shot playheadPost, ok bool) error {
 	err := playPostPlayhead(shot.accountID, shot.contentID, shot.seconds, shot.locale, shot.audioLang)
 	if err != nil {
 		a.logPlayheadErr(err)
+		return err
 	}
-	return err
+	if shot.debounce != nil {
+		shot.debounce.MarkPosted(shot.contentID, shot.seconds)
+	}
+	return nil
 }
 
 func (a *App) logPlayheadErr(err error) {

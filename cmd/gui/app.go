@@ -23,14 +23,15 @@ type App struct {
 	mu     sync.Mutex
 	prefs  engine.Preferences
 
-	playMu     sync.Mutex
-	playHost   MpvHost
-	playCancel context.CancelFunc
-	playRect   PlayStageRect
-	playParent uintptr
-	playChild  uintptr
-	playPaused bool
-	playGen    uint64
+	playMu        sync.Mutex
+	playHost      MpvHost
+	playCancel    context.CancelFunc
+	playRect      PlayStageRect
+	playParent    uintptr
+	playChild     uintptr
+	playPaused    bool
+	playGen       uint64
+	playAbandoned uint64
 
 	playEpisodeID string
 	playLocale    string

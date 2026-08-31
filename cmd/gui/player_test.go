@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -409,5 +410,167 @@ func TestPlayPauseThenStopDebouncesSameSecond(t *testing.T) {
 	}
 	if n := len(sink.snapshot()); n != 1 {
 		t.Fatalf("pause-then-close posts=%d want 1", n)
+	}
+}
+
+func TestResolveLocalMKVDoesNotMatchE10InsideE100(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "Show")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(dir, "Show S01E10 - a.mkv")
+	decoy := filepath.Join(dir, "Show S01E100 - b.mkv")
+	if err := os.WriteFile(decoy, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(want, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := resolveLocalMKV(root, "Show", 1, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != want {
+		t.Fatalf("got %q want %q", got, want)
+	}
+}
+
+func TestResolveLocalMKVPrefersSeriesFolderNotSubstring(t *testing.T) {
+	root := t.TempDir()
+	bleach := filepath.Join(root, "Bleach")
+	tybw := filepath.Join(root, "Bleach Thousand Year Blood War")
+	if err := os.MkdirAll(bleach, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(tybw, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(bleach, "Bleach S01E01 - X [1080p].mkv")
+	decoy := filepath.Join(tybw, "Bleach Thousand Year Blood War S01E01 - Y [1080p].mkv")
+	if err := os.WriteFile(decoy, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(want, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := resolveLocalMKV(root, "Bleach", 1, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != want {
+		t.Fatalf("got %q want %q", got, want)
+	}
+}
+
+func TestPlayPauseFailedPostThenStopRetries(t *testing.T) {
+	sink := stubPlayheadNetwork(t)
+	calls := 0
+	inner := playPostPlayhead
+	playPostPlayhead = func(accountID, contentID string, playheadSec float64, locale, audioLang string) error {
+		calls++
+		if calls == 1 {
+			return fmt.Errorf("playhead POST HTTP 500")
+		}
+		return inner(accountID, contentID, playheadSec, locale, audioLang)
+	}
+	h := &scriptedHost{pos: 10, dur: 100}
+	a := NewApp()
+	a.playHost = h
+	a.playGen = 1
+	a.playEpisodeID = "GWep"
+	a.playAccountID = "acct"
+	a.playPaused = false
+	a.playDebounce = engine.NewPlayheadDebouncer(time.Second)
+
+	if err := a.PlayPause(); err == nil {
+		t.Fatal("expected pause POST error")
+	}
+	if n := len(sink.snapshot()); n != 0 {
+		t.Fatalf("failed pause posted n=%d", n)
+	}
+	if err := a.StopPlay(); err != nil {
+		t.Fatal(err)
+	}
+	if calls != 2 {
+		t.Fatalf("posts=%d want 2", calls)
+	}
+	if n := len(sink.snapshot()); n != 1 {
+		t.Fatalf("close posts=%d want 1", n)
+	}
+}
+
+func TestStopPlayAbandonsInFlightStartPlay(t *testing.T) {
+	sink := stubPlayheadNetwork(t)
+	started := make(chan struct{})
+	release := make(chan struct{})
+	origAuth := playAuthenticate
+	playAuthenticate = func(string) error {
+		close(started)
+		<-release
+		return nil
+	}
+	t.Cleanup(func() { playAuthenticate = origAuth })
+
+	factoryCalls := 0
+	origFactory := mpvHostFactory
+	mpvHostFactory = func() (MpvHost, error) {
+		factoryCalls++
+		return &scriptedHost{}, nil
+	}
+	t.Cleanup(func() { mpvHostFactory = origFactory })
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "Show S01E01 - X [1080p].mkv")
+	if err := os.WriteFile(path, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	a := NewApp()
+	a.prefs.CookieFile = "cookie.txt"
+	a.prefs.OutputDir = dir
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- a.StartPlay(PlayRequest{
+			EpisodeID:     "GWep",
+			SeriesTitle:   "Show",
+			SeasonNumber:  1,
+			EpisodeNumber: 1,
+			FilePath:      path,
+		})
+	}()
+
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("auth did not start")
+	}
+
+	if err := a.StopPlay(); err != nil {
+		t.Fatal(err)
+	}
+	close(release)
+
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Fatalf("StartPlay: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("StartPlay did not return")
+	}
+
+	if a.playHost != nil {
+		t.Fatal("host set after abandon")
+	}
+	if a.playCancel != nil {
+		t.Fatal("ticker running after abandon")
+	}
+	if factoryCalls != 0 {
+		t.Fatalf("factoryCalls=%d", factoryCalls)
+	}
+	if n := len(sink.snapshot()); n != 0 {
+		t.Fatalf("posts=%d", n)
 	}
 }

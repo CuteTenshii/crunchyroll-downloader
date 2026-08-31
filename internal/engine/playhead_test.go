@@ -142,8 +142,23 @@ func TestPlayheadDebounceSameSecond(t *testing.T) {
 	if !d.ShouldPost("id", 10) {
 		t.Fatal("first should post")
 	}
+	d.MarkPosted("id", 10)
 	if d.ShouldPost("id", 10) {
 		t.Fatal("duplicate within window")
+	}
+}
+
+func TestPlayheadDebouncePeekDoesNotMark(t *testing.T) {
+	d := NewPlayheadDebouncer(time.Second)
+	if !d.ShouldPost("id", 10) {
+		t.Fatal("first should post")
+	}
+	if !d.ShouldPost("id", 10) {
+		t.Fatal("unmarked peek must still post")
+	}
+	d.MarkPosted("id", 10)
+	if d.ShouldPost("id", 10) {
+		t.Fatal("after MarkPosted same second must skip")
 	}
 }
 
@@ -152,6 +167,7 @@ func TestPlayheadDebounceDifferentSecond(t *testing.T) {
 	if !d.ShouldPost("id", 10) {
 		t.Fatal("first should post")
 	}
+	d.MarkPosted("id", 10)
 	if !d.ShouldPost("id", 11) {
 		t.Fatal("different second should post")
 	}
@@ -164,6 +180,7 @@ func TestPlayheadDebounceAfterWindow(t *testing.T) {
 	if !d.ShouldPost("id", 10) {
 		t.Fatal("first should post")
 	}
+	d.MarkPosted("id", 10)
 	now = now.Add(time.Second)
 	if !d.ShouldPost("id", 10) {
 		t.Fatal("after window expires should post again")
@@ -175,6 +192,7 @@ func TestPlayheadDebounceDifferentContentID(t *testing.T) {
 	if !d.ShouldPost("id", 10) {
 		t.Fatal("first should post")
 	}
+	d.MarkPosted("id", 10)
 	if !d.ShouldPost("other", 10) {
 		t.Fatal("different content id should post")
 	}

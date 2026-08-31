@@ -116,13 +116,23 @@ func (d *PlayheadDebouncer) ShouldPost(contentID string, seconds float64) bool {
 	if d.now == nil {
 		d.now = time.Now
 	}
-	now := d.now()
 	sec := int64(seconds)
-	if d.lastID == contentID && d.lastSec == sec && !d.lastAt.IsZero() && now.Sub(d.lastAt) < d.window {
+	if d.lastID == contentID && d.lastSec == sec && !d.lastAt.IsZero() && d.now().Sub(d.lastAt) < d.window {
 		return false
 	}
-	d.lastID = contentID
-	d.lastSec = sec
-	d.lastAt = now
 	return true
+}
+
+func (d *PlayheadDebouncer) MarkPosted(contentID string, seconds float64) {
+	if d == nil {
+		return
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.now == nil {
+		d.now = time.Now
+	}
+	d.lastID = contentID
+	d.lastSec = int64(seconds)
+	d.lastAt = d.now()
 }
