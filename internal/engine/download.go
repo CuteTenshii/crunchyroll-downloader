@@ -2,6 +2,7 @@ package engine
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -260,6 +261,75 @@ func downloadParts(baseUrl, representationId *string, set *mpd.AdaptationSet) (s
 	}
 
 	return filename, nil
+}
+
+// decryptFragment decrypts one media segment by concatenating the init segment
+// with that media part and running Widevine CENC/CBCS decrypt. The returned
+// bytes are a fragmented MP4 (ftyp+moov+moof+mdat). Progressive play appends
+// the moof+mdat tail onto playing.mp4; downloadParts still decrypts the whole
+// concatenated file in one pass so its behavior is unchanged.
+func decryptFragment(initData, mediaData []byte, k []*widevine.Key) ([]byte, error) {
+	if len(k) == 0 {
+		k = keys
+	}
+	if len(k) == 0 {
+		return nil, errors.New("no widevine keys")
+	}
+	var in bytes.Buffer
+	in.Grow(len(initData) + len(mediaData))
+	_, _ = in.Write(initData)
+	_, _ = in.Write(mediaData)
+	var out bytes.Buffer
+	if err := widevine.DecryptMP4Auto(bytes.NewReader(in.Bytes()), k, &out); err != nil {
+		return nil, fmt.Errorf("widevine.DecryptMP4Auto: %w", err)
+	}
+	return out.Bytes(), nil
+}
+
+// runQueuedSegmentJobs pulls indexes from q until the queue is exhausted,
+// stopped, or ctx is done. handle is invoked once per index, one segment at a
+// time per worker. Used by progressive play; downloadParts does not use this
+// path (it still bulk-downloads, then decrypts the whole file).
+func runQueuedSegmentJobs(ctx context.Context, q *segmentQueue, workers int, handle func(index int) error) error {
+	if q == nil {
+		return errors.New("nil segment queue")
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if workers < 1 {
+		workers = 1
+	}
+	var (
+		wg       sync.WaitGroup
+		errOnce  sync.Once
+		firstErr error
+	)
+	run := func() {
+		defer wg.Done()
+		for {
+			if err := ctx.Err(); err != nil {
+				errOnce.Do(func() { firstErr = err })
+				q.Stop()
+				return
+			}
+			idx := q.Next()
+			if idx < 0 {
+				return
+			}
+			if err := handle(idx); err != nil {
+				errOnce.Do(func() { firstErr = err })
+				q.Stop()
+				return
+			}
+		}
+	}
+	wg.Add(workers)
+	for i := 0; i < workers; i++ {
+		go run()
+	}
+	wg.Wait()
+	return firstErr
 }
 
 // fetchSubtitleASS validates and returns the raw ASS response. It intentionally

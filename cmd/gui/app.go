@@ -39,6 +39,11 @@ type App struct {
 	playAccountID string
 	playDebounce  *engine.PlayheadDebouncer
 	playEOFPosted bool
+
+	playSession       playBufferSession
+	playSessionCancel context.CancelFunc
+	playBufferEnd     float64
+	playDurationHint  float64
 }
 
 // NewApp constructs an empty App; prefs load on startup.

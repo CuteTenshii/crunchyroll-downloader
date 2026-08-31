@@ -93,6 +93,7 @@
   var playOverlayPlaying = false;
   var playStopPromise = Promise.resolve();
   var playDuration = 0;
+  var playBufferEnd = 0;
   var playResumeHandled = false;
   var playEventsUnsub = null;
   var els = {};
@@ -120,6 +121,7 @@
       playTime: $("play-time"),
       playStage: $("play-stage"),
       playError: $("play-error"),
+      playWait: $("play-wait"),
       playTimeline: $("play-timeline"),
       playBuf: $("play-buf"),
       playProg: $("play-prog"),
@@ -954,12 +956,21 @@
       });
   }
 
+  function showPlayWait(on) {
+    if (!els.playWait) return;
+    els.playWait.hidden = !on;
+  }
+
   function applyPlayState(ev) {
     if (!ev || typeof ev !== "object") return;
     var pos = Number(ev.position != null ? ev.position : ev.Position) || 0;
     var dur = Number(ev.duration != null ? ev.duration : ev.Duration) || 0;
     var paused = !!(ev.paused != null ? ev.paused : ev.Paused);
     var eof = !!(ev.eof != null ? ev.eof : ev.Eof);
+    var bufRaw = ev.bufferEnd != null ? ev.bufferEnd : ev.BufferEnd;
+    if (bufRaw != null && bufRaw !== "") {
+      playBufferEnd = Number(bufRaw) || 0;
+    }
     playDuration = dur;
     if (els.playTime) {
       els.playTime.textContent = formatPlayClock(pos) + " / " + formatPlayClock(dur);
@@ -967,7 +978,16 @@
     var pct = dur > 0 ? Math.max(0, Math.min(100, (pos / dur) * 100)) : 0;
     if (els.playProg) els.playProg.style.width = pct + "%";
     if (els.playDot) els.playDot.style.left = pct + "%";
-    if (els.playBuf) els.playBuf.style.width = "100%";
+    if (els.playBuf) {
+      var bufPct = 100;
+      if (dur > 0) {
+        bufPct = Math.max(0, Math.min(100, (playBufferEnd / dur) * 100));
+      }
+      els.playBuf.style.width = bufPct + "%";
+    }
+    if (playBufferEnd > 0 && pos <= playBufferEnd + 0.05) {
+      showPlayWait(false);
+    }
     playOverlayPlaying = !paused && !eof;
     setPlayToggleIcon(playOverlayPlaying);
   }
@@ -997,9 +1017,13 @@
     if (rect.width <= 0) return;
     var frac = (e.clientX - rect.left) / rect.width;
     frac = Math.max(0, Math.min(1, frac));
+    var sec = frac * playDuration;
+    if (playBufferEnd > 0 && sec > playBufferEnd) {
+      showPlayWait(true);
+    }
     var app = goApp();
     if (!app || typeof app.PlaySeek !== "function") return;
-    Promise.resolve(app.PlaySeek(frac * playDuration)).catch(function () {
+    Promise.resolve(app.PlaySeek(sec)).catch(function () {
       /* ignore */
     });
   }
@@ -1063,6 +1087,7 @@
     playStopPromise = stop;
     return stop.then(function () {
       setPlayStageError("");
+      showPlayWait(false);
     });
   }
 
@@ -1081,10 +1106,12 @@
     if (els.playLock) els.playLock.textContent = "1080p locked";
     if (els.playTime) els.playTime.textContent = "0:00 / 0:00";
     playDuration = 0;
+    playBufferEnd = 0;
     playResumeHandled = false;
     playOverlayPlaying = false;
     setPlayToggleIcon(false);
-    if (els.playBuf) els.playBuf.style.width = "100%";
+    if (els.playBuf) els.playBuf.style.width = "0%";
+    showPlayWait(false);
     if (els.playProg) els.playProg.style.width = "0%";
     if (els.playDot) els.playDot.style.left = "0%";
     els.playPage.hidden = false;

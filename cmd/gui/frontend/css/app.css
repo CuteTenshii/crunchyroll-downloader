@@ -2741,6 +2741,19 @@ textarea.cr-input {
   pointer-events: none;
 }
 
+#page-play .play-wait {
+  position: absolute;
+  left: 50%;
+  top: 54%;
+  transform: translate(-50%, -50%);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  z-index: 2;
+  pointer-events: none;
+}
+
 #page-play .play-chrome {
   position: absolute;
   inset: 0;

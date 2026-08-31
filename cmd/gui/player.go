@@ -64,12 +64,28 @@ type playheadPost struct {
 var mpvHostFactory = newMpvHost
 
 var (
-	playAuthenticate = engine.AuthenticateFromCookieFile
-	playGetPlayheads = engine.GetPlayheads
-	playAccountIDFn  = engine.GetAccountID
-	playPostPlayhead = engine.PostPlayhead
-	resolvePlayFile  = resolveLocalMKV
+	playAuthenticate     = engine.AuthenticateFromCookieFile
+	playGetPlayheads     = engine.GetPlayheads
+	playAccountIDFn      = engine.GetAccountID
+	playPostPlayhead     = engine.PostPlayhead
+	resolvePlayFile      = resolveLocalMKV
+	startProgressivePlay = engine.StartProgressivePlay
 )
+
+// playBufferSession is the progressive-play control surface used by StartPlay,
+// PlaySeek, and StopPlay. *engine.PlaySession implements it.
+type playBufferSession interface {
+	SeekTarget(sec float64)
+	BufferedEnd() float64
+	Duration() float64
+	PlayingPath() string
+	AudioPath() string
+	Close() error
+}
+
+type mpvAudioAdder interface {
+	AddAudio(path string) error
+}
 
 func missingPlayerErr() error {
 	return fmt.Errorf(missingPlayerMsg)
@@ -229,6 +245,7 @@ func (a *App) StartPlay(req PlayRequest) error {
 	}
 
 	path := strings.TrimSpace(req.FilePath)
+	var progSess *engine.PlaySession
 	if path == "" {
 		if playRequestNeedsFile(req) {
 			outDir := strings.TrimSpace(prefs.OutputDir)
@@ -237,10 +254,59 @@ func (a *App) StartPlay(req PlayRequest) error {
 			}
 			found, err := resolvePlayFile(outDir, req.SeriesTitle, req.SeasonNumber, req.EpisodeNumber)
 			if err != nil || found == "" {
-				commitPrev()
-				return fmt.Errorf("no local file")
+				if episodeID == "" {
+					commitPrev()
+					return fmt.Errorf("no local file")
+				}
+				a.mu.Lock()
+				downloading := a.cancel != nil
+				a.mu.Unlock()
+				if downloading {
+					commitPrev()
+					return fmt.Errorf("download already running")
+				}
+				applyWidevineEnvFromPrefs(prefs)
+				cfg := runtimeConfigFromPrefs(prefs)
+				pctx, pcancel := context.WithCancel(context.Background())
+				a.playMu.Lock()
+				if a.playAbandoned >= mine {
+					a.playMu.Unlock()
+					pcancel()
+					commitPrev()
+					return nil
+				}
+				a.playSessionCancel = pcancel
+				a.playMu.Unlock()
+
+				sess, perr := startProgressivePlay(pctx, episodeID, cfg, func(p engine.PlayProgress) {
+					a.onPlayProgress(p)
+				})
+				if a.playAbandonedLocked(mine) {
+					if sess != nil {
+						_ = sess.Close()
+					}
+					pcancel()
+					a.playMu.Lock()
+					a.playSessionCancel = nil
+					a.playMu.Unlock()
+					commitPrev()
+					return nil
+				}
+				if perr != nil {
+					pcancel()
+					a.playMu.Lock()
+					if a.playSessionCancel != nil {
+						a.playSessionCancel = nil
+					}
+					a.playMu.Unlock()
+					commitPrev()
+					return perr
+				}
+				progSess = sess
+				path = sess.PlayingPath()
+			} else {
+				path = found
 			}
-			path = found
 		}
 	} else {
 		st, err := os.Stat(path)
@@ -253,13 +319,23 @@ func (a *App) StartPlay(req PlayRequest) error {
 	a.playMu.Lock()
 	if a.playAbandoned >= mine {
 		a.playMu.Unlock()
+		if progSess != nil {
+			_ = progSess.Close()
+		}
 		commitPrev()
 		return nil
+	}
+
+	if progSess != nil {
+		a.playSession = progSess
+		a.playBufferEnd = progSess.BufferedEnd()
+		a.playDurationHint = progSess.Duration()
 	}
 
 	if a.playHost == nil {
 		host, err := mpvHostFactory()
 		if err != nil {
+			_ = a.clearPlayLocked()
 			a.playMu.Unlock()
 			commitPrev()
 			return missingPlayerErr()
@@ -285,13 +361,20 @@ func (a *App) StartPlay(req PlayRequest) error {
 	}
 	if path != "" {
 		if err := a.playHost.LoadFile(path); err != nil {
+			_ = a.clearPlayLocked()
 			a.playMu.Unlock()
 			commitPrev()
 			return err
 		}
 		a.playPaused = false
+		if adder, ok := a.playHost.(mpvAudioAdder); ok {
+			if a.playSession != nil {
+				if audio := a.playSession.AudioPath(); audio != "" {
+					_ = adder.AddAudio(audio)
+				}
+			}
+		}
 	}
-
 	a.playEpisodeID = episodeID
 	a.playLocale = locale
 	a.playAudioLang = audio
@@ -370,11 +453,17 @@ func (a *App) PlayPause() error {
 }
 
 // PlaySeek seeks the current file to seconds (absolute).
+// When a progressive session is active and sec is past the contiguous buffer,
+// workers are retargeted and mpv is not seeked until the prefix catches up.
 func (a *App) PlaySeek(seconds float64) error {
 	a.playMu.Lock()
 	defer a.playMu.Unlock()
 	if a.playHost == nil {
 		return missingPlayerErr()
+	}
+	if a.playSession != nil && seconds > a.playSession.BufferedEnd() {
+		a.playSession.SeekTarget(seconds)
+		return nil
 	}
 	return a.playHost.Seek(seconds)
 }
@@ -402,6 +491,16 @@ func (a *App) PlayLayout(x, y, w, h float64) error {
 
 func (a *App) clearPlayLocked() error {
 	a.stopPlayTickerLocked()
+	if a.playSessionCancel != nil {
+		a.playSessionCancel()
+		a.playSessionCancel = nil
+	}
+	if a.playSession != nil {
+		_ = a.playSession.Close()
+		a.playSession = nil
+	}
+	a.playBufferEnd = 0
+	a.playDurationHint = 0
 	var err error
 	if a.playHost != nil {
 		_ = a.playHost.Pause(true)
@@ -469,11 +568,19 @@ func (a *App) emitPlayState(wailsCtx context.Context, host MpvHost) {
 		shot, doPost = a.queuePlayheadLocked()
 		a.playEOFPosted = true
 	}
+	if a.playDurationHint > dur {
+		dur = a.playDurationHint
+	}
+	bufEnd := a.playBufferEnd
+	if a.playSession == nil {
+		bufEnd = dur
+	}
 	payload := map[string]any{
-		"position": pos,
-		"duration": dur,
-		"paused":   paused,
-		"eof":      eof,
+		"position":  pos,
+		"duration":  dur,
+		"paused":    paused,
+		"eof":       eof,
+		"bufferEnd": bufEnd,
 	}
 	a.playMu.Unlock()
 
@@ -544,6 +651,33 @@ func (a *App) commitPlayhead(shot playheadPost, ok bool) error {
 		shot.debounce.MarkPosted(shot.contentID, shot.seconds)
 	}
 	return nil
+}
+
+func (a *App) onPlayProgress(p engine.PlayProgress) {
+	// Emit off the download worker so we cannot deadlock with StartPlay's playMu.
+	go func() {
+		a.playMu.Lock()
+		a.playBufferEnd = p.BufferEndSec
+		if p.DurationSec > a.playDurationHint {
+			a.playDurationHint = p.DurationSec
+		}
+		ctx := a.ctx
+		paused := a.playPaused
+		a.playMu.Unlock()
+		if ctx == nil {
+			return
+		}
+		payload := map[string]any{
+			"bufferEnd": p.BufferEndSec,
+			"duration":  p.DurationSec,
+			"paused":    paused,
+			"eof":       false,
+		}
+		if p.Err != nil {
+			payload["error"] = p.Err.Error()
+		}
+		wailsruntime.EventsEmit(ctx, "play-state", payload)
+	}()
 }
 
 func (a *App) logPlayheadErr(err error) {

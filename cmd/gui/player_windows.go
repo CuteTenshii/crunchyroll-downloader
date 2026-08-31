@@ -264,6 +264,15 @@ func (h *windowsMpvHost) LoadFile(path string) error {
 	return h.commandLocked("loadfile", path, "replace")
 }
 
+func (h *windowsMpvHost) AddAudio(path string) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.handle == 0 {
+		return missingPlayerErr()
+	}
+	return h.commandLocked("audio-add", path)
+}
+
 func (h *windowsMpvHost) Pause(p bool) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()

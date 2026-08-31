@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -220,13 +221,133 @@ func stubPlayheadNetwork(t *testing.T) *postSink {
 	return sink
 }
 
-func TestStartPlayNoLocalFile(t *testing.T) {
+func TestStartPlayFallsBackToProgressive(t *testing.T) {
 	stubPlayheadNetwork(t)
+	dir := t.TempDir()
+	playing := filepath.Join(dir, "playing.mp4")
+	if err := os.WriteFile(playing, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	origProg := startProgressivePlay
+	var called bool
+	var gotID string
+	startProgressivePlay = func(ctx context.Context, episodeID string, cfg engine.RuntimeConfig, emit func(engine.PlayProgress)) (*engine.PlaySession, error) {
+		called = true
+		gotID = episodeID
+		if emit != nil {
+			emit(engine.PlayProgress{BufferEndSec: 4, DurationSec: 24, Ready: true, PlayingPath: playing})
+		}
+		return &engine.PlaySession{EpisodeID: episodeID, Dir: dir, BufferEndSec: 4}, nil
+	}
+	t.Cleanup(func() { startProgressivePlay = origProg })
+
+	h := &scriptedHost{}
+	origFactory := mpvHostFactory
+	mpvHostFactory = func() (MpvHost, error) { return h, nil }
+	t.Cleanup(func() { mpvHostFactory = origFactory })
+
 	a := NewApp()
 	a.prefs.CookieFile = "cookie.txt"
 	a.prefs.OutputDir = t.TempDir()
 	err := a.StartPlay(PlayRequest{
 		EpisodeID:     "GWep",
+		SeriesTitle:   "Show",
+		SeasonNumber:  1,
+		EpisodeNumber: 1,
+	})
+	if !called || gotID != "GWep" {
+		t.Fatalf("progressive play not used called=%v id=%q", called, gotID)
+	}
+	// Windows tests have no Wails HWND, so attach may return player-library-missing
+	// after the session starts; that is still a successful fallback from glob-miss.
+	if err != nil && !libmpvError(err) {
+		t.Fatalf("StartPlay: %v", err)
+	}
+	if err == nil && h.loadPath != playing {
+		t.Fatalf("loadPath=%q want %q", h.loadPath, playing)
+	}
+	if err := a.StopPlay(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestStartPlayProgressiveBlockedWhenDownloading(t *testing.T) {
+	stubPlayheadNetwork(t)
+	a := NewApp()
+	a.prefs.CookieFile = "cookie.txt"
+	a.prefs.OutputDir = t.TempDir()
+	a.cancel = func() {}
+	err := a.StartPlay(PlayRequest{
+		EpisodeID:     "GWep",
+		SeriesTitle:   "Show",
+		SeasonNumber:  1,
+		EpisodeNumber: 1,
+	})
+	if err == nil || !strings.Contains(err.Error(), "download already running") {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+type fakePlaySess struct {
+	end, seek float64
+	path      string
+	closed    bool
+}
+
+func (f *fakePlaySess) SeekTarget(sec float64) { f.seek = sec }
+func (f *fakePlaySess) BufferedEnd() float64   { return f.end }
+func (f *fakePlaySess) Duration() float64      { return 100 }
+func (f *fakePlaySess) PlayingPath() string    { return f.path }
+func (f *fakePlaySess) AudioPath() string      { return "" }
+func (f *fakePlaySess) Close() error           { f.closed = true; return nil }
+
+func TestPlaySeekRetargetsWhenAheadOfBuffer(t *testing.T) {
+	h := &scriptedHost{pos: 1, dur: 100}
+	sess := &fakePlaySess{end: 10}
+	a := NewApp()
+	a.playHost = h
+	a.playSession = sess
+
+	if err := a.PlaySeek(40); err != nil {
+		t.Fatal(err)
+	}
+	if sess.seek != 40 {
+		t.Fatalf("SeekTarget=%v want 40", sess.seek)
+	}
+	if h.pos != 1 {
+		t.Fatalf("mpv seeked to %v while past buffer", h.pos)
+	}
+
+	if err := a.PlaySeek(5); err != nil {
+		t.Fatal(err)
+	}
+	if h.pos != 5 {
+		t.Fatalf("mpv pos=%v want 5", h.pos)
+	}
+}
+
+func TestStopPlayClosesProgressiveSession(t *testing.T) {
+	h := &scriptedHost{}
+	sess := &fakePlaySess{end: 8}
+	a := NewApp()
+	a.playHost = h
+	a.playGen = 1
+	a.playSession = sess
+	if err := a.StopPlay(); err != nil {
+		t.Fatal(err)
+	}
+	if !sess.closed {
+		t.Fatal("session not closed")
+	}
+	if a.playSession != nil {
+		t.Fatal("playSession still set")
+	}
+}
+
+func TestStartPlayNoEpisodeIDStillNoLocalFile(t *testing.T) {
+	a := NewApp()
+	a.prefs.OutputDir = t.TempDir()
+	err := a.StartPlay(PlayRequest{
 		SeriesTitle:   "Show",
 		SeasonNumber:  1,
 		EpisodeNumber: 1,
