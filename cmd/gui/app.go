@@ -22,6 +22,14 @@ type App struct {
 	cancel context.CancelFunc // job cancel only; nil when no download is running
 	mu     sync.Mutex
 	prefs  engine.Preferences
+
+	playMu     sync.Mutex
+	playHost   MpvHost
+	playCancel context.CancelFunc
+	playRect   PlayStageRect
+	playParent uintptr
+	playChild  uintptr
+	playPaused bool
 }
 
 // NewApp constructs an empty App; prefs load on startup.

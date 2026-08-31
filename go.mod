@@ -7,6 +7,7 @@ require (
 	github.com/iyear/gowidevine v0.1.3
 	github.com/unki2aut/go-mpd v0.0.0-20250515065241-e261b43d6523
 	github.com/wailsapp/wails/v2 v2.13.0
+	golang.org/x/sys v0.44.0
 )
 
 require (
@@ -38,7 +39,6 @@ require (
 	github.com/wailsapp/mimetype v1.4.1 // indirect
 	golang.org/x/crypto v0.51.0 // indirect
 	golang.org/x/net v0.54.0 // indirect
-	golang.org/x/sys v0.44.0 // indirect
 	golang.org/x/text v0.37.0 // indirect
 	google.golang.org/protobuf v1.36.2 // indirect
 )

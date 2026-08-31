@@ -114,6 +114,7 @@
       playLock: $("play-lock"),
       playTime: $("play-time"),
       playStage: $("play-stage"),
+      playError: $("play-error"),
       output: $("output-dir"),
       outputBtn: $("btn-output"),
       mediaHero: $("media-hero"),
@@ -838,6 +839,62 @@
     wakePlayChrome();
   }
 
+  function playErrText(err) {
+    if (!err) return "";
+    if (typeof err === "string") return err;
+    if (err.message) return String(err.message);
+    return String(err);
+  }
+
+  function setPlayStageError(msg) {
+    var text = msg || "libmpv surface";
+    if (els.playError) els.playError.textContent = text;
+    else if (els.playStage) {
+      var label = els.playStage.querySelector(".play-stage-label");
+      if (label) label.textContent = text;
+    }
+  }
+
+  function layoutPlayStage() {
+    if (!els.playStage) return;
+    var r = els.playStage.getBoundingClientRect();
+    var app = goApp();
+    if (!app || typeof app.PlayLayout !== "function") return;
+    try {
+      var p = app.PlayLayout(r.left, r.top, r.width, r.height);
+      if (p && typeof p.then === "function") {
+        p.catch(function () {
+          /* ignore layout errors */
+        });
+      }
+    } catch (e) {
+      /* ignore */
+    }
+  }
+
+  function startPlaySurface() {
+    layoutPlayStage();
+    var app = goApp();
+    if (!app || typeof app.StartPlay !== "function") {
+      setPlayStageError("player library missing");
+      return;
+    }
+    Promise.resolve(app.StartPlay(""))
+      .then(function () {
+        layoutPlayStage();
+      })
+      .catch(function (err) {
+        var msg = playErrText(err);
+        if (msg.indexOf("player library missing") !== -1) {
+          setPlayStageError(msg);
+        } else if (msg) {
+          setPlayStageError(msg);
+        } else {
+          setPlayStageError("player library missing");
+        }
+      });
+  }
+
   function closePlayOverlay() {
     if (playIdleTimer) {
       clearTimeout(playIdleTimer);
@@ -845,6 +902,13 @@
     }
     playOverlayPlaying = false;
     setPlayToggleIcon(false);
+    var app = goApp();
+    if (app && typeof app.StopPlay === "function") {
+      Promise.resolve(app.StopPlay()).catch(function () {
+        /* ignore */
+      });
+    }
+    setPlayStageError("");
     if (!els.playPage) return;
     els.playPage.hidden = true;
     els.playPage.classList.remove("is-idle");
@@ -875,7 +939,11 @@
     } catch (e) {
       /* ignore */
     }
+    setPlayStageError("");
     wakePlayChrome();
+    requestAnimationFrame(function () {
+      startPlaySurface();
+    });
   }
 
   /** Extract episode content id from a /watch/{id}/… URL. */
@@ -3698,6 +3766,10 @@
     if (els.playPage) {
       els.playPage.addEventListener("mousemove", wakePlayChrome);
     }
+    window.addEventListener("resize", function () {
+      if (!isPlayOverlayOpen()) return;
+      layoutPlayStage();
+    });
     if (els.selectAll) {
       els.selectAll.addEventListener("click", onSelectAllEpisodes);
     }
