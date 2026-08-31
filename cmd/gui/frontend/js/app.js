@@ -1148,7 +1148,10 @@
     if (!els.playPage) return;
     if (els.playTitle) els.playTitle.textContent = meta.episodeTitle || "Untitled";
     if (els.playShow) els.playShow.textContent = playShowLabel(meta);
-    if (els.playLock) els.playLock.textContent = "1080p locked";
+    if (els.playLock) {
+      var q = String(state.videoQuality || "max").trim() || "max";
+      els.playLock.textContent = q + " locked";
+    }
     if (els.playTime) els.playTime.textContent = "0:00 / 0:00";
     playDuration = 0;
     playBufferEnd = 0;

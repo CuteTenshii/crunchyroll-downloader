@@ -23,13 +23,16 @@ func TestSeekAheadRetargetsIndex(t *testing.T) {
 	}
 }
 
-func TestSeekAheadThenFillsForwardAndGaps(t *testing.T) {
-	// After Retarget(40), Next is 40, then 41, 42… to the end, then gap-fill
-	// from 0 (lowest unclaimed index). Workers never switch representation.
-	q := newSegmentQueue(45)
-	q.Retarget(40)
-	got := []int{q.Next(), q.Next(), q.Next(), q.Next(), q.Next(), q.Next()}
-	want := []int{40, 41, 42, 43, 44, 0}
+func TestSeekAheadThenFillsLowestMissing(t *testing.T) {
+	// After Retarget(3), Next is 3 once, then lowest missing: 0,1,2,4.
+	// playing.mp4 / BufferEndSec are contiguous from 0, so prefix fill is required.
+	q := newSegmentQueue(5)
+	q.Retarget(3)
+	if q.Next() != 3 {
+		t.Fatalf("want 3")
+	}
+	got := []int{q.Next(), q.Next(), q.Next(), q.Next()}
+	want := []int{0, 1, 2, 4}
 	for i := range want {
 		if got[i] != want[i] {
 			t.Fatalf("got %v want %v", got, want)

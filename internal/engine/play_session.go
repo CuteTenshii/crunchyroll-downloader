@@ -75,15 +75,16 @@ type PlaySession struct {
 }
 
 // segmentQueue hands out segment indexes. Retarget makes that index the next
-// job; subsequent Next values fill forward to the end, then wrap to fill holes
-// from 0. Never used for ABR / representation switching.
+// job once; subsequent Next values fill the lowest missing index so
+// BufferEndSec (contiguous from 0) can advance. Never used for ABR.
 type segmentQueue struct {
 	mu        sync.Mutex
 	n         int
 	taken     []bool
-	next      int
 	remaining int
 	stopped   bool
+	priority  int
+	hasPrio   bool
 }
 
 func newSegmentQueue(n int) *segmentQueue {
@@ -112,7 +113,8 @@ func (q *segmentQueue) Retarget(i int) {
 	if i >= q.n {
 		i = q.n - 1
 	}
-	q.next = i
+	q.priority = i
+	q.hasPrio = true
 }
 
 func (q *segmentQueue) Stop() {
@@ -133,20 +135,20 @@ func (q *segmentQueue) Next() int {
 	if q.stopped || q.remaining == 0 || q.n == 0 {
 		return -1
 	}
-	for pass := 0; pass < 2; pass++ {
-		start, end := 0, q.n
-		if pass == 0 {
-			start = q.next
-		} else {
-			end = q.next
+	if q.hasPrio {
+		q.hasPrio = false
+		i := q.priority
+		if i >= 0 && i < q.n && !q.taken[i] {
+			q.taken[i] = true
+			q.remaining--
+			return i
 		}
-		for i := start; i < end; i++ {
-			if !q.taken[i] {
-				q.taken[i] = true
-				q.remaining--
-				q.next = i + 1
-				return i
-			}
+	}
+	for i := 0; i < q.n; i++ {
+		if !q.taken[i] {
+			q.taken[i] = true
+			q.remaining--
+			return i
 		}
 	}
 	return -1
