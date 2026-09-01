@@ -19,20 +19,80 @@ import (
 
 var keys []*widevine.Key
 
-// getPssh finds the PSSH in the MPD manifest
-func getPssh(mpd *mpd.MPD) *string {
-	set := mpd.Period[0].AdaptationSets[0]
-	if set == nil {
-		return nil
-	}
+// widevineSystemID is the Widevine DRM system ID, used to tag PSSH boxes.
+var widevineSystemID = mp4.UUID{0xed, 0xef, 0x8b, 0xa9, 0x79, 0xd6, 0x4a, 0xce, 0xa3, 0xc8, 0x27, 0xdc, 0xd5, 0x1d, 0x21, 0xed}
 
-	for _, contentProtection := range set.ContentProtections {
-		if contentProtection.CencPSSH != nil {
+// widevineSchemeSuffix identifies the Widevine ContentProtection element in an
+// MPD by its schemeIdUri.
+const widevineSchemeSuffix = "edef8ba9-79d6-4ace-a3c8-27dcd51d21ed"
+
+// psshFromProtections returns the Widevine PSSH carried by a list of
+// ContentProtection elements, falling back to the first PSSH if none of them is
+// explicitly Widevine. Crunchyroll also lists a PlayReady/common system ID
+// (9a04f079-9840-4286-ab92-e65be0885f95) alongside Widevine, so the first PSSH
+// is not always the right one.
+func psshFromProtections(protections []mpd.Descriptor) *string {
+	var fallback *string
+	for _, contentProtection := range protections {
+		if contentProtection.CencPSSH == nil {
+			continue
+		}
+		if contentProtection.SchemeIDURI != nil && strings.Contains(*contentProtection.SchemeIDURI, widevineSchemeSuffix) {
 			return contentProtection.CencPSSH
 		}
+		if fallback == nil {
+			fallback = contentProtection.CencPSSH
+		}
+	}
+	return fallback
+}
+
+// getPssh finds the PSSH in the MPD manifest. Crunchyroll serves two manifest
+// shapes: one puts ContentProtection on the AdaptationSet, the other on each
+// Representation, so both are searched. The Widevine PSSH is preferred.
+func getPssh(m *mpd.MPD) *string {
+	if len(m.Period) == 0 {
+		return nil
+	}
+	for _, set := range m.Period[0].AdaptationSets {
+		if set == nil {
+			continue
+		}
+		if pssh := psshFromProtections(set.ContentProtections); pssh != nil {
+			return pssh
+		}
+		for _, representation := range set.Representations {
+			if pssh := psshFromProtections(representation.ContentProtections); pssh != nil {
+				return pssh
+			}
+		}
+	}
+	return nil
+}
+
+// toWidevinePssh rewrites a PSSH box so its system ID is Widevine's. Crunchyroll
+// now serves the Widevine PSSH data inside a box tagged with the PlayReady/common
+// system ID, which gowidevine's NewPSSH rejects. The payload itself is left
+// untouched; only the system ID field is normalized.
+func toWidevinePssh(pssh []byte) ([]byte, error) {
+	box, err := mp4.DecodeBox(0, bytes.NewReader(pssh))
+	if err != nil {
+		return nil, fmt.Errorf("decode PSSH box: %w", err)
+	}
+	psshBox, ok := box.(*mp4.PsshBox)
+	if !ok {
+		return nil, fmt.Errorf("box is a %s instead of a PSSH", box.Type())
+	}
+	if bytes.Equal(psshBox.SystemID, widevineSystemID) {
+		return pssh, nil
 	}
 
-	return nil
+	psshBox.SystemID = widevineSystemID
+	var buf bytes.Buffer
+	if err := psshBox.Encode(&buf); err != nil {
+		return nil, fmt.Errorf("encode PSSH box: %w", err)
+	}
+	return buf.Bytes(), nil
 }
 
 type CrunchyrollWidevineLicenseResponse struct {
@@ -126,7 +186,11 @@ func getLicense(psshData, contentId, videoToken string) error {
 	if err != nil {
 		return err
 	}
-	pssh, err := widevine.NewPSSH(decodedPssh)
+	normalizedPssh, err := toWidevinePssh(decodedPssh)
+	if err != nil {
+		return err
+	}
+	pssh, err := widevine.NewPSSH(normalizedPssh)
 	if err != nil {
 		return err
 	}

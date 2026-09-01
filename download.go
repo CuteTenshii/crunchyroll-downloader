@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	runtimedebug "runtime/debug"
 	"sort"
 	"strings"
 	"sync"
@@ -355,13 +356,13 @@ func downloadEpisode(baseContentId string, info EpisodeInfo, audioLangs, subsLan
 	// all if anything fails partway through.
 	activeStreams := map[string]string{}
 	defer func() {
-		print("Cleaning up...")
+		print("Cleaning up...\n")
 
 		for id, sToken := range activeStreams {
 			deleteStream(id, sToken)
 		}
 		if r := recover(); r != nil {
-			fmt.Println("Recovered from error:", r)
+			fmt.Printf("Recovered from error: %v\n%s\n", r, runtimedebug.Stack())
 		}
 	}()
 
@@ -439,7 +440,7 @@ func downloadEpisode(baseContentId string, info EpisodeInfo, audioLangs, subsLan
 			activeStreams[version.contentId] = episode.Token
 		}
 
-		manifest := parseManifest(episode.ManifestURL)
+		manifest, body := parseManifest(episode.ManifestURL)
 		pssh := getPssh(manifest)
 		if pssh == nil {
 			panic("PSSH not found")
@@ -450,30 +451,51 @@ func downloadEpisode(baseContentId string, info EpisodeInfo, audioLangs, subsLan
 			panic(fmt.Sprintf("getLicense for %s: %s", version.locale, err))
 		}
 
-		audioSet := manifest.Period[0].AdaptationSets[1]
-		fmt.Printf("Downloading %s audio...\n", trackTitle(version.locale))
-		audioBaseUrl, audioRepresentationId := getBaseUrl(audioSet, false, *audioQuality)
-		if audioBaseUrl == nil {
-			panic(fmt.Sprintf("failed to get the audio base URL for %s, maybe the audio quality you entered is wrong?", version.locale))
-		}
-		audioFile, err := downloadParts(audioBaseUrl, audioRepresentationId, audioSet)
-		if err != nil {
-			panic(err)
-		}
-		audioTracks = append(audioTracks, mediaTrack{file: audioFile, locale: version.locale})
-
-		// The video track is identical across dubs, so download it once using
-		// the first version's keys (already loaded above).
-		if i == 0 {
-			videoSet := manifest.Period[0].AdaptationSets[0]
-			fmt.Println("Downloading video...")
-			baseUrl, representationId := getBaseUrl(videoSet, true, *videoQuality)
-			if baseUrl == nil {
-				panic("failed to get the video base URL, maybe the video quality you entered is wrong?")
-			}
-			videoFile, err = downloadParts(baseUrl, representationId, videoSet)
+		if isOnDemand(manifest) {
+			sets, err := parseOnDemand(body)
 			if err != nil {
 				panic(err)
+			}
+
+			audioFile, err := downloadOnDemandAdaptation(sets, false, version.locale, *audioQuality)
+			if err != nil {
+				panic(err)
+			}
+			audioTracks = append(audioTracks, mediaTrack{file: audioFile, locale: version.locale})
+
+			// The video track is identical across dubs, so download it once.
+			if i == 0 {
+				videoFile, err = downloadOnDemandAdaptation(sets, true, "", *videoQuality)
+				if err != nil {
+					panic(err)
+				}
+			}
+		} else {
+			audioSet := manifest.Period[0].AdaptationSets[1]
+			fmt.Printf("Downloading %s audio...\n", trackTitle(version.locale))
+			audioBaseUrl, audioRepresentationId := getBaseUrl(audioSet, false, *audioQuality)
+			if audioBaseUrl == nil {
+				panic(fmt.Sprintf("failed to get the audio base URL for %s, maybe the audio quality you entered is wrong?", version.locale))
+			}
+			audioFile, err := downloadParts(audioBaseUrl, audioRepresentationId, audioSet)
+			if err != nil {
+				panic(err)
+			}
+			audioTracks = append(audioTracks, mediaTrack{file: audioFile, locale: version.locale})
+
+			// The video track is identical across dubs, so download it once using
+			// the first version's keys (already loaded above).
+			if i == 0 {
+				videoSet := manifest.Period[0].AdaptationSets[0]
+				fmt.Println("Downloading video...")
+				baseUrl, representationId := getBaseUrl(videoSet, true, *videoQuality)
+				if baseUrl == nil {
+					panic("failed to get the video base URL, maybe the video quality you entered is wrong?")
+				}
+				videoFile, err = downloadParts(baseUrl, representationId, videoSet)
+				if err != nil {
+					panic(err)
+				}
 			}
 		}
 
