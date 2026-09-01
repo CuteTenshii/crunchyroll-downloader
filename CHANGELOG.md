@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.4.0
+
+- Added support for on-demand (single-file) manifests and normalized non-Widevine PSSH system IDs, fixing "PSSH not found" and PlayReady errors on some episodes ([#8](https://github.com/CuteTenshii/crunchyroll-downloader/issues/8), [#38](https://github.com/CuteTenshii/crunchyroll-downloader/issues/38), [#39](https://github.com/CuteTenshii/crunchyroll-downloader/issues/39))
+- Fixed a crash when the playback response "error" field is a boolean or number instead of a string ([#29](https://github.com/CuteTenshii/crunchyroll-downloader/issues/29))
+- Fixed audio language selection so dubs resolve from the versions list instead of silently downloading the original language ([#35](https://github.com/CuteTenshii/crunchyroll-downloader/issues/35))
+- Unavailable subtitle and caption locales are now skipped instead of aborting the whole episode ([#27](https://github.com/CuteTenshii/crunchyroll-downloader/issues/27))
+- Unavailable audio locales are now skipped, downloading whichever of the requested languages are available ([#28](https://github.com/CuteTenshii/crunchyroll-downloader/issues/28))
+- Fixed URL parsing for locale-prefixed links such as /fr/series/...
+
 ## 1.3.0
 
 - Large downloads no longer buffer the entire file in memory. Segments are written to disk as they arrive, so memory use no longer scales with the length of the title — movie-length media previously crashed with an out-of-memory error
