@@ -288,6 +288,23 @@ func downloadSubs(url, format string) string {
 	return filename
 }
 
+// buildGuidByLocale maps each available audio locale to its playback GUID. The
+// episode's "versions" list is authoritative; the episode's own content ID is
+// only a fallback for single-audio content where the API lists no versions.
+// Crunchyroll sets "audio_locale" to the preferred language (which may be a dub)
+// while the episode ID still points at the original, so mapping audio_locale to
+// the content ID directly would resolve the dub to the wrong (original) stream.
+func buildGuidByLocale(info EpisodeInfo, baseContentId string) map[string]string {
+	guidByLocale := map[string]string{}
+	for _, v := range info.EpisodeMetadata.Versions {
+		guidByLocale[v.AudioLocale] = v.GUID
+	}
+	if len(guidByLocale) == 0 && info.EpisodeMetadata.AudioLocale != "" {
+		guidByLocale[info.EpisodeMetadata.AudioLocale] = baseContentId
+	}
+	return guidByLocale
+}
+
 func downloadEpisode(baseContentId string, info EpisodeInfo, audioLangs, subsLangs, ccLangs []string, videoQuality, audioQuality *string) {
 	cleanSeriesTitle := sanitizeFilename(info.EpisodeMetadata.SeriesTitle)
 	cleanEpisodeTitle := sanitizeFilename(info.Title)
@@ -311,13 +328,7 @@ func downloadEpisode(baseContentId string, info EpisodeInfo, audioLangs, subsLan
 
 	// Resolve each requested audio locale to its version GUID. Each dub is a
 	// separate playback stream with its own manifest, token and Widevine keys.
-	guidByLocale := map[string]string{}
-	if info.EpisodeMetadata.AudioLocale != "" {
-		guidByLocale[info.EpisodeMetadata.AudioLocale] = baseContentId
-	}
-	for _, v := range info.EpisodeMetadata.Versions {
-		guidByLocale[v.AudioLocale] = v.GUID
-	}
+	guidByLocale := buildGuidByLocale(info, baseContentId)
 
 	if len(audioLangs) == 1 && audioLangs[0] == "all" {
 		audioLangs = make([]string, 0, len(guidByLocale))

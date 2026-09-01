@@ -252,3 +252,58 @@ func TestStreamSegmentsReportsProgress(t *testing.T) {
 		}
 	}
 }
+
+func TestBuildGuidByLocale(t *testing.T) {
+	tests := []struct {
+		name   string
+		info   EpisodeInfo
+		baseID string
+		want   map[string]string
+	}{
+		{
+			name: "versions are authoritative",
+			info: EpisodeInfo{EpisodeMetadata: EpisodeMetadata{
+				AudioLocale: "it-IT",
+				Versions: []*DubVersion{
+					{AudioLocale: "ja-JP", GUID: "ja-guid"},
+					{AudioLocale: "it-IT", GUID: "it-guid"},
+				},
+			}},
+			baseID: "base-id",
+			want:   map[string]string{"ja-JP": "ja-guid", "it-IT": "it-guid"},
+		},
+		{
+			name: "preferred dub absent from versions is not mapped",
+			info: EpisodeInfo{EpisodeMetadata: EpisodeMetadata{
+				AudioLocale: "it-IT",
+				Versions: []*DubVersion{
+					{AudioLocale: "ja-JP", GUID: "ja-guid"},
+				},
+			}},
+			baseID: "base-id",
+			want:   map[string]string{"ja-JP": "ja-guid"},
+		},
+		{
+			name: "falls back to content id when no versions",
+			info: EpisodeInfo{EpisodeMetadata: EpisodeMetadata{
+				AudioLocale: "ja-JP",
+			}},
+			baseID: "base-id",
+			want:   map[string]string{"ja-JP": "base-id"},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := buildGuidByLocale(tc.info, tc.baseID)
+			if len(got) != len(tc.want) {
+				t.Fatalf("buildGuidByLocale() = %v, want %v", got, tc.want)
+			}
+			for k, v := range tc.want {
+				if got[k] != v {
+					t.Fatalf("buildGuidByLocale()[%q] = %q, want %q", k, got[k], v)
+				}
+			}
+		})
+	}
+}
