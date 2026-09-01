@@ -32,14 +32,22 @@ func parseLangs(s string) []string {
 	return out
 }
 
-func processUrl(url string) {
-	contentType := strings.Split(url, "/")[3]
-	contentId := strings.Split(url, "/")[4]
-	if len(contentId) < 9 && len(contentId) > 14 {
-		fmt.Printf("Invalid URL format: %s\n", url)
-		return
+// parseUrl extracts the content type ("watch" or "series") and content ID from a
+// Crunchyroll URL, tolerating an optional locale prefix such as "/fr/". The
+// content type and ID may appear at any position after the host.
+func parseUrl(url string) (contentType, contentId string) {
+	parts := strings.Split(strings.TrimRight(url, "/"), "/")
+	for i, p := range parts {
+		if (p == "watch" || p == "series") && i+1 < len(parts) {
+			return p, parts[i+1]
+		}
 	}
-	if contentType != "watch" && contentType != "series" {
+	return "", ""
+}
+
+func processUrl(url string) {
+	contentType, contentId := parseUrl(url)
+	if contentType == "" || contentId == "" {
 		fmt.Printf("Invalid URL (must be /watch/ or /series/): %s\n", url)
 		return
 	}
