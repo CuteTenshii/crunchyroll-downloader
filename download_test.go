@@ -307,3 +307,18 @@ func TestBuildGuidByLocale(t *testing.T) {
 		})
 	}
 }
+
+func TestFilterAvailableLangs(t *testing.T) {
+	available := map[string]*Subtitle{
+		"en-US":  {},
+		"es-419": {},
+	}
+	got := filterAvailableLangs([]string{"en-US", "hi-IN"}, available, "Subtitle", 0)
+	if len(got) != 1 || got[0] != "en-US" {
+		t.Fatalf("filterAvailableLangs() = %v, want [en-US]", got)
+	}
+
+	if got := filterAvailableLangs(nil, available, "Subtitle", 0); got != nil {
+		t.Fatalf("filterAvailableLangs(nil) = %v, want nil", got)
+	}
+}

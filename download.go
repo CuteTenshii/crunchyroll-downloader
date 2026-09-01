@@ -305,6 +305,22 @@ func buildGuidByLocale(info EpisodeInfo, baseContentId string) map[string]string
 	return guidByLocale
 }
 
+// filterAvailableLangs drops subtitle/caption locales that the episode does not
+// offer, warning about each one instead of aborting the whole download. Subtitles
+// are optional, so a missing locale (e.g. the default "en-US" on a movie) should
+// not prevent the video and audio from being saved.
+func filterAvailableLangs(langs []string, available map[string]*Subtitle, kind string, episode int) []string {
+	var filtered []string
+	for _, locale := range langs {
+		if available[locale] == nil {
+			fmt.Printf("! %s locale %s is not available for episode %v, skipping it.\n", kind, locale, episode)
+			continue
+		}
+		filtered = append(filtered, locale)
+	}
+	return filtered
+}
+
 func downloadEpisode(baseContentId string, info EpisodeInfo, audioLangs, subsLangs, ccLangs []string, videoQuality, audioQuality *string) {
 	cleanSeriesTitle := sanitizeFilename(info.EpisodeMetadata.SeriesTitle)
 	cleanEpisodeTitle := sanitizeFilename(info.Title)
@@ -404,18 +420,8 @@ func downloadEpisode(baseContentId string, info EpisodeInfo, audioLangs, subsLan
 	fmt.Printf("Audio locales: %s | Subtitle locales: %s | CC locales: %s\n",
 		strings.Join(audioLangs, ", "), strings.Join(subsLangs, ", "), strings.Join(ccLangs, ", "))
 
-	for _, locale := range subsLangs {
-		if firstEpisode.Subtitles[locale] == nil {
-			fmt.Printf("! Subtitle locale %s is not available for episode %v, aborting this episode.\n", locale, info.EpisodeMetadata.EpisodeNumber)
-			return
-		}
-	}
-	for _, locale := range ccLangs {
-		if firstEpisode.Captions[locale] == nil {
-			fmt.Printf("! Closed caption locale %s is not available for episode %v, aborting this episode.\n", locale, info.EpisodeMetadata.EpisodeNumber)
-			return
-		}
-	}
+	subsLangs = filterAvailableLangs(subsLangs, firstEpisode.Subtitles, "Subtitle", info.EpisodeMetadata.EpisodeNumber)
+	ccLangs = filterAvailableLangs(ccLangs, firstEpisode.Captions, "Closed caption", info.EpisodeMetadata.EpisodeNumber)
 
 	var subTracks []mediaTrack
 	for _, locale := range subsLangs {
