@@ -6,7 +6,34 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strings"
 )
+
+// EpisodeError is the playback endpoint's polymorphic "error" field. It is a
+// string message on failure, but Crunchyroll also returns false, null or a bare
+// number when playback is fine, which a plain *string cannot unmarshal.
+type EpisodeError string
+
+// UnmarshalJSON accepts any shape Crunchyroll returns for "error", storing the
+// message for real errors and the empty string for false/null/0.
+func (e *EpisodeError) UnmarshalJSON(data []byte) error {
+	s := strings.TrimSpace(string(data))
+	switch s {
+	case "", "null", "false", "0":
+		*e = ""
+		return nil
+	}
+	if len(s) >= 2 && s[0] == '"' && s[len(s)-1] == '"' {
+		var msg string
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return err
+		}
+		*e = EpisodeError(msg)
+		return nil
+	}
+	*e = EpisodeError(s)
+	return nil
+}
 
 type Episode struct {
 	// Dash manifest file URL
@@ -17,8 +44,8 @@ type Episode struct {
 	Captions map[string]*Subtitle `json:"captions"`
 	// Token to give to the Widevine CDM challenge
 	Token string `json:"token"`
-	// Error, `nil` if there's no error
-	Error *string `json:"error"`
+	// Error, empty when there's no error
+	Error EpisodeError `json:"error"`
 }
 
 type Subtitle struct {
@@ -51,8 +78,8 @@ func getEpisode(id string) Episode {
 	if err = json.Unmarshal(body, &episode); err != nil {
 		panic(err)
 	}
-	if episode.Error != nil {
-		print("Error:", *episode.Error)
+	if episode.Error != "" {
+		fmt.Printf("Error: %s\n", episode.Error)
 		os.Exit(1)
 	}
 
