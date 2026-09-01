@@ -133,29 +133,42 @@ type windowsMpvHost struct {
 
 func openLibmpv(explicit string) (*windows.DLL, error) {
 	if explicit != "" {
-		dll, err := windows.LoadDLL(explicit)
+		dll, err := loadLibmpvFile(explicit)
 		if err != nil {
-			return nil, missingPlayerErr()
+			return nil, fmt.Errorf("%s: %w", missingPlayerMsg, err)
 		}
 		return dll, nil
 	}
 	if exe, err := os.Executable(); err == nil {
 		p := filepath.Join(filepath.Dir(exe), libmpvDLLName)
-		if dll, err := windows.LoadDLL(p); err == nil {
+		if dll, err := loadLibmpvFile(p); err == nil {
 			return dll, nil
 		}
 	}
 	if cwd, err := os.Getwd(); err == nil {
 		p := filepath.Join(cwd, libmpvDLLName)
-		if dll, err := windows.LoadDLL(p); err == nil {
+		if dll, err := loadLibmpvFile(p); err == nil {
 			return dll, nil
 		}
 	}
-	dll, err := windows.LoadDLL(libmpvDLLName)
+	dll, err := loadLibmpvFile(libmpvDLLName)
 	if err != nil {
-		return nil, missingPlayerErr()
+		return nil, fmt.Errorf("%s: %w", missingPlayerMsg, err)
 	}
 	return dll, nil
+}
+
+func loadLibmpvFile(path string) (*windows.DLL, error) {
+	abs := path
+	if a, err := filepath.Abs(path); err == nil {
+		abs = a
+	}
+	const loadWithAlteredSearchPath = 0x00000008
+	mod, err := windows.LoadLibraryEx(abs, 0, loadWithAlteredSearchPath)
+	if err != nil {
+		return nil, err
+	}
+	return &windows.DLL{Name: abs, Handle: mod}, nil
 }
 
 func bindLibmpv(dll *windows.DLL) (*libmpvProcs, error) {
@@ -437,7 +450,7 @@ func (h *windowsMpvHost) commandLocked(args ...string) error {
 
 func (h *windowsMpvHost) setPropertyLocked(name string, format int, data unsafe.Pointer) error {
 	if h.handle == 0 || h.procs == nil {
-		return missingPlayerErr()
+		return playerNotReadyErr()
 	}
 	n, err := syscall.BytePtrFromString(name)
 	if err != nil {

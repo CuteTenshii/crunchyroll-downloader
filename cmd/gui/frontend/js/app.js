@@ -897,7 +897,8 @@
     if (app && typeof app.PlayPause === "function") {
       Promise.resolve(app.PlayPause()).catch(function (err) {
         var msg = playErrText(err);
-        if (msg) logLine("Play pause: " + msg, "warn");
+        if (!msg || msg.indexOf("not ready") !== -1) return;
+        logLine("Play pause: " + msg, "warn");
       });
       return;
     }

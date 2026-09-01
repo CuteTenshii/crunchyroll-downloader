@@ -310,6 +310,16 @@ func (a *App) StartPlay(req PlayRequest) error {
 				}
 				a.playSessionCancel = pcancel
 				a.playMu.Unlock()
+				if err := a.ensureAttachedHost(); err != nil {
+					pcancel()
+					a.playMu.Lock()
+					if a.playGen == mine {
+						a.playSessionCancel = nil
+					}
+					a.playMu.Unlock()
+					commitPrev()
+					return err
+				}
 
 				sess, perr := startProgressivePlay(pctx, episodeID, cfg, func(p engine.PlayProgress) {
 					a.onPlayProgress(p, mine)
@@ -371,32 +381,11 @@ func (a *App) StartPlay(req PlayRequest) error {
 		a.playLastDur = progSess.Duration()
 	}
 
-	if a.playHost == nil {
-		host, err := mpvHostFactory()
-		if err != nil {
-			_ = a.clearPlayLocked()
-			a.playMu.Unlock()
-			commitPrev()
-			return missingPlayerErr()
-		}
-		a.playHost = host
-	}
-
-	hwnd, err := a.ensurePlaySurfaceLocked()
-	if err != nil {
+	if err := a.ensureAttachedHostLocked(); err != nil {
 		_ = a.clearPlayLocked()
 		a.playMu.Unlock()
 		commitPrev()
-		return missingPlayerErr()
-	}
-	if err := a.playHost.Attach(hwnd); err != nil {
-		_ = a.clearPlayLocked()
-		a.playMu.Unlock()
-		commitPrev()
-		if libmpvError(err) {
-			return err
-		}
-		return missingPlayerErr()
+		return err
 	}
 	if path != "" {
 		if err := a.playHost.LoadFile(path); err != nil {
@@ -465,11 +454,45 @@ func (a *App) clearPlayIfGen(gen uint64) error {
 }
 
 // PlayPause toggles the pause flag on the current host.
+func playerNotReadyErr() error {
+	return fmt.Errorf("player not ready")
+}
+
+func (a *App) ensureAttachedHost() error {
+	a.playMu.Lock()
+	defer a.playMu.Unlock()
+	return a.ensureAttachedHostLocked()
+}
+
+func (a *App) ensureAttachedHostLocked() error {
+	if a.playHost == nil {
+		host, err := mpvHostFactory()
+		if err != nil {
+			if libmpvError(err) {
+				return err
+			}
+			return missingPlayerErr()
+		}
+		a.playHost = host
+	}
+	hwnd, err := a.ensurePlaySurfaceLocked()
+	if err != nil {
+		return fmt.Errorf("player window: %w", err)
+	}
+	if err := a.playHost.Attach(hwnd); err != nil {
+		if libmpvError(err) {
+			return err
+		}
+		return fmt.Errorf("player attach: %w", err)
+	}
+	return nil
+}
+
 func (a *App) PlayPause() error {
 	a.playMu.Lock()
 	if a.playHost == nil {
 		a.playMu.Unlock()
-		return missingPlayerErr()
+		return playerNotReadyErr()
 	}
 	next := !a.playPaused
 	if err := a.playHost.Pause(next); err != nil {
