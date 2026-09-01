@@ -371,10 +371,14 @@ func downloadEpisode(baseContentId string, info EpisodeInfo, audioLangs, subsLan
 	for _, locale := range audioLangs {
 		guid, ok := guidByLocale[locale]
 		if !ok {
-			fmt.Printf("! Audio locale %s is not available for episode %v, aborting this episode.\n", locale, info.EpisodeMetadata.EpisodeNumber)
-			return
+			fmt.Printf("! Audio locale %s is not available for episode %v, skipping it.\n", locale, info.EpisodeMetadata.EpisodeNumber)
+			continue
 		}
 		versions = append(versions, audioVersion{locale: locale, contentId: guid})
+	}
+	if len(versions) == 0 {
+		fmt.Printf("! None of the requested audio locales are available for episode %v, aborting this episode.\n", info.EpisodeMetadata.EpisodeNumber)
+		return
 	}
 
 	fmt.Printf("Downloading: %s (S%02vE%02v) from %s\n", info.Title, info.EpisodeMetadata.SeasonNumber, info.EpisodeMetadata.EpisodeNumber, info.EpisodeMetadata.SeriesTitle)
