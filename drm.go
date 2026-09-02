@@ -100,7 +100,7 @@ type CrunchyrollWidevineLicenseResponse struct {
 }
 
 func sendChallenge(contentId, videoToken string, challenge []byte) ([]byte, error) {
-	req, err := http.NewRequest(http.MethodPost, "https://www.crunchyroll.com/license/v1/license/widevine", io.NopCloser(bytes.NewReader(challenge)))
+	req, err := http.NewRequest(http.MethodPost, "https://www.crunchyroll.com/license/v1/license/widevine", bytes.NewReader(challenge))
 	if err != nil {
 		return nil, err
 	}
