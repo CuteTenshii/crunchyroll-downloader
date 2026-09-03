@@ -1,0 +1,73 @@
+name: Bug report
+description: Report a crash, failed download, or incorrect output
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a report. The more detail you give, the faster it can be fixed.
+        **Do not paste your `etp_rt` cookie value or your Widevine device keys anywhere in this issue.**
+
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Which release are you using? (e.g. `1.4.0`, or `built from master @ <commit>`)
+      placeholder: "1.4.0"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - Linux
+        - macOS
+        - Windows
+    validations:
+      required: true
+
+  - type: textarea
+    id: command
+    attributes:
+      label: Command
+      description: The exact command you ran (remove the `--etp-rt` value).
+      placeholder: "./crunchyroll-downloader --url https://www.crunchyroll.com/watch/... --etp-rt REDACTED"
+      render: shell
+    validations:
+      required: true
+
+  - type: input
+    id: url
+    attributes:
+      label: Episode / series URL
+      description: The Crunchyroll URL that triggered the problem.
+      placeholder: "https://www.crunchyroll.com/watch/..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you expect to happen, and what actually happened?
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Output / error
+      description: Paste the full terminal output, including any `Recovered from error:` stack trace.
+      render: shell
+
+  - type: textarea
+    id: debug-manifest
+    attributes:
+      label: Manifest (optional, for DRM/PSSH errors)
+      description: |
+        Run the same command with `--debug-manifest` and paste the `<ContentProtection>` sections
+        from the printed MPD. This is what makes `getLicense` / PSSH errors diagnosable.
+      render: xml
