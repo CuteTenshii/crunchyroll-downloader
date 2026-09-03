@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.5.0
+## 1.5.1
 
 - Audio dubs, subtitles, closed captions and the video track now download concurrently instead of one after another, making multi-language downloads much faster
 - Added progress bars showing percentage, segment count and download speed (Mbps) for every active download
