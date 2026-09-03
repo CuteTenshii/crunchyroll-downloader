@@ -17,8 +17,6 @@ import (
 	"github.com/unki2aut/go-mpd"
 )
 
-var keys []*widevine.Key
-
 // widevineSystemID is the Widevine DRM system ID, used to tag PSSH boxes.
 var widevineSystemID = mp4.UUID{0xed, 0xef, 0x8b, 0xa9, 0x79, 0xd6, 0x4a, 0xce, 0xa3, 0xc8, 0x27, 0xdc, 0xd5, 0x1d, 0x21, 0xed}
 
@@ -174,41 +172,41 @@ func getWidevineDevice() (*widevine.Device, error) {
 	return nil, nil
 }
 
-func getLicense(psshData, contentId, videoToken string) error {
+func getLicense(psshData, contentId, videoToken string) ([]*widevine.Key, error) {
 	device, err := getWidevineDevice()
 	if device == nil {
-		return errors.New("no widevine device provided. You either need:\n- a \".wvd\" file,\n- or \"client_id.bin\" and \"private_key.pem\" files.\nI'm not sharing links for obvious reasons, but search \"ready to use cdms\" on Google :)\n")
+		return nil, errors.New("no widevine device provided. You either need:\n- a \".wvd\" file,\n- or \"client_id.bin\" and \"private_key.pem\" files.\nI'm not sharing links for obvious reasons, but search \"ready to use cdms\" on Google :)\n")
 	} else if err != nil {
-		return err
+		return nil, err
 	}
 	cdm := widevine.NewCDM(device)
 	decodedPssh, err := base64.StdEncoding.DecodeString(psshData)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	normalizedPssh, err := toWidevinePssh(decodedPssh)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	pssh, err := widevine.NewPSSH(normalizedPssh)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	challenge, parseLicense, err := cdm.GetLicenseChallenge(pssh, widevinepb.LicenseType_AUTOMATIC, false)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	resp, err := sendChallenge(contentId, videoToken, challenge)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	keys, err = parseLicense(resp)
+	keys, err := parseLicense(resp)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	return nil
+	return keys, nil
 }
 
 // decryptMP4 decrypts a fragmented MP4 read from media, choosing the content

@@ -1,6 +1,9 @@
 package main
 
-import "testing"
+import (
+	"net/http"
+	"testing"
+)
 
 func TestParseByteRange(t *testing.T) {
 	tests := []struct {
@@ -87,6 +90,40 @@ func TestParseOnDemand(t *testing.T) {
 	audio := sets[1].Representations[0]
 	if audio.Bandwidth != 199094 || audio.InitRange != "0-1707" || audio.IndexRange != "1708-6011" {
 		t.Fatalf("audio representation = %+v", audio)
+	}
+}
+
+func TestResponseRange(t *testing.T) {
+	tests := []struct {
+		name      string
+		header    string
+		length    int64
+		wantTotal int64
+		wantStart int64
+		wantOK    bool
+	}{
+		{"206 with content-range", "bytes 123456-999999/1000000", 0, 1000000, 123456, true},
+		{"206 zero start", "bytes 0-999/1000", 0, 1000, 0, true},
+		{"no content-range, known length", "", 5000, 5000, 0, true},
+		{"no length info", "", -1, 0, 0, false},
+		{"malformed content-range", "bytes foo-bar/baz", 0, 0, 0, false},
+		{"missing bytes prefix", "0-999/1000", 0, 0, 0, false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			resp := &http.Response{Header: http.Header{}, ContentLength: tc.length}
+			if tc.header != "" {
+				resp.Header.Set("Content-Range", tc.header)
+			}
+			total, start, ok := responseRange(resp)
+			if ok != tc.wantOK {
+				t.Fatalf("responseRange() ok = %v, want %v", ok, tc.wantOK)
+			}
+			if total != tc.wantTotal || start != tc.wantStart {
+				t.Fatalf("responseRange() = %d,%d; want %d,%d", total, start, tc.wantTotal, tc.wantStart)
+			}
+		})
 	}
 }
 

@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/iyear/gowidevine"
 	"github.com/unki2aut/go-mpd"
 )
 
@@ -185,13 +186,71 @@ func downloadRange(url string, start, end int64) ([]byte, error) {
 	return io.ReadAll(resp.Body)
 }
 
-func streamRange(w io.Writer, url string, start int64) error {
+// responseRange reports the total size of the resource and the byte offset at
+// which this response's body begins, so a partial download can be shown against
+// the whole file. Range requests normally come back as 206 with a Content-Range
+// header; if the server ignored the range (200), the body starts at zero.
+func responseRange(resp *http.Response) (total, start int64, ok bool) {
+	if cr := resp.Header.Get("Content-Range"); cr != "" {
+		rest := strings.TrimPrefix(cr, "bytes ")
+		if rest != cr {
+			dash := strings.IndexByte(rest, '-')
+			slash := strings.LastIndexByte(rest, '/')
+			if dash >= 0 && slash > dash {
+				if s, errS := strconv.ParseInt(rest[:dash], 10, 64); errS == nil {
+					if t, errT := strconv.ParseInt(rest[slash+1:], 10, 64); errT == nil {
+						return t, s, true
+					}
+				}
+			}
+		}
+	}
+	if resp.ContentLength > 0 {
+		return resp.ContentLength, 0, true
+	}
+	return 0, 0, false
+}
+
+// countingReader reports the number of bytes read from r via onRead.
+type countingReader struct {
+	r      io.Reader
+	onRead func(n int)
+}
+
+func (c *countingReader) Read(p []byte) (int, error) {
+	n, err := c.r.Read(p)
+	if n > 0 && c.onRead != nil {
+		c.onRead(n)
+	}
+	return n, err
+}
+
+// streamRange downloads the resource from start to EOF, reporting absolute
+// progress as (current, total) bytes through onProgress when the total is known.
+func streamRange(w io.Writer, url string, start int64, onProgress func(current, total int64)) error {
 	resp, err := onDemandRequest(url, fmt.Sprintf("bytes=%d-", start))
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
-	_, err = io.Copy(w, resp.Body)
+
+	total, base, known := responseRange(resp)
+	if !known {
+		_, err = io.Copy(w, resp.Body)
+		return err
+	}
+
+	var done int64
+	reader := &countingReader{
+		r: resp.Body,
+		onRead: func(n int) {
+			done += int64(n)
+			if onProgress != nil {
+				onProgress(base+done, total)
+			}
+		},
+	}
+	_, err = io.Copy(w, reader)
 	return err
 }
 
@@ -211,7 +270,7 @@ func tempMediaFile(isVideo bool) string {
 
 // downloadOnDemandAdaptation finds the requested video or audio adaptation set,
 // selects a representation and downloads it.
-func downloadOnDemandAdaptation(sets []onDemandAdaptationSet, isVideo bool, locale, quality string) (string, error) {
+func downloadOnDemandAdaptation(title string, sets []onDemandAdaptationSet, isVideo bool, quality string, keys []*widevine.Key) (string, error) {
 	var chosen *onDemandAdaptationSet
 	for i := range sets {
 		if sets[i].IsVideo == isVideo {
@@ -228,12 +287,7 @@ func downloadOnDemandAdaptation(sets []onDemandAdaptationSet, isVideo bool, loca
 		return "", fmt.Errorf("no %s representation available", videoOrAudio(isVideo))
 	}
 
-	if isVideo {
-		fmt.Println("Downloading video...")
-	} else {
-		fmt.Printf("Downloading %s audio...\n", trackTitle(locale))
-	}
-	return downloadOnDemandParts(rep, isVideo)
+	return downloadOnDemandParts(title, rep, isVideo, keys)
 }
 
 func videoOrAudio(isVideo bool) string {
@@ -246,7 +300,7 @@ func videoOrAudio(isVideo bool) string {
 // downloadOnDemandParts downloads a single-file representation: the initialization
 // range for key selection, then the remainder of the file (from the start of the
 // index range to EOF) streamed to disk, then decrypts the whole thing.
-func downloadOnDemandParts(rep onDemandRepresentation, isVideo bool) (string, error) {
+func downloadOnDemandParts(title string, rep onDemandRepresentation, isVideo bool, keys []*widevine.Key) (string, error) {
 	initStart, initEnd, err := parseByteRange(rep.InitRange)
 	if err != nil {
 		return "", fmt.Errorf("parse init range: %w", err)
@@ -274,9 +328,15 @@ func downloadOnDemandParts(rep onDemandRepresentation, isVideo bool) (string, er
 		return "", fmt.Errorf("writing init segment: %w", err)
 	}
 
-	if err = streamRange(encFile, rep.BaseURL, indexStart); err != nil {
+	bar := newProgressBar(title, 0, "")
+	if err = streamRange(encFile, rep.BaseURL, indexStart, func(current, total int64) {
+		bar.setTotal(total)
+		bar.update(current, current)
+	}); err != nil {
+		bar.finish()
 		return "", err
 	}
+	bar.finish()
 
 	if _, err = encFile.Seek(0, io.SeekStart); err != nil {
 		return "", fmt.Errorf("rewinding %s: %w", encPath, err)

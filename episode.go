@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"strings"
 )
 
@@ -59,26 +58,26 @@ type Subtitle struct {
 	URL string `json:"url"`
 }
 
-func getEpisode(id string) Episode {
+func getEpisode(id string) (Episode, error) {
 	req, err := http.NewRequest(http.MethodGet, fmt.Sprintf("https://www.crunchyroll.com/playback/v3/%s/web/firefox/play", id), nil)
 	if err != nil {
-		panic(err)
+		return Episode{}, err
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("User-Agent", "Mozilla/5.0 (X11; Linux x86_64; rv:147.0) Gecko/20100101 Firefox/147.0")
 	resp, err := DoRequest(req)
 	if err != nil {
-		panic(err)
+		return Episode{}, err
 	}
 	defer resp.Body.Close()
 
 	var episode Episode
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		panic(err)
+		return Episode{}, err
 	}
 	if err = json.Unmarshal(body, &episode); err != nil {
-		panic(err)
+		return Episode{}, err
 	}
 	if episode.Error != "" {
 		fmt.Printf("Error: %s", episode.Error)
@@ -89,14 +88,14 @@ func getEpisode(id string) Episode {
 		if strings.HasPrefix(string(episode.Error), "429") {
 			fmt.Println("Crunchyroll is rate-limiting this account. Wait a while before retrying, or use a different account.")
 		}
-		os.Exit(1)
+		return Episode{}, fmt.Errorf("playback error: %s", episode.Error)
 	}
 
 	if *debug {
 		fmt.Printf("\n%s\n", string(body))
 	}
 
-	return episode
+	return episode, nil
 }
 
 type EpisodeMetadataResponse struct {

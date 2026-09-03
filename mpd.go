@@ -13,22 +13,22 @@ import (
 // parseManifest fetches and parses an MPD, returning both the decoded struct and
 // the raw XML. The raw body is needed to parse the single-file "on demand"
 // manifests whose SegmentBase byte ranges go-mpd does not model.
-func parseManifest(url string) (*mpd.MPD, []byte) {
+func parseManifest(url string) (*mpd.MPD, []byte, error) {
 	req, err := http.NewRequest(http.MethodGet, url, nil)
 	if err != nil {
-		panic(err)
+		return nil, nil, err
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("User-Agent", "Mozilla/5.0 (X11; Linux x86_64; rv:147.0) Gecko/20100101 Firefox/147.0")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		panic(err)
+		return nil, nil, err
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		panic(err)
+		return nil, nil, err
 	}
 	mpd := new(mpd.MPD)
 	mpd.Decode(body)
@@ -37,7 +37,7 @@ func parseManifest(url string) (*mpd.MPD, []byte) {
 		fmt.Printf("\n%s\n", string(body))
 	}
 
-	return mpd, body
+	return mpd, body, nil
 }
 
 func getBaseUrl(set *mpd.AdaptationSet, isVideoSet bool, quality string) (*string, *string) {
