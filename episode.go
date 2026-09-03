@@ -46,6 +46,8 @@ type Episode struct {
 	Token string `json:"token"`
 	// Error, empty when there's no error
 	Error EpisodeError `json:"error"`
+	// Reason explains the error (e.g. "Too many requests") when present
+	Reason string `json:"reason"`
 }
 
 type Subtitle struct {
@@ -79,7 +81,14 @@ func getEpisode(id string) Episode {
 		panic(err)
 	}
 	if episode.Error != "" {
-		fmt.Printf("Error: %s\n", episode.Error)
+		fmt.Printf("Error: %s", episode.Error)
+		if episode.Reason != "" {
+			fmt.Printf(" (%s)", episode.Reason)
+		}
+		fmt.Println()
+		if strings.HasPrefix(string(episode.Error), "429") {
+			fmt.Println("Crunchyroll is rate-limiting this account. Wait a while before retrying, or use a different account.")
+		}
 		os.Exit(1)
 	}
 
