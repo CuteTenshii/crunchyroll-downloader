@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.5.0
+
+- Audio dubs, subtitles, closed captions and the video track now download concurrently instead of one after another, making multi-language downloads much faster
+- Added progress bars showing percentage, segment count and download speed (Mbps) for every active download
+- Playback errors now surface the API's error reason, and rate-limited (429) responses print a hint to wait or use a different account ([#47](https://github.com/CuteTenshii/crunchyroll-downloader/issues/47))
+- Fixed a bug where retrying a request after refreshing an expired access token sent an empty or truncated body, breaking license requests
+
 ## 1.4.0
 
 - Added support for on-demand (single-file) manifests and normalized non-Widevine PSSH system IDs, fixing "PSSH not found" and PlayReady errors on some episodes ([#8](https://github.com/CuteTenshii/crunchyroll-downloader/issues/8), [#38](https://github.com/CuteTenshii/crunchyroll-downloader/issues/38), [#39](https://github.com/CuteTenshii/crunchyroll-downloader/issues/39))
