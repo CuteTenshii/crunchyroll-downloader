@@ -148,18 +148,24 @@ func getEpisodeInfo(id string) EpisodeInfo {
 	return info.Data[0]
 }
 
-// deleteStream removes the stream to make Crunchyroll think we "left" the playback
-func deleteStream(contentId, sToken string) bool {
+// deleteStream removes the stream to make Crunchyroll think we "left" the playback.
+// It returns an error rather than panicking so a transient network failure during
+// cleanup can't crash the whole process or strand other streams mid-teardown.
+func deleteStream(contentId, sToken string) error {
 	req, err := http.NewRequest(http.MethodDelete, fmt.Sprintf("https://www.crunchyroll.com/playback/v1/token/%s/%s", contentId, sToken), nil)
 	if err != nil {
-		panic(err)
+		return err
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("User-Agent", "Mozilla/5.0 (X11; Linux x86_64; rv:147.0) Gecko/20100101 Firefox/147.0")
 	resp, err := DoRequest(req)
 	if err != nil {
-		panic(err)
+		return err
 	}
+	defer resp.Body.Close()
 
-	return resp.StatusCode == http.StatusNoContent
+	if resp.StatusCode != http.StatusNoContent {
+		return fmt.Errorf("unexpected status %d", resp.StatusCode)
+	}
+	return nil
 }

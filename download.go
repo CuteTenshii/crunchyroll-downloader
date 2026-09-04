@@ -346,6 +346,29 @@ func buildGuidByLocale(info EpisodeInfo, baseContentId string) map[string]string
 	return guidByLocale
 }
 
+// mergeSubtitleAndCaptions combines the subtitles and captions offered by every
+// audio version of an episode. Subtitles (translation scripts) are usually
+// identical across versions, but captions (closed captions) transcribe a
+// specific dub and only appear on that version's playback. Taking the first
+// non-nil entry per locale preserves the union without duplication.
+func mergeSubtitleAndCaptions(episodes []Episode) (subtitles, captions map[string]*Subtitle) {
+	subtitles = map[string]*Subtitle{}
+	captions = map[string]*Subtitle{}
+	for _, ep := range episodes {
+		for locale, sub := range ep.Subtitles {
+			if sub != nil && subtitles[locale] == nil {
+				subtitles[locale] = sub
+			}
+		}
+		for locale, cc := range ep.Captions {
+			if cc != nil && captions[locale] == nil {
+				captions[locale] = cc
+			}
+		}
+	}
+	return subtitles, captions
+}
+
 // filterAvailableLangs drops subtitle/caption locales that the episode does not
 // offer, warning about each one instead of aborting the whole download. Subtitles
 // are optional, so a missing locale (e.g. the default "en-US" on a movie) should
@@ -439,26 +462,40 @@ func downloadEpisode(baseContentId string, info EpisodeInfo, audioLangs, subsLan
 		streamsMu.Unlock()
 
 		for id, sToken := range streams {
-			deleteStream(id, sToken)
+			if err := deleteStream(id, sToken); err != nil {
+				fmt.Printf("Failed to remove the player stream for %s: %v\n", id, err)
+			}
 		}
 		if r := recover(); r != nil {
 			fmt.Printf("Recovered from error: %v\n%s\n", r, runtimedebug.Stack())
 		}
 	}()
 
-	// Fetch the first version's playback first so we can validate subtitle
-	// and caption availability before downloading anything heavy.
-	firstEpisode, err := getEpisode(versions[0].contentId)
-	if err != nil {
-		panic(err)
+	// Fetch every version's playback up front so subtitle and caption
+	// availability can be validated against the union of all versions. Closed
+	// captions are per-audio-locale: a caption locale (e.g. the English dub's
+	// en-US captions) only appears on that version's playback, so the first
+	// version alone is not enough when multiple audio languages are requested.
+	episodes := make([]Episode, len(versions))
+	for i, version := range versions {
+		ep, err := getEpisode(version.contentId)
+		if err != nil {
+			panic(err)
+		}
+		episodes[i] = ep
+		streamsMu.Lock()
+		activeStreams[version.contentId] = ep.Token
+		streamsMu.Unlock()
 	}
-	streamsMu.Lock()
-	activeStreams[versions[0].contentId] = firstEpisode.Token
-	streamsMu.Unlock()
+
+	// Merge subtitles and captions across versions. Subtitles (translation
+	// scripts) are usually identical across versions, while captions are the
+	// per-dub transcriptions that only exist on their own version.
+	subtitles, captions := mergeSubtitleAndCaptions(episodes)
 
 	if len(subsLangs) == 1 && subsLangs[0] == "all" {
-		subsLangs = make([]string, 0, len(firstEpisode.Subtitles))
-		for locale, sub := range firstEpisode.Subtitles {
+		subsLangs = make([]string, 0, len(subtitles))
+		for locale, sub := range subtitles {
 			if sub != nil && sub.URL != "" {
 				subsLangs = append(subsLangs, locale)
 			}
@@ -466,8 +503,8 @@ func downloadEpisode(baseContentId string, info EpisodeInfo, audioLangs, subsLan
 		sort.Strings(subsLangs)
 	}
 	if len(ccLangs) == 1 && ccLangs[0] == "all" {
-		ccLangs = make([]string, 0, len(firstEpisode.Captions))
-		for locale, cc := range firstEpisode.Captions {
+		ccLangs = make([]string, 0, len(captions))
+		for locale, cc := range captions {
 			if cc != nil && cc.URL != "" {
 				ccLangs = append(ccLangs, locale)
 			}
@@ -478,8 +515,8 @@ func downloadEpisode(baseContentId string, info EpisodeInfo, audioLangs, subsLan
 	fmt.Printf("Audio locales: %s | Subtitle locales: %s | CC locales: %s\n",
 		strings.Join(audioLangs, ", "), strings.Join(subsLangs, ", "), strings.Join(ccLangs, ", "))
 
-	subsLangs = filterAvailableLangs(subsLangs, firstEpisode.Subtitles, "Subtitle", info.EpisodeMetadata.EpisodeNumber)
-	ccLangs = filterAvailableLangs(ccLangs, firstEpisode.Captions, "Closed caption", info.EpisodeMetadata.EpisodeNumber)
+	subsLangs = filterAvailableLangs(subsLangs, subtitles, "Subtitle", info.EpisodeMetadata.EpisodeNumber)
+	ccLangs = filterAvailableLangs(ccLangs, captions, "Closed caption", info.EpisodeMetadata.EpisodeNumber)
 
 	// Build the list of subtitle and caption downloads.
 	type subJob struct {
@@ -490,11 +527,11 @@ func downloadEpisode(baseContentId string, info EpisodeInfo, audioLangs, subsLan
 	}
 	var subJobs []subJob
 	for _, locale := range subsLangs {
-		sub := firstEpisode.Subtitles[locale]
+		sub := subtitles[locale]
 		subJobs = append(subJobs, subJob{url: sub.URL, format: sub.Format, locale: locale})
 	}
 	for _, locale := range ccLangs {
-		cc := firstEpisode.Captions[locale]
+		cc := captions[locale]
 		subJobs = append(subJobs, subJob{url: cc.URL, format: cc.Format, locale: locale, isCC: true})
 	}
 
@@ -536,18 +573,7 @@ func downloadEpisode(baseContentId string, info EpisodeInfo, audioLangs, subsLan
 		go func(i int, version audioVersion) {
 			defer wg.Done()
 
-			episode := firstEpisode
-			if i > 0 {
-				var err error
-				episode, err = getEpisode(version.contentId)
-				if err != nil {
-					fail(fmt.Errorf("getEpisode for %s: %w", version.locale, err))
-					return
-				}
-				streamsMu.Lock()
-				activeStreams[version.contentId] = episode.Token
-				streamsMu.Unlock()
-			}
+			episode := episodes[i]
 
 			manifest, body, err := parseManifest(episode.ManifestURL)
 			if err != nil {
@@ -614,8 +640,8 @@ func downloadEpisode(baseContentId string, info EpisodeInfo, audioLangs, subsLan
 				audioTracks[i] = mediaTrack{file: audioFile, locale: version.locale}
 			}
 
-			if success := deleteStream(version.contentId, episode.Token); !success {
-				print("Failed to remove the player stream, you will probably have issues downloading other episodes.\n")
+			if err := deleteStream(version.contentId, episode.Token); err != nil {
+				fmt.Printf("Failed to remove the player stream for %s: %v\n", version.locale, err)
 			}
 			streamsMu.Lock()
 			delete(activeStreams, version.contentId)

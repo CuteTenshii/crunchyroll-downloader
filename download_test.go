@@ -308,6 +308,41 @@ func TestBuildGuidByLocale(t *testing.T) {
 	}
 }
 
+func TestMergeSubtitleAndCaptions(t *testing.T) {
+	// Reproduces issue #48: en-US closed captions exist only on the English
+	// dub (second version), not on the first (zh-CN) version.
+	episodes := []Episode{
+		{
+			Subtitles: map[string]*Subtitle{
+				"en-US": {Language: "en-US", Format: "ass", URL: "sub-en"},
+			},
+			Captions: map[string]*Subtitle{
+				"zh-CN": {Language: "zh-CN", Format: "vtt", URL: "cc-zh"},
+			},
+		},
+		{
+			Subtitles: map[string]*Subtitle{
+				"en-US": {Language: "en-US", Format: "ass", URL: "sub-en"},
+			},
+			Captions: map[string]*Subtitle{
+				"en-US": {Language: "en-US", Format: "vtt", URL: "cc-en"},
+			},
+		},
+	}
+
+	subtitles, captions := mergeSubtitleAndCaptions(episodes)
+
+	if subtitles["en-US"] == nil {
+		t.Fatalf("en-US subtitle missing from merged map")
+	}
+	if captions["en-US"] == nil {
+		t.Fatalf("en-US caption missing from merged map; should be pulled from the second version")
+	}
+	if captions["zh-CN"] == nil {
+		t.Fatalf("zh-CN caption missing from merged map")
+	}
+}
+
 func TestFilterAvailableLangs(t *testing.T) {
 	available := map[string]*Subtitle{
 		"en-US":  {},
