@@ -13,6 +13,7 @@ You won't be banned or anything, I downloaded all Kaguya-Sama seasons to test du
 ## Features
 
 - Supports choosing the audio and subtitles language, including downloading multiple of each into a single file
+- Supports downloading audio only, as one .m4a per language or a single muxed .mka
 - Supports choosing the audio and video quality
 - Decrypts Widevine DRM (requires: a `.wvd` file or `client_id.bin` and `private_key.pem` files)
 - Adds metadata (like episode name) to the MKV container
@@ -38,6 +39,10 @@ Check the [latest release](https://github.com/CuteTenshii/crunchyroll-downloader
 Usage of ./crunchyroll-downloader:
   -audio-lang string
         Audio language(s), comma-separated for multiple (e.g. "ja-JP,en-US"). First is the default track (default "ja-JP")
+  -audio-mux
+        With --audio-only: mux all audio languages into a single .mka instead of one .m4a per language
+  -audio-only
+        Download audio tracks only, skipping video and subtitles
   -audio-quality string
         Audio quality (default "192k")
   -cc-lang string
@@ -79,6 +84,13 @@ To download multiple audio tracks and subtitles into a single file (the first of
 ```shell
 ./crunchyroll-downloader --url https://www.crunchyroll.com/watch/GE00198973JAJP/dawn-and-confusion --etp-rt replace_this --audio-lang ja-JP,en-US --subs-lang en-US,es-419,de-DE
 ```
+
+To download audio only, skipping video and subtitles (one .m4a file per language):
+```shell
+./crunchyroll-downloader --url https://www.crunchyroll.com/watch/GE00198973JAJP/dawn-and-confusion --etp-rt replace_this --audio-only --audio-lang ja-JP,en-US
+```
+
+Add `--audio-mux` to that to get a single .mka with all audio languages as tracks in one file instead of separate .m4a files.
 
 If you're getting rate-limited while downloading a season/batch, wait at least this long between each episode:
 ```shell
