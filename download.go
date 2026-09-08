@@ -402,9 +402,11 @@ func downloadEpisode(baseContentId string, info EpisodeInfo, audioLangs, subsLan
 		*videoQuality,
 	))
 
-	if _, statErr := os.Stat(outputFile); statErr == nil {
-		fmt.Printf("Episode %v is already downloaded, skipping...\n", info.EpisodeMetadata.EpisodeNumber)
-		return
+	if !*audioOnly {
+		if _, statErr := os.Stat(outputFile); statErr == nil {
+			fmt.Printf("Episode %v is already downloaded, skipping...\n", info.EpisodeMetadata.EpisodeNumber)
+			return
+		}
 	}
 
 	// Resolve each requested audio locale to its version GUID. Each dub is a
@@ -444,6 +446,22 @@ func downloadEpisode(baseContentId string, info EpisodeInfo, audioLangs, subsLan
 	if len(versions) == 0 {
 		fmt.Printf("! None of the requested audio locales are available for episode %v, aborting this episode.\n", info.EpisodeMetadata.EpisodeNumber)
 		return
+	}
+
+	// In audio-only mode each output file is independent, so drop the dubs
+	// already on disk and skip the episode entirely when nothing new remains.
+	if *audioOnly {
+		var missing []audioVersion
+		for _, version := range versions {
+			if _, statErr := os.Stat(audioOutputFile(cleanSeriesTitle, cleanEpisodeTitle, info, version.locale)); statErr != nil {
+				missing = append(missing, version)
+			}
+		}
+		if len(missing) == 0 {
+			fmt.Printf("Episode %v is already downloaded, skipping...\n", info.EpisodeMetadata.EpisodeNumber)
+			return
+		}
+		versions = missing
 	}
 
 	fmt.Printf("Downloading: %s (S%02vE%02v) from %s\n", info.Title, info.EpisodeMetadata.SeasonNumber, info.EpisodeMetadata.EpisodeNumber, info.EpisodeMetadata.SeriesTitle)
@@ -507,37 +525,8 @@ func downloadEpisode(baseContentId string, info EpisodeInfo, audioLangs, subsLan
 		streamsMu.Unlock()
 	}
 
-	// Merge subtitles and captions across versions. Subtitles (translation
-	// scripts) are usually identical across versions, while captions are the
-	// per-dub transcriptions that only exist on their own version.
-	subtitles, captions := mergeSubtitleAndCaptions(episodes)
-
-	if len(subsLangs) == 1 && subsLangs[0] == "all" {
-		subsLangs = make([]string, 0, len(subtitles))
-		for locale, sub := range subtitles {
-			if sub != nil && sub.URL != "" {
-				subsLangs = append(subsLangs, locale)
-			}
-		}
-		sort.Strings(subsLangs)
-	}
-	if len(ccLangs) == 1 && ccLangs[0] == "all" {
-		ccLangs = make([]string, 0, len(captions))
-		for locale, cc := range captions {
-			if cc != nil && cc.URL != "" {
-				ccLangs = append(ccLangs, locale)
-			}
-		}
-		sort.Strings(ccLangs)
-	}
-
-	fmt.Printf("Audio locales: %s | Subtitle locales: %s | CC locales: %s\n",
-		strings.Join(audioLangs, ", "), strings.Join(subsLangs, ", "), strings.Join(ccLangs, ", "))
-
-	subsLangs = filterAvailableLangs(subsLangs, subtitles, "Subtitle", info.EpisodeMetadata.EpisodeNumber)
-	ccLangs = filterAvailableLangs(ccLangs, captions, "Closed caption", info.EpisodeMetadata.EpisodeNumber)
-
-	// Build the list of subtitle and caption downloads.
+	// Build the list of subtitle and caption downloads. Audio-only mode
+	// downloads no subtitles, so the list stays empty.
 	type subJob struct {
 		url    string
 		format string
@@ -545,13 +534,47 @@ func downloadEpisode(baseContentId string, info EpisodeInfo, audioLangs, subsLan
 		isCC   bool
 	}
 	var subJobs []subJob
-	for _, locale := range subsLangs {
-		sub := subtitles[locale]
-		subJobs = append(subJobs, subJob{url: sub.URL, format: sub.Format, locale: locale})
-	}
-	for _, locale := range ccLangs {
-		cc := captions[locale]
-		subJobs = append(subJobs, subJob{url: cc.URL, format: cc.Format, locale: locale, isCC: true})
+
+	// Merge subtitles and captions across versions. Subtitles (translation
+	// scripts) are usually identical across versions, while captions are the
+	// per-dub transcriptions that only exist on their own version. Skipped
+	// entirely in audio-only mode, which downloads no subtitles.
+	if !*audioOnly {
+		subtitles, captions := mergeSubtitleAndCaptions(episodes)
+
+		if len(subsLangs) == 1 && subsLangs[0] == "all" {
+			subsLangs = make([]string, 0, len(subtitles))
+			for locale, sub := range subtitles {
+				if sub != nil && sub.URL != "" {
+					subsLangs = append(subsLangs, locale)
+				}
+			}
+			sort.Strings(subsLangs)
+		}
+		if len(ccLangs) == 1 && ccLangs[0] == "all" {
+			ccLangs = make([]string, 0, len(captions))
+			for locale, cc := range captions {
+				if cc != nil && cc.URL != "" {
+					ccLangs = append(ccLangs, locale)
+				}
+			}
+			sort.Strings(ccLangs)
+		}
+
+		fmt.Printf("Audio locales: %s | Subtitle locales: %s | CC locales: %s\n",
+			strings.Join(audioLangs, ", "), strings.Join(subsLangs, ", "), strings.Join(ccLangs, ", "))
+
+		subsLangs = filterAvailableLangs(subsLangs, subtitles, "Subtitle", info.EpisodeMetadata.EpisodeNumber)
+		ccLangs = filterAvailableLangs(ccLangs, captions, "Closed caption", info.EpisodeMetadata.EpisodeNumber)
+
+		for _, locale := range subsLangs {
+			sub := subtitles[locale]
+			subJobs = append(subJobs, subJob{url: sub.URL, format: sub.Format, locale: locale})
+		}
+		for _, locale := range ccLangs {
+			cc := captions[locale]
+			subJobs = append(subJobs, subJob{url: cc.URL, format: cc.Format, locale: locale, isCC: true})
+		}
 	}
 
 	// Download every subtitle, every audio dub and the video track concurrently.
@@ -620,10 +643,10 @@ func downloadEpisode(baseContentId string, info EpisodeInfo, audioLangs, subsLan
 				}
 			}
 
-			if i == 0 {
+			if i == 0 && !*audioOnly {
 				// The video and the first audio track share this version's keys,
 				// so they download concurrently with each other and everything
-				// else.
+				// else. Audio-only mode downloads no video.
 				type trackResult struct {
 					file string
 					err  error
@@ -672,6 +695,16 @@ func downloadEpisode(baseContentId string, info EpisodeInfo, audioLangs, subsLan
 	if firstErr != nil {
 		panic(firstErr)
 	}
+
+	if *audioOnly {
+		if *audioMux {
+			muxAudioTracks(audioTracks, audioOutputFile(cleanSeriesTitle, cleanEpisodeTitle, info, ""), info)
+		} else {
+			exportAudioTracks(audioTracks, cleanSeriesTitle, cleanEpisodeTitle, info)
+		}
+		return nil
+	}
+
 	if len(subTracks) > 0 {
 		fmt.Println("Downloaded subtitles!")
 	}

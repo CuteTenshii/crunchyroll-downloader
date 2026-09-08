@@ -15,6 +15,8 @@ var (
 	ccLang        = flag.String("cc-lang", "", "Closed caption language(s), comma-separated for multiple (e.g. \"en-US\"). Downloaded in addition to --subs-lang, not instead of it")
 	videoQuality  = flag.String("video-quality", "1080p", "Video quality")
 	audioQuality  = flag.String("audio-quality", "192k", "Audio quality")
+	audioOnly     = flag.Bool("audio-only", false, "Download audio tracks only, skipping video and subtitles")
+	audioMux      = flag.Bool("audio-mux", false, "With --audio-only: mux all audio languages into a single .mka instead of one .m4a per language")
 	seasonNumber  = flag.Int("season", 0, "Season number. Not used if an episode link is entered")
 	etpRt         = flag.String("etp-rt", "", "The \"etp_rt\" cookie value of your account")
 	debug         = flag.Bool("debug-manifest", false, "Log raw episode playback JSON and manifest XML")

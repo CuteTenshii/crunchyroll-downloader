@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 )
 
 // mediaTrack pairs a downloaded temporary file with the locale it represents.
@@ -22,6 +23,17 @@ func trackTitle(locale string) string {
 		return name
 	}
 	return locale
+}
+
+// runFfmpeg runs ffmpeg with args, removing the output file if it fails.
+func runFfmpeg(args []string, outputFile string) {
+	cmd := exec.Command("ffmpeg", args...)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		_ = os.Remove(outputFile)
+		panic(fmt.Sprintf("ffmpeg failed: %s\n%s", err, stderr.String()))
+	}
 }
 
 // mergeEverything merges the video, all audio tracks and all subtitle tracks
@@ -105,13 +117,7 @@ func mergeEverything(videoFile string, audioTracks, subTracks []mediaTrack, outp
 		outputFile,
 	)
 
-	cmd := exec.Command("ffmpeg", args...)
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		_ = os.Remove(outputFile)
-		panic(fmt.Sprintf("ffmpeg failed: %s\n%s", err, stderr.String()))
-	}
+	runFfmpeg(args, outputFile)
 
 	// Remove temporary files
 	_ = os.Remove(videoFile)
@@ -120,6 +126,86 @@ func mergeEverything(videoFile string, audioTracks, subTracks []mediaTrack, outp
 	}
 	for _, sub := range subTracks {
 		_ = os.Remove(sub.file)
+	}
+
+	fmt.Printf("\nDownload finished! Output file: %s\n\n", outputFile)
+}
+
+// audioOutputFile returns the output path for an episode's audio. Without
+// -audio-mux each dub gets its own .m4a tagged with its locale; with it, all
+// dubs share a single .mka tagged with the audio quality (matching the
+// [1080p] convention of the video files).
+func audioOutputFile(cleanSeriesTitle, cleanEpisodeTitle string, info EpisodeInfo, locale string) string {
+	ext, tag := ".m4a", locale
+	if *audioMux {
+		ext, tag = ".mka", *audioQuality
+	}
+	return filepath.Join(cleanSeriesTitle, fmt.Sprintf("%s S%02dE%02d - %s [%s]%s",
+		cleanSeriesTitle,
+		info.EpisodeMetadata.SeasonNumber,
+		info.EpisodeMetadata.EpisodeNumber,
+		cleanEpisodeTitle,
+		tag,
+		ext))
+}
+
+// exportAudioTracks writes each downloaded audio track to its own .m4a file,
+// tagged with its language. Used with -audio-only.
+func exportAudioTracks(audioTracks []mediaTrack, cleanSeriesTitle, cleanEpisodeTitle string, info EpisodeInfo) {
+	for _, audio := range audioTracks {
+		outputFile := audioOutputFile(cleanSeriesTitle, cleanEpisodeTitle, info, audio.locale)
+		args := []string{
+			"-i", audio.file,
+			"-map", "0:a:0",
+			"-c:a", "copy",
+			"-metadata:s:a:0", "language=" + languageCodes[audio.locale],
+			"-metadata:s:a:0", "title=" + trackTitle(audio.locale),
+			"-disposition:a:0", "default",
+			outputFile,
+		}
+		runFfmpeg(args, outputFile)
+		_ = os.Remove(audio.file)
+		fmt.Printf("\nDownload finished! Output file: %s\n", outputFile)
+	}
+	fmt.Println()
+}
+
+// muxAudioTracks combines every downloaded audio track into a single .mka
+// container, marking the first track as default. Used with -audio-only
+// -audio-mux.
+func muxAudioTracks(audioTracks []mediaTrack, outputFile string, info EpisodeInfo) {
+	var args []string
+	for _, audio := range audioTracks {
+		args = append(args, "-i", audio.file)
+	}
+	for i := range audioTracks {
+		args = append(args, "-map", fmt.Sprintf("%d:a:0", i))
+	}
+	args = append(args, "-c:a", "copy")
+	for i, audio := range audioTracks {
+		args = append(args,
+			fmt.Sprintf("-metadata:s:a:%d", i), "language="+languageCodes[audio.locale],
+			fmt.Sprintf("-metadata:s:a:%d", i), "title="+trackTitle(audio.locale),
+		)
+	}
+	for i := range audioTracks {
+		disposition := "0"
+		if i == 0 {
+			disposition = "default"
+		}
+		args = append(args, fmt.Sprintf("-disposition:a:%d", i), disposition)
+	}
+	args = append(args,
+		"-metadata:g", "title="+fmt.Sprintf("S%02vE%02v - %s", info.EpisodeMetadata.SeasonNumber, info.EpisodeMetadata.EpisodeNumber, info.Title),
+		"-metadata:g", "show="+info.EpisodeMetadata.SeriesTitle,
+		"-metadata:g", "track="+fmt.Sprintf("%v", info.EpisodeMetadata.EpisodeNumber),
+		outputFile,
+	)
+
+	runFfmpeg(args, outputFile)
+
+	for _, audio := range audioTracks {
+		_ = os.Remove(audio.file)
 	}
 
 	fmt.Printf("\nDownload finished! Output file: %s\n\n", outputFile)
