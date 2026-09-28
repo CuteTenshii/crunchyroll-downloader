@@ -26,6 +26,8 @@ type onDemandMPD struct {
 				ID          string `xml:"id,attr"`
 				Bandwidth   uint64 `xml:"bandwidth,attr"`
 				Height      uint64 `xml:"height,attr"`
+				Width       uint64 `xml:"width,attr"`
+				Codecs      string `xml:"codecs,attr"`
 				BaseURL     string `xml:"BaseURL"`
 				SegmentBase struct {
 					IndexRange     string `xml:"indexRange,attr"`
@@ -42,6 +44,8 @@ type onDemandRepresentation struct {
 	ID         string
 	Bandwidth  uint64
 	Height     uint64
+	Width      uint64
+	Codecs     string
 	BaseURL    string
 	InitRange  string
 	IndexRange string
@@ -81,6 +85,8 @@ func parseOnDemand(body []byte) ([]onDemandAdaptationSet, error) {
 				ID:         rep.ID,
 				Bandwidth:  rep.Bandwidth,
 				Height:     rep.Height,
+				Width:      rep.Width,
+				Codecs:     rep.Codecs,
 				BaseURL:    rep.BaseURL,
 				InitRange:  rep.SegmentBase.Initialization.Range,
 				IndexRange: rep.SegmentBase.IndexRange,
@@ -109,21 +115,29 @@ func parseByteRange(r string) (start, end int64, err error) {
 }
 
 // selectOnDemandRepresentation picks the representation matching the requested
-// quality, falling back to the first one. Video is matched by height, audio by
-// bandwidth, mirroring the segmented manifest selection.
+// quality. Video ranks by height then bandwidth for best, or exact height;
+// audio retains its bandwidth thresholds and first-representation fallback.
 func selectOnDemandRepresentation(set onDemandAdaptationSet, quality string, isVideo bool) (onDemandRepresentation, bool) {
 	if len(set.Representations) == 0 {
 		return onDemandRepresentation{}, false
 	}
 
-	if isVideo {
-		if target, err := strconv.ParseInt(strings.ReplaceAll(quality, "p", ""), 10, 64); err == nil {
-			for _, rep := range set.Representations {
-				if rep.Height == uint64(target) {
-					return rep, true
+	if isVideo || quality == "best" {
+		var best onDemandRepresentation
+		found := false
+		for _, rep := range set.Representations {
+			if quality == "best" {
+				initStart, initEnd, initErr := parseByteRange(rep.InitRange)
+				indexStart, indexEnd, indexErr := parseByteRange(rep.IndexRange)
+				if strings.TrimSpace(rep.BaseURL) == "" || initErr != nil || indexErr != nil || initStart < 0 || initEnd < initStart || indexStart < 0 || indexEnd < indexStart {
+					continue
 				}
 			}
+			if preferRepresentation(quality, isVideo, rep.Height, rep.Bandwidth, best.Height, best.Bandwidth, found) {
+				best, found = rep, true
+			}
 		}
+		return best, found
 	} else {
 		target := strings.ReplaceAll(quality, "k", "")
 		for _, rep := range set.Representations {
@@ -145,11 +159,7 @@ func selectOnDemandRepresentation(set onDemandAdaptationSet, quality string, isV
 	}
 
 	first := set.Representations[0]
-	kind := "Audio"
-	if isVideo {
-		kind = "Video"
-	}
-	fmt.Printf("%s quality %s not found, deferring to %s\n", kind, quality, first.ID)
+	fmt.Printf("Audio quality %s not found, deferring to %s\n", quality, first.ID)
 	return first, true
 }
 
@@ -270,7 +280,7 @@ func tempMediaFile(isVideo bool) string {
 
 // downloadOnDemandAdaptation finds the requested video or audio adaptation set,
 // selects a representation and downloads it.
-func downloadOnDemandAdaptation(title string, sets []onDemandAdaptationSet, isVideo bool, quality string, keys []*widevine.Key) (string, error) {
+func downloadOnDemandAdaptation(title string, sets []onDemandAdaptationSet, isVideo bool, quality string, keys []*widevine.Key, locale ...string) (string, error) {
 	var chosen *onDemandAdaptationSet
 	for i := range sets {
 		if sets[i].IsVideo == isVideo {
@@ -284,10 +294,10 @@ func downloadOnDemandAdaptation(title string, sets []onDemandAdaptationSet, isVi
 
 	rep, ok := selectOnDemandRepresentation(*chosen, quality, isVideo)
 	if !ok {
-		return "", fmt.Errorf("no %s representation available", videoOrAudio(isVideo))
+		return "", fmt.Errorf("no %s representation available for quality %s", videoOrAudio(isVideo), quality)
 	}
 
-	return downloadOnDemandParts(title, rep, isVideo, keys)
+	return downloadOnDemandParts(title, rep, isVideo, keys, locale...)
 }
 
 func videoOrAudio(isVideo bool) string {
@@ -300,10 +310,15 @@ func videoOrAudio(isVideo bool) string {
 // downloadOnDemandParts downloads a single-file representation: the initialization
 // range for key selection, then the remainder of the file (from the start of the
 // index range to EOF) streamed to disk, then decrypts the whole thing.
-func downloadOnDemandParts(title string, rep onDemandRepresentation, isVideo bool, keys []*widevine.Key) (string, error) {
+func downloadOnDemandParts(title string, rep onDemandRepresentation, isVideo bool, keys []*widevine.Key, locale ...string) (string, error) {
 	initStart, initEnd, err := parseByteRange(rep.InitRange)
 	if err != nil {
 		return "", fmt.Errorf("parse init range: %w", err)
+	}
+	if isVideo {
+		logSelectedVideo(rep.Width, rep.Height, rep.Bandwidth, rep.BaseURL)
+	} else {
+		logSelectedAudio(locale, rep.Bandwidth, rep.Codecs)
 	}
 	initData, err := downloadRange(rep.BaseURL, initStart, initEnd)
 	if err != nil {
