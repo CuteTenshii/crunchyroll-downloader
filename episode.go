@@ -98,10 +98,6 @@ func getEpisode(id string) (Episode, error) {
 		return Episode{}, fmt.Errorf("playback error: %s", episode.Error)
 	}
 
-	if *debug {
-		fmt.Printf("\n%s\n", string(body))
-	}
-
 	return episode, nil
 }
 

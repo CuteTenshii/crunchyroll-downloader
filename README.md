@@ -1,6 +1,6 @@
 # Crunchyroll Downloader
 
-[![Tests](https://img.shields.io/github/actions/workflow/status/CuteTenshii/crunchyroll-downloader/tests.yml?branch=master&label=tests)](https://github.com/CuteTenshii/crunchyroll-downloader/actions/workflows/tests.yml)
+[![Build and checks](https://img.shields.io/github/actions/workflow/status/CuteTenshii/crunchyroll-downloader/tests.yml?branch=master&label=build%20and%20checks)](https://github.com/CuteTenshii/crunchyroll-downloader/actions/workflows/tests.yml)
 [![Latest release](https://img.shields.io/github/v/release/CuteTenshii/crunchyroll-downloader)](https://github.com/CuteTenshii/crunchyroll-downloader/releases/latest)
 [![Downloads](https://img.shields.io/github/downloads/CuteTenshii/crunchyroll-downloader/total)](https://github.com/CuteTenshii/crunchyroll-downloader/releases)
 [![Go version](https://img.shields.io/github/go-mod/go-version/CuteTenshii/crunchyroll-downloader)](go.mod)
@@ -8,12 +8,10 @@
 
 Downloads anime from Crunchyroll and outputs them in a MKV file.
 
-You won't be banned or anything, I downloaded all Kaguya-Sama seasons to test during 30 mins and everything went fine
-
 ## Features
 
 - Supports choosing the audio and subtitles language, including downloading multiple of each into a single file
-- Supports choosing the audio and video quality
+- Supports explicit audio/video quality settings and automatic `best` selection
 - Decrypts Widevine DRM (requires: a `.wvd` file or `client_id.bin` and `private_key.pem` files)
 - Adds metadata (like episode name) to the MKV container
 - Parallel segment downloads (10 workers) for faster downloads
@@ -39,11 +37,11 @@ Usage of ./crunchyroll-downloader:
   -audio-lang string
         Audio language(s), comma-separated for multiple (e.g. "ja-JP,en-US"). First is the default track (default "ja-JP")
   -audio-quality string
-        Audio quality (default "192k")
+        Audio quality (e.g. "192k" or "best") (default "192k")
   -cc-lang string
         Closed caption language(s), comma-separated for multiple (e.g. "en-US"). Downloaded in addition to --subs-lang, not instead of it
   -debug-manifest
-        Log raw episode playback JSON and manifest XML
+        Log selected video/audio representations without URL credentials
   -download-delay duration
         Minimum delay between episode downloads, to help avoid Crunchyroll's rate limiting (e.g. "30s", "2m")
   -etp-rt string
@@ -57,7 +55,7 @@ Usage of ./crunchyroll-downloader:
   -url string
         URL of the episode/season to download
   -video-quality string
-        Video quality (default "1080p")
+        Video quality (e.g. "1080p" or "best") (default "1080p")
 ```
 
 Ex: to download the first season of *Hell's Paradise*:
@@ -75,7 +73,7 @@ To batch download from a file (one URL per line):
 ./crunchyroll-downloader --file list.txt --etp-rt replace_this --subs-lang pt-BR
 ```
 
-To download multiple audio tracks and subtitles into a single file (the first of each is set as the default track). If any requested language is missing for an episode, that episode is skipped:
+To download multiple audio tracks and subtitles into a single file (the first of each is set as the default track). Unavailable languages are skipped with a warning; the episode is skipped if none of the requested audio languages are available:
 ```shell
 ./crunchyroll-downloader --url https://www.crunchyroll.com/watch/GE00198973JAJP/dawn-and-confusion --etp-rt replace_this --audio-lang ja-JP,en-US --subs-lang en-US,es-419,de-DE
 ```
@@ -86,6 +84,23 @@ If you're getting rate-limited while downloading a season/batch, wait at least t
 ```
 
 If Crunchyroll rate-limits an episode anyway, it's retried in place (starting at `-download-delay`, or 1 minute if unset, doubling up to 30 minutes on repeated hits) instead of moving on to the next episode and tripping the same limit again.
+
+### Quality selection
+
+Defaults remain `-video-quality "1080p"` and `-audio-quality "192k"`. Use `best` explicitly to select the highest available quality:
+
+- Video `best`: highest available height, then highest Bandwidth at that height. This also supports resolutions above 1080p, such as 1440p and 2160p.
+- Explicit video quality, such as `720p` or `1080p`: highest Bandwidth at exactly that height.
+- Audio `best`: highest Bandwidth within the selected audio AdaptationSet, independently for each requested language, without preferring a specific codec.
+- Selection works with both SegmentTemplate and SegmentBase/on-demand manifests. If `best` finds no usable representation, the download reports an error instead of silently selecting a fallback.
+
+Windows example (replace the URL and cookie placeholders locally):
+
+```powershell
+.\crdl-windows-fixed.exe -url "<URL>" -etp-rt "<YOUR_COOKIE>" -video-quality "best" -audio-quality "best" -audio-lang "ja-JP,en-US" -subs-lang "de-DE,en-US"
+```
+
+Add `-debug-manifest` to log the selected video resolution, Bandwidth and URL, plus the language, Bandwidth and codec of each selected audio track immediately before downloading. Video URL user information, query strings and fragments are omitted. Raw playback JSON and manifest XML are no longer printed.
 
 ## Building
 
@@ -98,6 +113,10 @@ If Crunchyroll rate-limits an episode anyway, it's retried in place (starting at
 - Clone this repository
 - Open a Terminal/Command prompt, and go to the folder where you cloned the repo
 - Run `go build .`
+
+For the named Windows executable, run `go build -o crdl-windows-fixed.exe .` on Windows.
+
+GitHub Actions builds for Linux, macOS and Windows and checks `go vet` and `gofmt`. This repository currently contains no Go test files.
 
 ## Help
 

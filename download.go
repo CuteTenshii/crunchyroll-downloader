@@ -207,8 +207,24 @@ func streamSegments(w io.Writer, urls []string, fetch func(string) ([]byte, erro
 	return failure
 }
 
-func downloadParts(title string, baseUrl, representationId *string, set *mpd.AdaptationSet, keys []*widevine.Key) (string, error) {
+func downloadParts(title string, baseUrl, representationId *string, set *mpd.AdaptationSet, keys []*widevine.Key, locale ...string) (string, error) {
 	initUrl := buildUrl(*baseUrl, *representationId, *set.SegmentTemplate.Initialization, nil)
+	for i := range set.Representations {
+		rep := &set.Representations[i]
+		// Match the actual selected BaseURL pointer, not the first height or ID.
+		if len(rep.BaseURL) > 0 && &rep.BaseURL[0].Value == baseUrl {
+			if len(locale) == 0 {
+				logSelectedVideo(uintValue(rep.Width), uintValue(rep.Height), uintValue(rep.Bandwidth), initUrl)
+			} else {
+				codec := ""
+				if rep.Codecs != nil {
+					codec = *rep.Codecs
+				}
+				logSelectedAudio(locale, uintValue(rep.Bandwidth), codec)
+			}
+			break
+		}
+	}
 	initData, err := downloadPart(initUrl)
 	if err != nil {
 		return "", err
@@ -273,14 +289,14 @@ func downloadParts(title string, baseUrl, representationId *string, set *mpd.Ada
 func downloadAudioTrack(manifest *mpd.MPD, sets []onDemandAdaptationSet, locale, quality string, keys []*widevine.Key) (string, error) {
 	title := "Downloading " + trackTitle(locale) + " audio"
 	if isOnDemand(manifest) {
-		return downloadOnDemandAdaptation(title, sets, false, quality, keys)
+		return downloadOnDemandAdaptation(title, sets, false, quality, keys, locale)
 	}
 	audioSet := manifest.Period[0].AdaptationSets[1]
 	audioBaseUrl, audioRepresentationId := getBaseUrl(audioSet, false, quality)
 	if audioBaseUrl == nil {
-		return "", fmt.Errorf("failed to get the audio base URL for %s, maybe the audio quality you entered is wrong?", locale)
+		return "", fmt.Errorf("no usable audio representation for language %s and quality %q", locale, quality)
 	}
-	return downloadParts(title, audioBaseUrl, audioRepresentationId, audioSet, keys)
+	return downloadParts(title, audioBaseUrl, audioRepresentationId, audioSet, keys, locale)
 }
 
 // downloadVideoTrack downloads the video representation into a temporary file.
@@ -292,7 +308,7 @@ func downloadVideoTrack(manifest *mpd.MPD, sets []onDemandAdaptationSet, quality
 	videoSet := manifest.Period[0].AdaptationSets[0]
 	baseUrl, representationId := getBaseUrl(videoSet, true, quality)
 	if baseUrl == nil {
-		return "", fmt.Errorf("failed to get the video base URL, maybe the video quality you entered is wrong?")
+		return "", fmt.Errorf("no usable video representation for quality %q", quality)
 	}
 	return downloadParts("Downloading video", baseUrl, representationId, videoSet, keys)
 }
@@ -483,7 +499,7 @@ func downloadEpisode(baseContentId string, info EpisodeInfo, audioLangs, subsLan
 				err = fmt.Errorf("%v", r)
 			}
 			if *debug {
-				fmt.Printf("Recovered from error: %v\n%s\n", r, runtimedebug.Stack())
+				fmt.Printf("Recovered from download error (details omitted to protect credentials)\n%s\n", runtimedebug.Stack())
 			} else {
 				fmt.Printf("Recovered from error: %v\n", r)
 			}
