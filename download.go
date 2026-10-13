@@ -71,19 +71,21 @@ func downloadPart(url string) ([]byte, error) {
 }
 
 func getFilename(set *mpd.AdaptationSet, subExt string) string {
+	tempPath := os.Getenv("TEMP") + "\\CR-DL"
+	os.MkdirAll(tempPath, 0755)
 	if set == nil {
 		if subExt == "" {
 			subExt = "ass"
 		}
-		f, _ := os.CreateTemp("", "crdl-subs-*."+subExt)
+		f, _ := os.CreateTemp(tempPath, "crdl-subs-*."+subExt)
 		return f.Name()
 	}
 	for _, representation := range set.Representations {
 		if representation.Height != nil {
-			f, _ := os.CreateTemp("", "crdl-video-*.mp4")
+			f, _ := os.CreateTemp(tempPath, "crdl-video-*.mp4")
 			return f.Name()
 		} else if representation.Bandwidth != nil {
-			f, _ := os.CreateTemp("", "crdl-audio-*.mp3")
+			f, _ := os.CreateTemp(tempPath, "crdl-audio-*.mp3")
 			return f.Name()
 		}
 	}
@@ -754,6 +756,8 @@ func downloadEpisode(baseContentId string, info EpisodeInfo, audioLangs, subsLan
 	}
 
 	mergeEverything(videoFile, audioTracks, subTracks, outputFile, info)
+	tempPath := os.Getenv("TEMP") + "\\CR-DL"
+	os.RemoveAll(tempPath)
 	return nil
 }
 
