@@ -46,6 +46,8 @@ Usage of ./crunchyroll-downloader:
         Log raw episode playback JSON and manifest XML
   -download-delay duration
         Minimum delay between episode downloads, to help avoid Crunchyroll's rate limiting (e.g. "30s", "2m")
+  -headless
+        Replace the live progress bars with plain start/finish messages, for logging to a file
   -etp-rt string
         The "etp_rt" cookie value of your account
   -file string

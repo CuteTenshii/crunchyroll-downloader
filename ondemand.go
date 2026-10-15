@@ -333,10 +333,10 @@ func downloadOnDemandParts(title string, rep onDemandRepresentation, isVideo boo
 		bar.setTotal(total)
 		bar.update(current, current)
 	}); err != nil {
-		bar.finish()
+		bar.finish(err)
 		return "", err
 	}
-	bar.finish()
+	bar.finish(nil)
 
 	if _, err = encFile.Seek(0, io.SeekStart); err != nil {
 		return "", fmt.Errorf("rewinding %s: %w", encPath, err)

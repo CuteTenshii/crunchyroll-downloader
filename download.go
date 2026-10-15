@@ -246,7 +246,7 @@ func downloadParts(title string, baseUrl, representationId *string, set *mpd.Ada
 	err = streamSegments(encFile, urls, fetch, func(fetched int64) {
 		bar.update(fetched, totalBytes.Load())
 	})
-	bar.finish()
+	bar.finish(err)
 	if err != nil {
 		return "", err
 	}

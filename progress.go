@@ -54,6 +54,10 @@ func newProgressBar(title string, total int64, label string) *progressBar {
 	progressRenderer.mu.Lock()
 	defer progressRenderer.mu.Unlock()
 	b := &progressBar{title: title, total: total, label: label}
+	if *headless {
+		fmt.Println(title)
+		return b
+	}
 	progressRenderer.bars = append(progressRenderer.bars, b)
 	renderLocked()
 	return b
@@ -87,13 +91,23 @@ func (b *progressBar) update(current, bytes int64) {
 	}
 	b.current = current
 	b.recordBytes(bytes)
-	renderLocked()
+	if !*headless {
+		renderLocked()
+	}
 }
 
 // finish removes the bar from the display, leaving the remaining bars redrawn.
-func (b *progressBar) finish() {
+// In headless mode it instead logs a completion line when err is nil; failures
+// are reported by the caller.
+func (b *progressBar) finish(err error) {
 	progressRenderer.mu.Lock()
 	defer progressRenderer.mu.Unlock()
+	if *headless {
+		if err == nil {
+			fmt.Printf("Finished downloading %s\n", strings.TrimPrefix(b.title, "Downloading "))
+		}
+		return
+	}
 	for i, bar := range progressRenderer.bars {
 		if bar == b {
 			progressRenderer.bars = append(progressRenderer.bars[:i], progressRenderer.bars[i+1:]...)
