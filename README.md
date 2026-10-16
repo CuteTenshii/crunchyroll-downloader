@@ -13,6 +13,9 @@ You won't be banned or anything, I downloaded all Kaguya-Sama seasons to test du
 ## Features
 
 - Supports choosing the audio and subtitles language, including downloading multiple of each into a single file
+- Supports downloading subtitles and captions only, skipping video and audio
+- Supports saving subtitles/captions as separate sidecar files instead of muxing them into the MKV
+- Supports converting subtitles/captions to .srt for universal compatibility
 - Supports choosing the audio and video quality
 - Decrypts Widevine DRM (requires: a `.wvd` file or `client_id.bin` and `private_key.pem` files)
 - Adds metadata (like episode name) to the MKV container
@@ -54,6 +57,12 @@ Usage of ./crunchyroll-downloader:
         Season number. Not used if an episode link is entered
   -subs-lang string
         Subtitle language(s), comma-separated (e.g. "fr-FR,ALL"). Add ALL for every available subtitle; explicit languages lead, the first available track is default, and ALL alone prefers en-US (default "en-US")
+  -subs-only
+        Download subtitles and captions only, skipping video and audio
+  -subs-separate
+        Save subtitles and captions as separate files next to the video instead of muxing them into the MKV
+  -subs-srt
+        Convert downloaded subtitles and captions to .srt instead of keeping their original format (e.g. .ass, .vtt)
   -url string
         URL of the episode/season to download
   -video-quality string
@@ -83,6 +92,21 @@ To download multiple audio tracks and subtitles into a single file (the first av
 Add `ALL` to any language list to include every available language; listed languages come first. For example, `--subs-lang fr-FR,ALL` makes French the default subtitle and adds the rest:
 ```shell
 ./crunchyroll-downloader --url https://www.crunchyroll.com/watch/GE00198973JAJP/dawn-and-confusion --etp-rt replace_this --audio-lang ja-JP,ALL --subs-lang fr-FR,ALL --cc-lang ALL
+```
+
+To download only the subtitles/captions, skipping video and audio entirely (each language is saved as its own file, e.g. `Series S01E02 - Title [en-US].ass`, captions get a `[CC]` suffix):
+```shell
+./crunchyroll-downloader --url https://www.crunchyroll.com/watch/GE00198973JAJP/dawn-and-confusion --etp-rt replace_this --subs-only --subs-lang en-US,es-419 --cc-lang en-US
+```
+
+To download normally but keep the subtitles/captions as separate files next to the MKV instead of muxing them in:
+```shell
+./crunchyroll-downloader --url https://www.crunchyroll.com/watch/GE00198973JAJP/dawn-and-confusion --etp-rt replace_this --subs-separate --subs-lang en-US,es-419
+```
+
+Add `--subs-srt` to any of the above to convert the subtitles/captions to .srt (instead of Crunchyroll's native .ass/.vtt) for wider player compatibility:
+```shell
+./crunchyroll-downloader --url https://www.crunchyroll.com/watch/GE00198973JAJP/dawn-and-confusion --etp-rt replace_this --subs-separate --subs-srt --subs-lang en-US
 ```
 
 If you're getting rate-limited while downloading a season/batch, wait at least this long between each episode:
