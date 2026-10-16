@@ -486,9 +486,11 @@ func downloadEpisode(baseContentId string, info EpisodeInfo, audioLangs, subsLan
 		*videoQuality,
 	))
 
-	if _, statErr := os.Stat(outputFile); statErr == nil {
-		fmt.Printf("Episode %v is already downloaded, skipping...\n", info.EpisodeMetadata.EpisodeNumber)
-		return
+	if !*subsOnly {
+		if _, statErr := os.Stat(outputFile); statErr == nil {
+			fmt.Printf("Episode %v is already downloaded, skipping...\n", info.EpisodeMetadata.EpisodeNumber)
+			return
+		}
 	}
 
 	// Resolve each requested audio locale to its version GUID. Each dub is a
@@ -631,6 +633,34 @@ func downloadEpisode(baseContentId string, info EpisodeInfo, audioLangs, subsLan
 		subJobs = append(subJobs, subJob{url: cc.URL, format: cc.Format, locale: locale, isCC: true})
 	}
 
+	// In -subs-only and -subs-separate mode each subtitle/caption ends up as
+	// its own standalone file, so drop the ones already on disk before
+	// downloading. In -subs-only mode the episode itself is independent of
+	// video/audio, so it is skipped entirely once nothing new remains (same
+	// behavior as the existing .mkv skip check); in -subs-separate mode the
+	// video/audio download still proceeds, so only the subtitle jobs are
+	// trimmed. The stat uses the post-conversion format (-subs-srt forces
+	// .srt) so it matches whatever exportSubtitles will actually write.
+	if *subsOnly || *subsSeparate {
+		finalFormat := func(format string) string {
+			if *subsSRT {
+				return "srt"
+			}
+			return format
+		}
+		var missing []subJob
+		for _, job := range subJobs {
+			if _, statErr := os.Stat(subsOutputFile(outputFile, job.locale, finalFormat(job.format), job.isCC)); statErr != nil {
+				missing = append(missing, job)
+			}
+		}
+		if *subsOnly && len(missing) == 0 {
+			fmt.Printf("Episode %v is already downloaded, skipping...\n", info.EpisodeMetadata.EpisodeNumber)
+			return
+		}
+		subJobs = missing
+	}
+
 	// Download every subtitle, every audio dub and the video track concurrently.
 	// Each dub has its own playback token and license keys, so they no longer
 	// need to be serialized behind a single global key set.
@@ -660,97 +690,123 @@ func downloadEpisode(baseContentId string, info EpisodeInfo, audioLangs, subsLan
 				fail(fmt.Errorf("downloading subtitles for %s: %w", trackTitle(job.locale), err))
 				return
 			}
-			subTracks[j] = mediaTrack{file: file, locale: job.locale, format: job.format, isCC: job.isCC}
+			format := job.format
+			if *subsSRT {
+				var convErr error
+				file, format, convErr = convertSubtitleToSRT(file, format)
+				if convErr != nil {
+					fail(fmt.Errorf("converting subtitles to srt for %s: %w", trackTitle(job.locale), convErr))
+					return
+				}
+			}
+			subTracks[j] = mediaTrack{file: file, locale: job.locale, format: format, isCC: job.isCC}
 		}(j, job)
 	}
 
-	for i, version := range versions {
-		wg.Add(1)
-		go func(i int, version audioVersion) {
-			defer wg.Done()
+	// Subs-only mode downloads no audio or video, so playback tokens are left
+	// for the deferred cleanup above to release and this whole stage is
+	// skipped.
+	if !*subsOnly {
+		for i, version := range versions {
+			wg.Add(1)
+			go func(i int, version audioVersion) {
+				defer wg.Done()
 
-			episode := episodes[i]
+				episode := episodes[i]
 
-			manifest, body, err := parseManifest(episode.ManifestURL)
-			if err != nil {
-				fail(fmt.Errorf("parsing manifest for %s: %w", version.locale, err))
-				return
-			}
-			pssh := getPssh(manifest)
-			if pssh == nil {
-				fail(fmt.Errorf("PSSH not found for %s", version.locale))
-				return
-			}
-			keys, err := getLicense(*pssh, version.contentId, episode.Token)
-			if err != nil {
-				fail(fmt.Errorf("getLicense for %s: %w", version.locale, err))
-				return
-			}
-
-			var sets []onDemandAdaptationSet
-			if isOnDemand(manifest) {
-				var err error
-				sets, err = parseOnDemand(body)
+				manifest, body, err := parseManifest(episode.ManifestURL)
 				if err != nil {
-					fail(err)
+					fail(fmt.Errorf("parsing manifest for %s: %w", version.locale, err))
 					return
 				}
-			}
-
-			if i == 0 {
-				// The video and the first audio track share this version's keys,
-				// so they download concurrently with each other and everything
-				// else.
-				type trackResult struct {
-					file string
-					err  error
+				pssh := getPssh(manifest)
+				if pssh == nil {
+					fail(fmt.Errorf("PSSH not found for %s", version.locale))
+					return
 				}
-				videoCh := make(chan trackResult, 1)
-				go func() {
-					file, err := downloadVideoTrack(manifest, sets, *videoQuality, keys)
-					videoCh <- trackResult{file, err}
-				}()
-
-				audioFile, err := downloadAudioTrack(manifest, sets, version.locale, *audioQuality, keys)
+				keys, err := getLicense(*pssh, version.contentId, episode.Token)
 				if err != nil {
-					// Join the video download before unwinding so its progress
-					// bar can't race the deferred cleanup.
-					<-videoCh
-					fail(err)
+					fail(fmt.Errorf("getLicense for %s: %w", version.locale, err))
 					return
 				}
-				audioTracks[i] = mediaTrack{file: audioFile, locale: version.locale}
 
-				video := <-videoCh
-				if video.err != nil {
-					fail(video.err)
-					return
+				var sets []onDemandAdaptationSet
+				if isOnDemand(manifest) {
+					var err error
+					sets, err = parseOnDemand(body)
+					if err != nil {
+						fail(err)
+						return
+					}
 				}
-				videoFile = video.file
-			} else {
-				audioFile, err := downloadAudioTrack(manifest, sets, version.locale, *audioQuality, keys)
-				if err != nil {
-					fail(err)
-					return
-				}
-				audioTracks[i] = mediaTrack{file: audioFile, locale: version.locale}
-			}
 
-			if err := deleteStream(version.contentId, episode.Token); err != nil {
-				fmt.Printf("Failed to remove the player stream for %s: %v\n", version.locale, err)
-			}
-			streamsMu.Lock()
-			delete(activeStreams, version.contentId)
-			streamsMu.Unlock()
-		}(i, version)
+				if i == 0 {
+					// The video and the first audio track share this version's keys,
+					// so they download concurrently with each other and everything
+					// else.
+					type trackResult struct {
+						file string
+						err  error
+					}
+					videoCh := make(chan trackResult, 1)
+					go func() {
+						file, err := downloadVideoTrack(manifest, sets, *videoQuality, keys)
+						videoCh <- trackResult{file, err}
+					}()
+
+					audioFile, err := downloadAudioTrack(manifest, sets, version.locale, *audioQuality, keys)
+					if err != nil {
+						// Join the video download before unwinding so its progress
+						// bar can't race the deferred cleanup.
+						<-videoCh
+						fail(err)
+						return
+					}
+					audioTracks[i] = mediaTrack{file: audioFile, locale: version.locale}
+
+					video := <-videoCh
+					if video.err != nil {
+						fail(video.err)
+						return
+					}
+					videoFile = video.file
+				} else {
+					audioFile, err := downloadAudioTrack(manifest, sets, version.locale, *audioQuality, keys)
+					if err != nil {
+						fail(err)
+						return
+					}
+					audioTracks[i] = mediaTrack{file: audioFile, locale: version.locale}
+				}
+
+				if err := deleteStream(version.contentId, episode.Token); err != nil {
+					fmt.Printf("Failed to remove the player stream for %s: %v\n", version.locale, err)
+				}
+				streamsMu.Lock()
+				delete(activeStreams, version.contentId)
+				streamsMu.Unlock()
+			}(i, version)
+		}
 	}
 
 	wg.Wait()
 	if firstErr != nil {
 		panic(firstErr)
 	}
+
+	if *subsOnly {
+		exportSubtitles(subTracks, outputFile)
+		return nil
+	}
+
 	if len(subTracks) > 0 {
 		fmt.Println("Downloaded subtitles!")
+	}
+
+	if *subsSeparate {
+		mergeEverything(videoFile, audioTracks, nil, outputFile, info)
+		exportSubtitles(subTracks, outputFile)
+		return nil
 	}
 
 	mergeEverything(videoFile, audioTracks, subTracks, outputFile, info)
