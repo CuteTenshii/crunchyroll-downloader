@@ -534,6 +534,24 @@ func downloadEpisode(baseContentId string, info EpisodeInfo, audioLangs, subsLan
 		streamsMu     sync.Mutex
 		activeStreams = map[string]string{}
 	)
+	// tempFiles tracks every decrypted video/audio/subtitle file written to
+	// disk for this episode, so a failure partway through (rate limit,
+	// network error, a sibling track failing) doesn't leak them forever.
+	// The success path (mergeEverything) already removes its inputs once it
+	// has consumed them, so this only has to clean up what a failure left
+	// behind.
+	var (
+		tempMu    sync.Mutex
+		tempFiles []string
+	)
+	addTempFile := func(path string) {
+		if path == "" {
+			return
+		}
+		tempMu.Lock()
+		tempFiles = append(tempFiles, path)
+		tempMu.Unlock()
+	}
 	defer func() {
 		// Start the backoff clock as soon as this download is over, success or
 		// not, so a failed/rate-limited attempt doesn't get retried immediately.
@@ -561,6 +579,19 @@ func downloadEpisode(baseContentId string, info EpisodeInfo, audioLangs, subsLan
 				fmt.Printf("Recovered from error: %v\n%s\n", r, runtimedebug.Stack())
 			} else {
 				fmt.Printf("Recovered from error: %v\n", r)
+			}
+		}
+
+		// On failure, remove every decrypted track this episode wrote to
+		// disk before hitting the error. A successful run already consumed
+		// and removed these via mergeEverything, so this is a no-op
+		// (os.Remove on an already-gone path) in that case.
+		if err != nil {
+			tempMu.Lock()
+			leaked := tempFiles
+			tempMu.Unlock()
+			for _, path := range leaked {
+				_ = os.Remove(path)
 			}
 		}
 	}()
@@ -660,6 +691,7 @@ func downloadEpisode(baseContentId string, info EpisodeInfo, audioLangs, subsLan
 				fail(fmt.Errorf("downloading subtitles for %s: %w", trackTitle(job.locale), err))
 				return
 			}
+			addTempFile(file)
 			subTracks[j] = mediaTrack{file: file, locale: job.locale, format: job.format, isCC: job.isCC}
 		}(j, job)
 	}
@@ -720,6 +752,7 @@ func downloadEpisode(baseContentId string, info EpisodeInfo, audioLangs, subsLan
 					return
 				}
 				audioTracks[i] = mediaTrack{file: audioFile, locale: version.locale}
+				addTempFile(audioFile)
 
 				video := <-videoCh
 				if video.err != nil {
@@ -727,6 +760,7 @@ func downloadEpisode(baseContentId string, info EpisodeInfo, audioLangs, subsLan
 					return
 				}
 				videoFile = video.file
+				addTempFile(videoFile)
 			} else {
 				audioFile, err := downloadAudioTrack(manifest, sets, version.locale, *audioQuality, keys)
 				if err != nil {
@@ -734,6 +768,7 @@ func downloadEpisode(baseContentId string, info EpisodeInfo, audioLangs, subsLan
 					return
 				}
 				audioTracks[i] = mediaTrack{file: audioFile, locale: version.locale}
+				addTempFile(audioFile)
 			}
 
 			if err := deleteStream(version.contentId, episode.Token); err != nil {

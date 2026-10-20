@@ -21,12 +21,31 @@ var (
 	debug         = flag.Bool("debug-manifest", false, "Log raw episode playback JSON and manifest XML")
 	downloadDelay = flag.Duration("download-delay", 0, "Minimum delay between episode downloads, to help avoid Crunchyroll's rate limiting (e.g. \"30s\", \"2m\")")
 	output        = flag.String("output-dir", ".", "Target base path for downloading")
+	tempDir       = flag.String("temp-dir", "", "Directory for temporary download files (video/audio/subtitles before merging). Defaults to $TMPDIR or the OS default temp directory; set this if that default is too small or slow for multi-GB downloads")
 )
 
 // backoff spaces out consecutive episode downloads by *downloadDelay. It is
 // initialized in main() once flags are parsed, and is a no-op (including when
 // left nil) whenever no delay is configured.
 var backoff *downloadBackoff
+
+// configureTempDir points os.CreateTemp (used for every decrypted video,
+// audio and subtitle file during a download) at dir when set, so a download
+// isn't limited to whatever the OS default temp directory is. Some setups
+// default to a small or RAM-backed temp dir (e.g. a tmpfs /tmp), which a
+// season's worth of 1080p episodes downloading concurrently can easily
+// exceed, surfacing as "disk quota exceeded" mid-download. Leaves TMPDIR
+// alone when dir is empty, so the OS/user default still applies.
+func configureTempDir(dir string) {
+	if dir == "" {
+		return
+	}
+	if err := os.MkdirAll(dir, 0777); err != nil {
+		fmt.Printf("! Couldn't create -temp-dir %q, falling back to the system default temp dir: %v\n", dir, err)
+		return
+	}
+	_ = os.Setenv("TMPDIR", dir)
+}
 
 // parseLangs splits a comma-separated locale list, trimming spaces and dropping
 // empties.
@@ -120,6 +139,8 @@ func main() {
 	url := flag.String("url", "", "URL of the episode/season to download")
 	urlsFile := flag.String("file", "", "Path to a text file with one URL per line")
 	flag.Parse()
+
+	configureTempDir(*tempDir)
 
 	if *url == "" && *urlsFile == "" {
 		flag.Usage()
