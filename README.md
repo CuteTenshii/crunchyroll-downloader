@@ -19,6 +19,7 @@ You won't be banned or anything, I downloaded all Kaguya-Sama seasons to test du
 - Parallel segment downloads (10 workers) for faster downloads
 - Retry with backoff on connection errors
 - Batch download from a list of URLs
+- Select specific episodes by Crunchyroll episode number with `--episodes` (e.g. `--episodes 1-12,15`)
 
 ## Requirements
 
@@ -46,6 +47,8 @@ Usage of ./crunchyroll-downloader:
         Log raw episode playback JSON and manifest XML
   -download-delay duration
         Minimum delay between episode downloads, to help avoid Crunchyroll's rate limiting (e.g. "30s", "2m")
+  -episodes string
+        Episode number(s) as shown on Crunchyroll, comma-separated and/or ranges (e.g. "1-12,15"); numbering may continue across seasons. Only applies to series URLs
   -etp-rt string
         The "etp_rt" cookie value of your account
   -file string
@@ -69,6 +72,13 @@ To download a specific episode:
 ```shell
 ./crunchyroll-downloader --url https://www.crunchyroll.com/watch/GE00198973JAJP/dawn-and-confusion --etp-rt replace_this
 ```
+
+To download only episodes 1-12 and 15 of *Frieren* season 1:
+```shell
+./crunchyroll-downloader --url https://www.crunchyroll.com/series/GG5H5XQX4/frieren-beyond-journeys-end --season 1 --episodes 1-12,15 --etp-rt replace_this
+```
+
+`--episodes` matches the episode numbers Crunchyroll displays. These can restart each season (as with *Frieren*) or continue across seasons (as with *One Piece* and *Hell's Paradise* season 2, which starts at 14). Without `--season`, every season is filtered independently, and `0` can be used for specials. If a selection matches nothing, the error lists the numbers that season actually has.
 
 To batch download from a file (one URL per line):
 ```shell

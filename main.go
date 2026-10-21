@@ -64,7 +64,7 @@ func parseUrl(url string) (contentType, contentId string) {
 	return "", ""
 }
 
-func processUrl(url string) {
+func processUrl(url string, episodeRanges []episodeRange) {
 	contentType, contentId := parseUrl(url)
 	if contentType == "" || contentId == "" {
 		fmt.Printf("Invalid URL (must be /watch/ or /series/): %s\n", url)
@@ -85,6 +85,9 @@ func processUrl(url string) {
 	primarySubs := preferredRequestLocale(subsLangs, "en-US")
 
 	if contentType == "watch" {
+		if len(episodeRanges) > 0 {
+			fmt.Println("! -episodes only applies to series URLs; downloading this episode.")
+		}
 		info := getEpisodeInfo(contentId)
 		downloadEpisodeWithRetry(contentId, info, audioLangs, subsLangs, ccLangs, videoQuality, audioQuality, *output)
 	} else {
@@ -103,13 +106,31 @@ func processUrl(url string) {
 				return
 			}
 
-			episodes := getSeasonEpisodes(seasonId, primaryAudio, primarySubs)
+			seasonEpisodes := getSeasonEpisodes(seasonId, primaryAudio, primarySubs)
+			episodes := filterEpisodes(seasonEpisodes, episodeRanges)
+			if len(episodes) == 0 {
+				if len(episodeRanges) > 0 && len(seasonEpisodes) > 0 {
+					fmt.Printf("No episodes matched -episodes in season %v (available: %s).\n", *seasonNumber, formatEpisodeNumbers(seasonEpisodes))
+				} else {
+					fmt.Printf("Season %v has no downloadable episodes.\n", *seasonNumber)
+				}
+				return
+			}
 			downloadSeason(videoQuality, audioQuality, audioLangs, subsLangs, ccLangs, episodes, *output)
 		} else {
 			print("No season number specified, downloading all seasons...\n")
 
 			for _, season := range seasons {
-				episodes := getSeasonEpisodes(season.ID, primaryAudio, primarySubs)
+				seasonEpisodes := getSeasonEpisodes(season.ID, primaryAudio, primarySubs)
+				episodes := filterEpisodes(seasonEpisodes, episodeRanges)
+				if len(episodes) == 0 {
+					if len(episodeRanges) > 0 && len(seasonEpisodes) > 0 {
+						fmt.Printf("No episodes matched -episodes in season %v, skipping (available: %s).\n", season.SeasonNumber, formatEpisodeNumbers(seasonEpisodes))
+					} else {
+						fmt.Printf("Season %v has no downloadable episodes, skipping.\n", season.SeasonNumber)
+					}
+					continue
+				}
 				downloadSeason(videoQuality, audioQuality, audioLangs, subsLangs, ccLangs, episodes, *output)
 			}
 		}
@@ -119,10 +140,17 @@ func processUrl(url string) {
 func main() {
 	url := flag.String("url", "", "URL of the episode/season to download")
 	urlsFile := flag.String("file", "", "Path to a text file with one URL per line")
+	episodesSpec := flag.String("episodes", "", "Episode number(s) as shown on Crunchyroll, comma-separated and/or ranges (e.g. \"1-12,15\"); numbering may continue across seasons. Only applies to series URLs")
 	flag.Parse()
 
 	if *url == "" && *urlsFile == "" {
 		flag.Usage()
+		os.Exit(1)
+	}
+
+	episodeRanges, err := parseEpisodeSelection(*episodesSpec)
+	if err != nil {
+		fmt.Printf("Invalid -episodes value: %s\n", err)
 		os.Exit(1)
 	}
 
@@ -171,10 +199,10 @@ func main() {
 		fmt.Printf("Found %d URLs to download\n\n", len(urls))
 		for i, u := range urls {
 			fmt.Printf("=== [%d/%d] %s ===\n", i+1, len(urls), u)
-			processUrl(u)
+			processUrl(u, episodeRanges)
 			fmt.Println()
 		}
 	} else {
-		processUrl(*url)
+		processUrl(*url, episodeRanges)
 	}
 }
