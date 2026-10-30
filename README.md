@@ -50,6 +50,8 @@ Usage of ./crunchyroll-downloader:
         The "etp_rt" cookie value of your account
   -file string
         Path to a text file with one URL per line
+  -headless
+        Print a plain started/finished line per track instead of live progress bars, for piping output to a log file
   -season int
         Season number. Not used if an episode link is entered
   -subs-lang string

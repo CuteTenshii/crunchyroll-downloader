@@ -21,6 +21,7 @@ var (
 	debug         = flag.Bool("debug-manifest", false, "Log raw episode playback JSON and manifest XML")
 	downloadDelay = flag.Duration("download-delay", 0, "Minimum delay between episode downloads, to help avoid Crunchyroll's rate limiting (e.g. \"30s\", \"2m\")")
 	output        = flag.String("output-dir", ".", "Target base path for downloading")
+	headless      = flag.Bool("headless", false, "Print a plain started/finished line per track instead of live progress bars, for piping output to a log file")
 )
 
 // backoff spaces out consecutive episode downloads by *downloadDelay. It is

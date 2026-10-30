@@ -49,12 +49,16 @@ type progressBar struct {
 }
 
 // newProgressBar registers a bar for a download. Callers that do not know the
-// total until after the first response may pass 0 and use setTotal later.
+// total until after the first response may pass 0 and use setTotal later. In
+// headless mode it logs a single "started" line instead.
 func newProgressBar(title string, total int64, label string) *progressBar {
 	progressRenderer.mu.Lock()
 	defer progressRenderer.mu.Unlock()
 	b := &progressBar{title: title, total: total, label: label}
 	progressRenderer.bars = append(progressRenderer.bars, b)
+	if *headless {
+		fmt.Printf("%s: started\n", title)
+	}
 	renderLocked()
 	return b
 }
@@ -91,13 +95,22 @@ func (b *progressBar) update(current, bytes int64) {
 }
 
 // finish removes the bar from the display, leaving the remaining bars redrawn.
-func (b *progressBar) finish() {
+// err is the download's outcome; in headless mode it decides whether a
+// "finished" or "failed" line is logged.
+func (b *progressBar) finish(err error) {
 	progressRenderer.mu.Lock()
 	defer progressRenderer.mu.Unlock()
 	for i, bar := range progressRenderer.bars {
 		if bar == b {
 			progressRenderer.bars = append(progressRenderer.bars[:i], progressRenderer.bars[i+1:]...)
 			break
+		}
+	}
+	if *headless {
+		if err != nil {
+			fmt.Printf("%s: failed: %v\n", b.title, err)
+		} else {
+			fmt.Printf("%s: finished\n", b.title)
 		}
 	}
 	renderLocked()
@@ -172,7 +185,11 @@ func (b *progressBar) renderLine(titleWidth int) string {
 
 // renderLocked rewrites every bar on its own line, moving the cursor back over
 // the previous frame first. It must be called with progressRenderer.mu held.
+// Headless mode never draws, so no ANSI escapes reach a log file.
 func renderLocked() {
+	if *headless {
+		return
+	}
 	titleWidth := 0
 	for _, b := range progressRenderer.bars {
 		if w := displayWidth(b.title); w > titleWidth {
