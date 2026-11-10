@@ -239,7 +239,7 @@ func decryptMP4(initData []byte, media io.Reader, licenseKeys []*widevine.Key, o
 		// Match this track's KID with a content key returned by the license.
 		for _, key := range licenseKeys {
 			if key.Type == widevinepb.License_KeyContainer_CONTENT && bytes.Equal(key.ID, kid) {
-				return widevine.DecryptMP4(media, key.Key, output)
+				return decryptFragmentedMP4(media, key.Key, output)
 			}
 		}
 		// Keep looking: a later track may still match a key in the license.
